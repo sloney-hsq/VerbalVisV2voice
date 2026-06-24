@@ -99,7 +99,9 @@ def initialize_db() -> None:
     con.execute("ALTER TABLE main_dedup RENAME TO main_table")
     con.execute("ALTER TABLE main_table DROP COLUMN _rn")
 
-    row_count = con.execute("SELECT COUNT(*) FROM main_table").fetchone()[0]
+    row = con.execute("SELECT COUNT(DISTINCT order_id) FROM main_table").fetchone()
+    assert row is not None
+    row_count = row[0]
     log.info("main_table ready: %d rows", row_count)
 
 
@@ -198,7 +200,7 @@ def stats_query(
     where = build_where(filters or [])
     sql = f"""
         SELECT
-            COUNT(*)           AS row_count,
+            COUNT(DISTINCT order_id)           AS row_count,
             AVG({field})       AS mean,
             MEDIAN({field})    AS median,
             MIN({field})       AS min_val,
@@ -207,6 +209,7 @@ def stats_query(
         WHERE {where} AND {field} IS NOT NULL
     """
     row = con.execute(sql).fetchone()
+    assert row is not None
     return {
         "row_count": row[0],
         "mean": round(row[1], 2) if row[1] is not None else None,
@@ -227,4 +230,6 @@ def raw_query(sql: str) -> list[dict]:
 def total_rows(filters: list[dict] | None = None) -> int:
     con = get_connection()
     where = build_where(filters or [])
-    return con.execute(f"SELECT COUNT(*) FROM main_table WHERE {where}").fetchone()[0]
+    row = con.execute(f"SELECT COUNT(DISTINCT order_id) FROM main_table WHERE {where}").fetchone()
+    assert row is not None
+    return row[0]

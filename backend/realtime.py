@@ -116,15 +116,16 @@ class RealtimeSession:
 
     def _init_session_loggers(self) -> None:
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self._log_dir = _LOG_ROOT / f"{ts}_{self.session_id}"
-        self._log_dir.mkdir(parents=True, exist_ok=True)
+        log_dir = _LOG_ROOT / f"{ts}_{self.session_id}"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        self._log_dir = log_dir
 
         def _make(name: str) -> logging.Logger:
             logger = logging.getLogger(f"realtime.{name}.{self.session_id}.{ts}")
             logger.setLevel(logging.DEBUG)
             logger.propagate = False
             logger.handlers.clear()
-            fh = logging.FileHandler(self._log_dir / f"{name}.log", encoding="utf-8")
+            fh = logging.FileHandler(log_dir / f"{name}.log", encoding="utf-8")
             fh.setFormatter(_LOG_FMT)
             logger.addHandler(fh)
             return logger
@@ -509,7 +510,7 @@ class RealtimeSession:
                 self.current_response_id = None
                 await self._send_client({
                     "type": "response_done",
-                    "metrics": self._response_metrics.get(response_id, {}),
+                    "metrics": self._response_metrics.get(response_id, {}) if response_id else {},
                 })
 
             elif etype == "error":
