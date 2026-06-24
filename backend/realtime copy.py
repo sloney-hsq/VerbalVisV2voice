@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime
 import json
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any
 import base64
 import websockets
@@ -30,6 +32,59 @@ from tools import (
 load_dotenv()
 log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Structured event logging — per-session timestamped directory under logs/
+# ---------------------------------------------------------------------------
+_LOG_ROOT = Path("logs")
+_LOG_ROOT.mkdir(exist_ok=True)
+_LOG_FMT = logging.Formatter("%(asctime)s.%(msecs)03d  %(message)s", datefmt="%H:%M:%S")
+
+# Lazily initialised per session — see _init_session_loggers()
+_session_log_dir: Path | None = None
+event_logger: logging.Logger | None = None
+tool_logger: logging.Logger | None = None
+dashboard_logger: logging.Logger | None = None
+bargein_logger: logging.Logger | None = None
+
+
+def _init_session_loggers(session_id: str) -> Path:
+    """Create logs/{YYYYMMDD_HHMMSS}_{session_id}/ and point all loggers there."""
+    global _session_log_dir, event_logger, tool_logger, dashboard_logger, bargein_logger
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    _session_log_dir = _LOG_ROOT / f"{ts}_{session_id}"
+    _session_log_dir.mkdir(parents=True, exist_ok=True)
+
+    def _make(name: str) -> logging.Logger:
+        logger = logging.getLogger(f"realtime.{name}.{session_id}")
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+        logger.handlers.clear()
+        fh = logging.FileHandler(_session_log_dir / f"{name}.log", encoding="utf-8")
+        fh.setFormatter(_LOG_FMT)
+        logger.addHandler(fh)
+        return logger
+
+    event_logger = _make("realtime_events")
+    tool_logger = _make("tool_calls")
+    dashboard_logger = _make("dashboard")
+    bargein_logger = _make("bargein")
+
+    return _session_log_dir
+
+# Events worth printing to terminal
+IMPORTANT_EVENTS = {
+    "session.updated",
+    "input_audio_buffer.speech_started",
+    "input_audio_buffer.speech_stopped",
+    "conversation.item.input_audio_transcription.completed",
+    "response.created",
+    "response.function_call_arguments.done",
+    "response.output_audio_transcript.done",
+    "response.done",
+    "error",
+}
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2")
 REALTIME_URL = f"wss://api.openai.com/v1/realtime?model={REALTIME_MODEL}"
@@ -39,9 +94,7 @@ REASONING_EFFORT = os.getenv("OPENAI_REALTIME_REASONING_EFFORT", "low")
 OPENAI_RECONNECT_ATTEMPTS = int(os.getenv("OPENAI_REALTIME_RECONNECT_ATTEMPTS", "2"))
 
 # Set to False for turn-based baseline (user study control condition).
-# 鈹€鈹€ TEMPORARILY DISABLED for GA session schema debugging 鈹€鈹€
-BARGE_IN_ENABLED = False
-# BARGE_IN_ENABLED = os.getenv("BARGE_IN_ENABLED", "true").lower() not in {"0", "false", "no"}
+BARGE_IN_ENABLED = os.getenv("BARGE_IN_ENABLED", "true").lower() not in {"0", "false", "no"}
 
 
 class RealtimeSession:
@@ -60,6 +113,12 @@ class RealtimeSession:
         self._invalidated_response_ids: set[str] = set()
         self._turn_epoch = 0
 
+        # Coordinates response.create across multiple function calls that
+        # belong to the same model turn (the Realtime API can emit several
+        # tool calls in one response). Keyed by response_id.
+        self._pending_tool_calls: dict[str, int] = {}
+        self._pending_should_respond: dict[str, bool] = {}
+
         self._session_update_profiles = ("primary", "no_reasoning", "no_transcription", "minimal")
         self._session_update_profile_index = 0
         self._session_update_pending = False
@@ -75,7 +134,11 @@ class RealtimeSession:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Connect to OpenAI and start bidirectional relay."""
+        """Accept the frontend WS and wait for start_session before connecting OpenAI."""
+        # Initialise per-session loggers; without this every module-level
+        # logger stays None and any .info() call kills the session
+        # ("'NoneType' object has no attribute 'info'").
+        self._log_dir = _init_session_loggers(self.session_id)
         init_views()
         self._running = True
 
@@ -86,10 +149,14 @@ class RealtimeSession:
         })
 
         try:
-            await self._connect_and_configure_openai()
-            await self._inject_context("Session started. Dashboard shows 4 base views with full dataset.")
-
+            # Phase 1: listen for client messages; OpenAI not connected yet.
+            # _client_to_openai will handle "start_session" to trigger phase 2.
+            self._openai_ready = asyncio.Event()
             client_task = asyncio.create_task(self._client_to_openai(), name=f"{self.session_id}:client_to_openai")
+
+            # Wait until OpenAI is connected (triggered by start_session)
+            await self._openai_ready.wait()
+
             openai_task = asyncio.create_task(self._openai_loop(), name=f"{self.session_id}:openai_loop")
             done, pending = await asyncio.wait(
                 {client_task, openai_task},
@@ -122,6 +189,7 @@ class RealtimeSession:
         if not OPENAI_API_KEY:
             raise RuntimeError("OPENAI_API_KEY is not set.")
 
+        log.warning("=== CONNECTING OPENAI ===")
         headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
         self.openai_ws = await websockets.connect(
             REALTIME_URL,
@@ -130,10 +198,13 @@ class RealtimeSession:
             ping_interval=20,
             ping_timeout=20,
         )
+        log.warning("=== OPENAI CONNECTED ===")
         self._record_timeline("openai.connected")
         profile = self._session_update_profiles[self._session_update_profile_index]
+        log.warning("=== SENDING SESSION UPDATE ===")
         await self._send_session_update(profile=profile)
-        await self._wait_for_session_updated()
+        log.warning("SKIP WAIT")
+        return
 
     async def _openai_loop(self) -> None:
         reconnects = 0
@@ -188,62 +259,68 @@ class RealtimeSession:
         self._session_update_pending = True
         self._session_updated.clear()
         self._record_timeline("session.update.sent", profile=profile)
-        await self._send_openai({
+
+        payload = {
             "type": "session.update",
             "session": self._build_session_config(profile),
-        })
-        print("APPEND SENT")
+        }
+
+        print("\n================ SESSION UPDATE ================")
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        print("================================================\n")
+
+        await self._send_openai(payload)
 
     def _build_session_config(self, profile: str) -> dict[str, Any]:
+        # GA gpt-realtime-2 schema: turn_detection and transcription live under
+        # audio.input (not at session root like the 2024 preview).
+        audio_input: dict[str, Any] = {
+            # Short form accepted by the GA schema for PCM 16-bit / 24 kHz.
+            "format": "pcm16",
+        }
+
+        if profile != "minimal" and BARGE_IN_ENABLED:
+            audio_input["turn_detection"] = {
+                "type": "semantic_vad",
+                "eagerness": "low",
+                "create_response": True,
+                # The actual barge-in switch. With this true the server
+                # auto-cancels the in-progress response on speech_started.
+                "interrupt_response": True,
+            }
+
+        if profile in {"primary", "no_reasoning"}:
+            audio_input["transcription"] = {"model": TRANSCRIPTION_MODEL}
+
         session: dict[str, Any] = {
             "type": "realtime",
             "instructions": build_system_prompt(),
             "tools": TOOL_SCHEMAS,
             "tool_choice": "auto",
             "audio": {
-                "input": {
-                    "format": {
-                        "type": "audio/pcm",
-                        "rate": 24000,
-                    },
-                },
+                "input": audio_input,
                 "output": {
-                    "format": {
-                        "type": "audio/pcm",
-                        "rate": 24000,
-                    },
+                    "format": "pcm16",
                     "voice": REALTIME_VOICE,
                 },
             },
         }
 
-        # if profile in {"primary", "no_transcription"}:
-        #     session["reasoning"] = {"effort": REASONING_EFFORT}
-
-        # if profile in {"primary", "no_reasoning"}:
-        #     session["input_audio_transcription"] = {"model": TRANSCRIPTION_MODEL}
-
-        if profile != "minimal" and BARGE_IN_ENABLED:
-            session["turn_detection"] = {
-                "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": 500,
-                "create_response": True,
-            }
+        # reasoning stays at the session root.
+        if profile in {"primary", "no_transcription"}:
+            session["reasoning"] = {"effort": REASONING_EFFORT}
 
         return session
 
     async def _retry_session_update_after_schema_error(self, error: dict[str, Any]) -> bool:
-        # 鈹€鈹€ SHORT-CIRCUITED: debug session schema first, no auto-downgrade 鈹€鈹€
+        # ── SHORT-CIRCUITED: debug session schema first, no auto-downgrade ──
         return False
 
     async def _wait_for_session_updated(self) -> None:
         """Read startup events until session.update is accepted or clearly rejected."""
         while self._session_update_pending and self._running:
             raw = await asyncio.wait_for(self.openai_ws.recv(), timeout=15)
-            # 鈹€鈹€ DEBUG: dump session negotiation 鈹€鈹€
-            print(f"\nSESSION EVENT\n{raw[:2000] if len(raw) > 2000 else raw}\n")
+            event_logger.info("SESSION %s", raw[:2000] if len(raw) > 2000 else raw)
             event = json.loads(raw)
             etype = event.get("type", "")
             self._record_timeline(etype)
@@ -270,29 +347,32 @@ class RealtimeSession:
     # ------------------------------------------------------------------
 
     async def _client_to_openai(self) -> None:
-        """Forward audio from frontend to OpenAI."""
+        """Forward messages from frontend to OpenAI. Handles start_session to create the Realtime connection."""
         try:
             while self._running:
                 raw = await self.client_ws.receive_text()
                 msg = json.loads(raw)
-
-                # 鈹€鈹€ DEBUG: log every client message 鈹€鈹€
                 msg_type = msg.get("type", "?")
-                if msg_type == "audio":
-                    audio_b64 = msg.get("data", "")
-                    print(f"AUDIO CHUNK LEN = {len(audio_b64)}, first20 = {audio_b64[:20]}")
-                    # Save raw PCM to disk for debugging
-                    with open("debug_audio.raw", "ab") as f:
-                        f.write(base64.b64decode(audio_b64))
-                else:
-                    print(f"CLIENT => {raw[:500]}")
 
-                if msg.get("type") == "audio":
+                if msg_type == "audio":
+                    event_logger.debug("CLIENT audio chunk len=%d", len(msg.get("data", "")))
+                else:
+                    event_logger.info("CLIENT => %s", raw[:500])
+
+                if msg_type == "start_session":
+                    # Connect to OpenAI Realtime now
+                    await self._connect_and_configure_openai()
+                    await self._inject_context("Session started. Dashboard shows 4 base views with full dataset.")
+                    self._openai_ready.set()
+                    await self._send_client({"type": "session_ready"})
+
+                elif msg_type == "audio":
                     await self._send_openai({
                         "type": "input_audio_buffer.append",
                         "audio": msg["data"],
                     })
-                elif msg.get("type") == "commit":
+
+                elif msg_type == "commit":
                     self._last_manual_commit_at = time.perf_counter()
                     self._record_timeline("client.commit")
                     await self._send_openai({"type": "input_audio_buffer.commit"})
@@ -300,7 +380,8 @@ class RealtimeSession:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.info("Client relay stopped: %s", exc)
+            log.error("Client relay stopped: %r (%s)", exc, type(exc).__name__)
+            import traceback; traceback.print_exc()
             self._running = False
 
     # ------------------------------------------------------------------
@@ -309,14 +390,17 @@ class RealtimeSession:
 
     async def _openai_to_client(self) -> None:
         """Process events from OpenAI and relay to frontend."""
+        print("OPENAI LOOP STARTED")
         async for raw in self.openai_ws:
-            # 鈹€鈹€ DEBUG: dump every event 鈹€鈹€
-            print(f"\n{'='*80}")
-            print(raw[:2000] if len(raw) > 2000 else raw)
-            print(f"{'='*80}\n")
-
+            print("\nOPENAI EVENT:")
+            print(raw)
             event = json.loads(raw)
             etype = event.get("type", "")
+
+            # Log everything to file; only important events to terminal
+            if etype in IMPORTANT_EVENTS:
+                print(f"\n[{etype}] {raw[:1000]}\n")
+            event_logger.info("%s", raw[:2000] if len(raw) > 2000 else raw)
             response_id = self._event_response_id(event)
             self._record_timeline(etype, response_id=response_id)
 
@@ -335,14 +419,14 @@ class RealtimeSession:
                 self.current_response_id = resp.get("id")
                 self._start_response_metrics(self.current_response_id)
 
-            elif etype == "response.audio.delta":
+            elif etype in ("response.audio.delta", "response.output_audio.delta"):
                 self._mark_first_audio(response_id)
                 await self._send_client({
                     "type": "audio",
                     "data": event.get("delta", ""),
                 })
 
-            elif etype == "response.audio_transcript.delta":
+            elif etype in ("response.audio_transcript.delta", "response.output_audio_transcript.delta"):
                 await self._send_client({
                     "type": "transcript",
                     "role": "assistant",
@@ -364,13 +448,28 @@ class RealtimeSession:
                 })
 
             elif etype in ("response.function_call_arguments.done", "response.output_item.done"):
-                # 鈹€鈹€ DEBUG: dump tool event 鈹€鈹€
-                print(f"TOOL EVENT =>")
-                print(json.dumps(event, indent=2, ensure_ascii=False)[:2000])
+                tool_logger.info("TOOL_EVENT %s", json.dumps(event, ensure_ascii=False)[:2000])
 
                 # Only handle function_call_arguments.done (output_item.done is logged but not acted on)
                 if etype != "response.function_call_arguments.done":
                     continue
+
+                # Print to terminal
+                _tool_name = event.get("name", "?")
+                _tool_args = event.get("arguments", "{}")
+                print(f"\n>>> TOOL CALL: {_tool_name}({_tool_args})\n")
+
+                # Send to frontend
+                await self._send_client({
+                    "type": "tool_call",
+                    "name": _tool_name,
+                    "arguments": _tool_args,
+                })
+
+                if response_id:
+                    self._pending_tool_calls[response_id] = (
+                        self._pending_tool_calls.get(response_id, 0) + 1
+                    )
 
                 task = asyncio.create_task(
                     self._handle_tool_call(event, response_id=response_id, turn_epoch=self._turn_epoch),
@@ -406,6 +505,7 @@ class RealtimeSession:
             self._invalidated_response_ids.add(invalidated_response_id)
 
         log.info("Barge-in detected; invalidating response %s", invalidated_response_id)
+        bargein_logger.info("BARGE_IN invalidated=%s epoch=%d", invalidated_response_id, self._turn_epoch)
         self._record_timeline("barge_in", response_id=invalidated_response_id)
 
         for task in list(self._tool_tasks):
@@ -433,75 +533,109 @@ class RealtimeSession:
         except json.JSONDecodeError:
             arguments = {}
 
-        if self._is_stale_tool_call(response_id, turn_epoch):
-            log.info("Skipping stale tool call before execution: %s(%s)", tool_name, arguments)
-            return
-
-        log.info("Tool call: %s(%s)", tool_name, arguments)
-        tool_started_at = time.perf_counter()
-        result: dict[str, Any]
-        tool_duration_ms: float
-        stale_after_execution = False
-
+        should_respond = False
         try:
-            async with self._tool_state_lock:
-                if self._is_stale_tool_call(response_id, turn_epoch):
-                    log.info("Skipping stale tool call after lock: %s(%s)", tool_name, arguments)
-                    return
+            if self._is_stale_tool_call(response_id, turn_epoch):
+                log.info("Skipping stale tool call before execution: %s(%s)", tool_name, arguments)
+                return
 
-                result = await asyncio.to_thread(execute_tool, tool_name, arguments)
-                tool_duration_ms = round((time.perf_counter() - tool_started_at) * 1000, 2)
-                stale_after_execution = self._is_stale_tool_call(response_id, turn_epoch)
-                views = get_views_for_frontend()
-                updated_context = context_text()
-                log_tool_call(
-                    session_id=self.session_id,
-                    tool_name=tool_name,
-                    params=arguments,
-                    mode="barge_in" if BARGE_IN_ENABLED else "turn_based",
-                    response_id=response_id,
-                    call_id=call_id,
-                    result_success=result.get("success"),
-                    cancelled=stale_after_execution,
-                    metrics={
-                        "tool_duration_ms": tool_duration_ms,
-                        "turn_epoch": turn_epoch,
-                        "timeline": self._timeline_snapshot(),
-                    },
-                )
-        except asyncio.CancelledError:
-            log.info("Tool call cancelled: %s", tool_name)
-            raise
+            log.info("Tool call: %s(%s)", tool_name, arguments)
+            tool_logger.info("TOOL_START name=%s call_id=%s args=%s", tool_name, call_id, json.dumps(arguments, ensure_ascii=False))
+            tool_started_at = time.perf_counter()
+            result: dict[str, Any]
+            tool_duration_ms: float
+            stale_after_execution = False
 
-        if stale_after_execution:
-            log.info("Discarding stale tool result: %s(%s)", tool_name, arguments)
-            return
+            try:
+                async with self._tool_state_lock:
+                    if self._is_stale_tool_call(response_id, turn_epoch):
+                        log.info("Skipping stale tool call after lock: %s(%s)", tool_name, arguments)
+                        return
 
-        await self._send_client({
-            "type": "tool_result",
-            "response_id": response_id,
-            "call_id": call_id,
-            "duration_ms": tool_duration_ms,
-            **result,
-        })
+                    result = await asyncio.to_thread(execute_tool, tool_name, arguments)
+                    tool_duration_ms = round((time.perf_counter() - tool_started_at) * 1000, 2)
+                    stale_after_execution = self._is_stale_tool_call(response_id, turn_epoch)
+                    views = get_views_for_frontend()
+                    updated_context = context_text()
+                    log_tool_call(
+                        session_id=self.session_id,
+                        tool_name=tool_name,
+                        params=arguments,
+                        mode="barge_in" if BARGE_IN_ENABLED else "turn_based",
+                        response_id=response_id,
+                        call_id=call_id,
+                        result_success=result.get("success"),
+                        cancelled=stale_after_execution,
+                        metrics={
+                            "tool_duration_ms": tool_duration_ms,
+                            "turn_epoch": turn_epoch,
+                            "timeline": self._timeline_snapshot(),
+                        },
+                        log_dir=self._log_dir,
+                    )
+            except asyncio.CancelledError:
+                log.info("Tool call cancelled: %s", tool_name)
+                raise
 
-        if tool_name in ("filter_data", "append_visual"):
+            if stale_after_execution:
+                tool_logger.info("TOOL_STALE name=%s call_id=%s dur=%.1fms", tool_name, call_id, tool_duration_ms)
+                log.info("Discarding stale tool result: %s(%s)", tool_name, arguments)
+                return
+            tool_logger.info("TOOL_DONE name=%s call_id=%s dur=%.1fms success=%s", tool_name, call_id, tool_duration_ms, result.get("success"))
+
             await self._send_client({
-                "type": "views_update",
-                "views": views,
+                "type": "tool_result",
+                "response_id": response_id,
+                "call_id": call_id,
+                "duration_ms": tool_duration_ms,
+                **result,
             })
 
-        await self._send_openai({
-            "type": "conversation.item.create",
-            "item": {
-                "type": "function_call_output",
-                "call_id": call_id,
-                "output": self._tool_result_text(result, tool_duration_ms),
-            },
-        })
+            if tool_name in ("filter_data", "append_visual"):
+                dashboard_logger.info("VIEWS_UPDATE tool=%s args=%s", tool_name, json.dumps(arguments, ensure_ascii=False))
+                await self._send_client({
+                    "type": "views_update",
+                    "views": views,
+                })
 
-        await self._inject_context(updated_context)
-        await self._send_openai({"type": "response.create"})
+            await self._send_openai({
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": self._tool_result_text(result, tool_duration_ms),
+                },
+            })
+
+            await self._inject_context(updated_context)
+            should_respond = True
+        finally:
+            # Only the tool call that empties the per-response pending count
+            # actually fires response.create — this prevents duplicate /
+            # racing response.create calls when the model issues several
+            # tool calls within a single turn.
+            await self._finalize_tool_call(response_id, should_respond)
+
+    async def _finalize_tool_call(self, response_id: str | None, should_respond: bool) -> None:
+        if response_id is None:
+            if should_respond:
+                await self._send_openai({"type": "response.create"})
+            return
+
+        async with self._tool_state_lock:
+            remaining = self._pending_tool_calls.get(response_id, 1) - 1
+            if remaining <= 0:
+                self._pending_tool_calls.pop(response_id, None)
+                pending_flag = self._pending_should_respond.pop(response_id, False)
+                fire = should_respond or pending_flag
+            else:
+                self._pending_tool_calls[response_id] = remaining
+                if should_respond:
+                    self._pending_should_respond[response_id] = True
+                fire = False
+
+        if fire:
+            await self._send_openai({"type": "response.create"})
 
     def _is_stale_tool_call(self, response_id: str | None, turn_epoch: int) -> bool:
         return (
@@ -609,10 +743,4 @@ class RealtimeSession:
     async def _send_openai(self, msg: dict) -> bool:
         if not self.openai_ws:
             return False
-        try:
-            async with self._openai_send_lock:
-                await self.openai_ws.send(json.dumps(msg))
-            return True
-        except Exception as exc:
-            log.debug("Failed to send OpenAI message: %s", exc)
-            return False
+    

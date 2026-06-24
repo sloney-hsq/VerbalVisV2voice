@@ -10,6 +10,9 @@ export default defineConfig({
         target: "ws://localhost:8000",
         ws: true,
       },
+      "/upload-recording": {
+        target: "http://localhost:8000",
+      },
     },
   },
 });

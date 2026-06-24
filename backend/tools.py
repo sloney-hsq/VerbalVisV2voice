@@ -652,6 +652,7 @@ def log_tool_call(
     result_success: bool | None = None,
     cancelled: bool = False,
     metrics: dict[str, Any] | None = None,
+    log_dir: Path | None = None,
 ) -> None:
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -666,6 +667,10 @@ def log_tool_call(
         "dashboard_context_snapshot": rebuild_context(),
         "mode": mode,
     }
-    log_file = LOG_DIR / f"{session_id}.jsonl"
-    with open(log_file, "a") as f:
+    # Per-session dir is the real target; the flat path is kept only as a
+    # backward-compat fallback in case any caller forgets to pass log_dir.
+    target_dir = log_dir or LOG_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+    log_file = target_dir / ("tool_calls.jsonl" if log_dir else f"{session_id}.jsonl")
+    with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, default=str) + "\n")

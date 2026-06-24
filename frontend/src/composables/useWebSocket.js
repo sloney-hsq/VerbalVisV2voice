@@ -18,6 +18,7 @@ export function useWebSocket(audioPlayer) {
 
     ws.onopen = () => {
       store.connectionStatus = "connected";
+      console.log("%c[WS] connected to backend", "color: #22c55e; font-weight: bold");
     };
 
     ws.onclose = () => {
@@ -105,7 +106,10 @@ export function useWebSocket(audioPlayer) {
 
   function startSession() {
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      console.log("%c[WS] sending start_session", "color: #f59e0b; font-weight: bold");
       socket.value.send(JSON.stringify({ type: "start_session" }));
+    } else {
+      console.error("[WS] cannot send start_session — socket not open, readyState:", socket.value?.readyState);
     }
   }
 

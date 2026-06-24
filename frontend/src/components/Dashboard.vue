@@ -63,12 +63,10 @@ import ChartSlot from "./ChartSlot.vue";
 import { useDashboardStore } from "../stores/dashboard";
 import { useAudio } from "../composables/useAudio";
 import { useWebSocket } from "../composables/useWebSocket";
-import { useScreenRecorder } from "../composables/useScreenRecorder";
 
 const store = useDashboardStore();
 const audio = useAudio();
 const ws = useWebSocket({ enqueue: audio.enqueue, flush: audio.flush, stop: audio.stop });
-const screen = useScreenRecorder();
 
 const statusClass = computed(() => ({
   "status-dot--connected": store.connectionStatus === "connected",
@@ -100,13 +98,9 @@ async function handleStartRecording() {
   await audio.startRecording((base64pcm) => {
     ws.sendAudio(base64pcm);
   });
-
-  // Start screen recording (captures tab video + AI audio + mic)
-  screen.startScreenRecording(audio.getMicStream());
 }
 
 function handleStopRecording() {
-  screen.stopScreenRecording();
   audio.stopRecording();
 }
 </script>
