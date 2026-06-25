@@ -1,0 +1,332 @@
+%% TVCG submission — VerbalVis
+%% Compile: pdflatex main && bibtex main && pdflatex main && pdflatex main
+%% Template: IEEEtran (journal mode) — TVCG accepts IEEEtran or VGTC styles.
+
+\documentclass[journal]{IEEEtran}
+
+\usepackage{cite}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\begin{document}
+
+\title{VerbalVis: Supporting Analytical Intent Evolution through Full-Duplex Conversational Visual Analytics}
+
+\author{Anonymous Author(s)%
+\thanks{Manuscript submitted to IEEE Transactions on Visualization and Computer Graphics. Source code, prompts, and study materials available at the project repository upon publication.}}
+
+\markboth{IEEE Transactions on Visualization and Computer Graphics,~Vol.~XX, No.~X, Month~Year}%
+{Author \MakeLowercase{\textit{et al.}}: VerbalVis}
+
+\maketitle
+
+% =====================================================================
+\begin{abstract}
+Exploratory data analysis is fundamentally a process of \emph{analytical intent evolution}: analysts continuously revise their direction as new observations surface hypotheses, refute them, and prompt further questions. Existing speech- and language-driven visual analytics systems are uniformly turn-based: a user must wait for the system to finish responding before correcting its course. This discretizes intent revision into fixed temporal windows and forces users to passively witness analyses that have already deviated from their interest.
+We present \textbf{VerbalVis}, a full-duplex conversational visual analytics system that treats user barge-in as an observable signal of intent evolution rather than as interaction noise. Built on the GPT-realtime-2 speech-to-speech API and a tool-calling LLM controller backed by an in-memory DuckDB analytics layer, VerbalVis cancels in-flight responses on speech onset, captures the redirecting utterance, and replans against a shared dashboard whose state is reinjected as system context after every tool call. We contribute (1) an \emph{Intent Evolution} framework that identifies three classes of revision --- \emph{Goal Shift}, \emph{Hypothesis Correction}, and \emph{Scope Narrowing} --- with their triggering conditions; (2) a 15-operation tool taxonomy organized along the Brehmer--Munzner \emph{why} and Yi et al.\ \emph{how} axes; (3) the VerbalVis prototype with a representative six-tool subset; and (4) a case study on the Olist Brazilian e-commerce dataset together with a planned 12-participant within-subject study comparing full-duplex against turn-based operation.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Visual analytics, conversational interfaces, natural language interfaces, speech interaction, large language models, full-duplex dialogue, exploratory data analysis.
+\end{IEEEkeywords}
+
+% =====================================================================
+\section{Introduction}
+\label{sec:intro}
+\IEEEPARstart{E}{xploratory} data analysis is an inherently iterative process in which analysts continuously revise their analytical direction as new observations emerge~\cite{kandel2012enterprise,pirolli2005sensemaking}. An analyst forms a hypothesis from a glance at a trend, the data refutes it, the analyst pivots to a related question, that question splinters into sub-questions, and so on. The \emph{shape} of this trajectory --- where the analyst turns, why, and how quickly --- is not incidental: it is the substance of sensemaking~\cite{pirolli2005sensemaking}. A visual analytics (VA) system that supports EDA must therefore support not merely query answering but \emph{intent evolution}: the continuous, often mid-utterance revision of analytical direction.
+
+\textbf{The structural limitation of current conversational VA.} Representative natural-language interfaces for visualization --- DataTone~\cite{gao2015datatone}, Eviza~\cite{setlur2016eviza}, NL4DV~\cite{narechania2020nl4dv}, and recent LLM-based systems including Data Formulator~2~\cite{wang2025dataformulator2} and LightVA~\cite{zhao2024lightva} --- all operate in a turn-based regime: the user speaks or types, the system processes, the system responds, the user speaks again. Intent revision is consequently confined to discrete handoff points. When the system is mid-response with an analysis that has already deviated from the user's interest, the user has no recourse except to wait, then issue a correction, then wait again. The cost compounds in voice modalities, where responses unfold at speaking rate and a misdirected explanation may consume tens of seconds before the user regains the floor.
+
+\textbf{The key observation.} Full-duplex speech models such as OpenAI's GPT-realtime-2 expose a new affordance: the user can interrupt the system at any instant, and the system can both detect the interruption and cancel its in-flight response. We argue that, in a VA context, this interruption is not noise to suppress but a \emph{first-class semantic signal}. When a user barges in mid-explanation, the act itself carries information: the current analytical direction requires revision. We formalize this as the central claim of this work --- \emph{user barge-in is an observable manifestation of analytical intent evolution} --- and design a system around it.
+
+\textbf{Contributions.} We make four contributions:
+\begin{enumerate}
+\item An \textbf{Intent Evolution framework} that conceptualizes intent revision in EDA and identifies three recurring revision types --- \emph{Goal Shift}, \emph{Hypothesis Correction}, and \emph{Scope Narrowing} --- with their triggering conditions and dashboard-level consequences.
+\item A \textbf{full-duplex conversational VA workflow} based on interruption-triggered replanning, which moves intent revision from discrete handoff points to a continuously available action.
+\item The \textbf{VerbalVis system}: a prototype implementation with a 15-operation tool taxonomy aligned to the Brehmer--Munzner~\cite{brehmer2013multi} \emph{why} and Yi et al.~\cite{yi2007toward} \emph{how} axes, of which six representative operations are realized end-to-end on a DuckDB-backed Olist e-commerce dashboard.
+\item A \textbf{case study} on three real instances of analytical intent revision and a planned \textbf{12-participant within-subject study} comparing full-duplex against turn-based operation along intent-revision count, exploration breadth, and perceived control.
+\end{enumerate}
+
+The remainder of the paper is organized as follows. Section~\ref{sec:related} positions our work relative to NLI-for-visualization, sensemaking theory, full-duplex conversational AI, and recent LLM-agent visual analytics. Section~\ref{sec:framework} introduces the Intent Evolution framework. Section~\ref{sec:system} describes the design and implementation of VerbalVis. Section~\ref{sec:case} reports the case study, Section~\ref{sec:study} the user study, and Sections~\ref{sec:discussion}--\ref{sec:conclusion} discuss limitations and conclude.
+
+% =====================================================================
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Natural Language Interfaces for Visualization}
+A line of work beginning with DataTone~\cite{gao2015datatone} and Eviza~\cite{setlur2016eviza} established the basic paradigm of translating natural-language queries into chart specifications and applying iterative refinement through ambiguity widgets and pragmatic context. NL4DV~\cite{narechania2020nl4dv} provided a reusable toolkit that exposes attribute, task, and visualization inferences to developers. More recent LLM-based systems --- Chat2VIS~\cite{maddigan2023chat2vis}, LIDA~\cite{dibia2023lida}, ChartGPT, and Data Formulator~2~\cite{wang2025dataformulator2} --- delegate chart specification or data transformation to a large language model, with Data Formulator~2 in particular blending direct manipulation on chart shelves with natural-language refinement and an iteration thread that lets users branch and reuse past designs. LightVA~\cite{zhao2024lightva} closes the loop further by composing a planner, executor, and controller agent that decompose high-level goals into chart-producing sub-tasks. Across this line, however, the interaction model remains strictly turn-based; intent revision happens only between user utterances and system completions.
+
+\subsection{Sensemaking and Analytical Intent}
+The view of analysis as a non-linear, iterative process is well established. Pirolli and Card's sensemaking loop~\cite{pirolli2005sensemaking} characterizes analysis as alternating between information foraging and structured reasoning, with frequent backtracking. Kandel et al.'s enterprise interview study~\cite{kandel2012enterprise} documents analysts repeatedly reformulating questions as preliminary results invalidate prior assumptions. Heer et al.~\cite{heer2008graphical} note that analytic provenance is largely the trace of these revisions. We build on this literature by giving \emph{intent revision} a concrete behavioral footprint in a conversational system --- the barge-in --- and using it to drive system response.
+
+\subsection{Full-Duplex Conversational AI}
+Until recently, voice agents in research prototypes were assembled from a cascade of automatic speech recognition (ASR), text LLM, and text-to-speech synthesis, which forced a turn-based regime and incurred multi-second latency. The release of speech-to-speech models such as OpenAI's GPT-realtime family~\cite{openai_realtime_docs} has changed the baseline: a single model ingests and emits audio at conversational latency, supports server-side voice-activity detection, and exposes a \texttt{response.cancel} primitive that aborts in-flight audio generation when the user resumes speaking. To our knowledge, no prior VA system has exploited this primitive as a semantic channel for intent revision; we are the first to operationalize barge-in as a first-class analytic event.
+
+\subsection{Conversational Visual Analytics and LLM-Agent VA}
+Beyond NLI, a growing family of LLM-agent systems --- LightVA~\cite{zhao2024lightva}, ProactiveVA~\cite{he2025proactiveva}, DashChat~\cite{cheng2025dashchat}, and multi-agent dashboard generators~\cite{shen2025datatodashboard} --- combine tool-calling LLMs with VA workflows. These systems demonstrate that LLM agents can plan multi-step analyses, but they treat context as accumulated text rather than as the user's continuously evolving intent, and they remain turn-based. VerbalVis differs along two axes: (i) modality (full-duplex voice rather than text), and (ii) the explicit treatment of interruption as a semantic event that triggers analytical replanning rather than mere cancellation.
+
+% =====================================================================
+\section{The Intent Evolution Framework}
+\label{sec:framework}
+
+\subsection{A Cyclic Model of Intent Revision}
+We model EDA as a cycle whose nominal trajectory is repeatedly perturbed by revisions:
+\[
+\textsc{Observation} \rightarrow \textsc{Suspicion} \rightarrow \textsc{Interruption} \rightarrow \textsc{Intent Revision} \rightarrow
+\]
+\[
+\textsc{Analytical Replanning} \rightarrow \textsc{New Visualization} \rightarrow \textsc{Observation} \cdots
+\]
+The cycle is conventional in sensemaking literature~\cite{pirolli2005sensemaking}; our contribution is to identify \emph{Interruption} as an explicit, machine-detectable transition point that, in a full-duplex system, can be acted on synchronously rather than discovered after the fact from a transcript.
+
+\subsection{Three Revision Types}
+Across our case study sessions and pilot interactions, we observe that intent revisions cluster into three recurring types, each with characteristic triggering conditions:
+
+\textbf{Type 1: Goal Shift.} The analyst's stated goal pivots to a different analytical question. Trigger: the current direction is mismatched with the analyst's actual interest, often because the system has chosen a plausible-but-tangential expansion. Example: while the system narrates category-level sales decomposition for November 2017, the analyst interrupts with ``I care about ratings, not sales.''
+
+\textbf{Type 2: Hypothesis Correction.} The analyst rejects the explanatory hypothesis under construction and substitutes an alternative. Trigger: a conflict between the system's tentative explanation and the analyst's domain prior. Example: the system attributes low-rated electronics to ``product quality issues''; the analyst interrupts with ``I think it is logistics, not the goods.''
+
+\textbf{Type 3: Scope Narrowing.} The analyst voluntarily contracts the analytical scope to a subset they already know to be relevant. Trigger: the analyst possesses business knowledge that renders the full sweep unnecessary. Example: during a national breakdown by state, the analyst interrupts with ``Only S\~ao Paulo.''
+
+These categories are not exhaustive, but in our case study they cover every revision we observed. Section~\ref{sec:case} illustrates each in detail.
+
+\subsection{Why Full-Duplex Matters}
+In a turn-based system, intent revisions can only occur at handoff points; a misdirected response must run to completion before the revision is even expressible. In a full-duplex system, intent revisions are continuously available: the user reclaims the floor by speaking, and the system, on detecting speech onset, can cancel the in-flight response and re-plan. The framework thus motivates a direct system-level requirement --- the controller must support synchronous cancellation, state preservation across the cancellation, and rapid replanning against the unchanged dashboard --- which we address in Section~\ref{sec:system}.
+
+% =====================================================================
+\section{System Design and Implementation}
+\label{sec:system}
+
+\subsection{Design Goals}
+The framework yields three design goals:
+\begin{itemize}
+\item \textbf{DG1: Continuous intent revision.} Support revision at any moment, not only at turn boundaries.
+\item \textbf{DG2: Rapid replanning after barge-in.} Once an interruption is detected, the system must discard the prior response, interpret the redirecting utterance, and re-plan against current dashboard state with minimal added latency.
+\item \textbf{DG3: Dashboard--intent synchrony.} The shared dashboard must always reflect the latest applied operations and must serve as the canonical source of truth for the LLM, so that explanations are grounded in what the user sees rather than in the model's prior outputs.
+\end{itemize}
+
+\subsection{Architecture Overview}
+VerbalVis comprises a Vue~3 + Vega-Lite frontend, a FastAPI backend with an in-memory DuckDB analytics layer, and a relay that bridges a browser WebSocket to the OpenAI Realtime WebSocket (Fig.~\ref{fig:arch}). The backend exposes a single \texttt{/ws} endpoint; on connection, it constructs a \texttt{RealtimeSession} that runs two concurrent async loops --- one forwarding client audio frames to OpenAI, one demultiplexing OpenAI events to the client and dispatching tool calls.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.92\linewidth}{\centering\small
+\textbf{[Figure placeholder]} System architecture: Frontend (Vue/Vega-Lite) $\leftrightarrow$ Backend (FastAPI relay + DuckDB) $\leftrightarrow$ OpenAI Realtime (\texttt{gpt-realtime-2}). Realtime Layer (audio streaming, VAD, barge-in, response cancel) on the left; Analytics Layer (tool calls, DuckDB, dashboard update) on the right; shared dashboard state in the middle.}}
+\caption{VerbalVis architecture. The Realtime Layer handles conversational coordination; the Analytics Layer executes tool calls asynchronously and updates the dashboard state, which is reinjected as system context after every tool call.}
+\label{fig:arch}
+\end{figure}
+
+\noindent\emph{Realtime layer.} GPT-realtime-2 streams 24\,kHz PCM audio in both directions. Server-side semantic voice-activity detection emits \texttt{input\_audio\_buffer.speech\_started} and \texttt{\dots speech\_stopped} events; the backend uses the former to fire \texttt{response.cancel}, increment a \emph{turn epoch} counter, and mark all in-flight tool tasks for the cancelled response as stale.
+
+\noindent\emph{Analytics layer.} Tool calls (\texttt{response.function\_call\_arguments.done}) are dispatched to handlers backed by DuckDB queries. DuckDB holds two derived fact tables built from seven Olist CSVs at startup: \texttt{fact\_order} (one row per delivered order, carrying order-grain attributes including \texttt{order\_month}, \texttt{review\_score}, \texttt{customer\_state}, \texttt{delivery\_days}, and per-order payment) and \texttt{fact\_item} (one row per order item, additionally carrying \texttt{product\_category} and per-item revenue $\textrm{price} + \textrm{freight}$). The two-table design lets revenue retain the correct semantics under both order-grain and item-grain aggregations; cross-grain filters on \texttt{product\_category} from the order table are rewritten as \texttt{order\_id IN (SELECT \dots FROM fact\_item WHERE \dots)} subqueries by a shared \texttt{build\_where} helper.
+
+VerbalVis employs real-time full-duplex audio interaction for conversational coordination, while analytical operations are executed asynchronously through tool calls that update the dashboard state.
+
+\subsection{Tool Taxonomy}
+Following the Brehmer--Munzner multi-level typology~\cite{brehmer2013multi} and Yi et al.'s how-axis~\cite{yi2007toward}, we organize VerbalVis operations along three dimensions: \emph{why} (analytical goal), \emph{how} (interaction primitive), and \emph{what} (target of the operation: data, view, layout, insight). Table~\ref{tab:tools} lists the full 15-operation taxonomy. The current implementation realizes six representative operations end-to-end, covering all four \emph{what} categories: \texttt{filter\_data}, \texttt{highlight\_visual}, \texttt{append\_visual} (closest analogue to \texttt{create\_view}), and three insight-producing utterances driven by prompt rules. The remaining nine operations have schema-level definitions and are listed for completeness; implementing them is straightforward extension work.
+
+\begin{table*}[t]
+\centering
+\caption{VerbalVis Tool Taxonomy. Six operations are implemented end-to-end (marked $\checkmark$); the remainder are specified at the schema level. \emph{Why} follows Brehmer--Munzner; \emph{How} follows Yi et al.; \emph{What} identifies the operation target.}
+\label{tab:tools}
+\small
+\begin{tabular}{lllllc}
+\toprule
+\textbf{Tool} & \textbf{Why} & \textbf{Why-Detail} & \textbf{How} & \textbf{What} & \textbf{Impl.} \\
+\midrule
+\texttt{filter\_data}          & Discover & Locate     & Filter                 & Data    & $\checkmark$ \\
+\texttt{aggregate\_data}       & Discover & Summarize  & Abstract/Elaborate     & Data    &              \\
+\texttt{compare\_data}         & Discover & Compare    & Connect                & Data    &              \\
+\texttt{compare\_segments}     & Discover & Compare    & Connect                & View    &              \\
+\texttt{change\_chart\_type}   & Discover & Explore    & Encode                 & View    &              \\
+\texttt{change\_encoding}      & Present  & ---        & Encode                 & View    &              \\
+\texttt{change\_sort}          & Discover & Compare    & Reconfigure            & View    &              \\
+\texttt{highlight\_visual}     & Discover & Locate     & Select                 & View    & $\checkmark$ \\
+\texttt{focus\_visual}         & Discover & Explore    & Select+Reconfigure     & View    &              \\
+\texttt{move\_visual}          & Present  & ---        & Reconfigure            & Layout  &              \\
+\texttt{remove\_visual}        & Discover & Identify   & Reconfigure            & Layout  &              \\
+\texttt{replace\_visual}       & Discover & Explore    & Reconfigure            & Layout  &              \\
+\texttt{explain\_visual}       & Discover & Identify   & Connect                & Insight & $\checkmark$ \\
+\texttt{reason\_about\_pattern}& Discover & Identify   & Connect+Abstract       & Insight & $\checkmark$ \\
+\texttt{summarize\_dashboard}  & Discover & Summarize  & Abstract/Elaborate     & Insight & $\checkmark$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\noindent The three implemented data/view tools are deliberately minimal: \texttt{filter\_data} centralizes all dataset narrowing (with a \texttt{field=null} convention for clearing, an \texttt{append} flag for AND-accumulation, and operator support for \texttt{eq, neq, in, gte, lte, between}); \texttt{highlight\_visual} touches no data and only redirects user attention; \texttt{append\_visual} creates a new chart at item or order grain based on whether \texttt{product\_category} appears in the encoding. This minimality is intentional: every analytical state change must be expressible by composing these operations, which keeps the model's tool-selection decision tree shallow and reduces the surface area on which the LLM can hallucinate.
+
+\subsection{Layered Prompt Design}
+The system prompt is constructed in four labeled sections, in line with the prompt-structure recommendations of the GPT-realtime-2 prompting guide~\cite{openai_realtime_prompt}. \emph{Identity} fixes the assistant as a collaborative data analyst, instructs language mirroring, and prescribes the opening behavior (greet, introduce the Olist dataset, walk through the four base views, then invite the user to choose a direction --- explicitly without preemptively highlighting any view). \emph{Dashboard Knowledge} provides a bidirectional view-id $\leftrightarrow$ Chinese-and-English-label dictionary, the exhaustive field list (forbidding fabricated fields such as ``return\_rate'' or ``profit''), and value semantics (e.g., \texttt{review\_score} 1--2 negative; \texttt{customer\_state} two-letter codes; revenue in BRL pronounced ``reais''). \emph{Tool Usage Rules} specify operator semantics, the cross-grain filter convention, and tool-selection guidelines that explicitly forbid defaulting to the review view for generic prompts such as ``what is interesting in the data.'' \emph{Realtime Rules} legitimize interruption as a high-priority signal and instruct the model to abandon prior explanations and re-evaluate against the latest user utterance.
+
+\subsection{Dashboard State and Context Reinjection}
+The four base views (\texttt{view-trend}, \texttt{view-review}, \texttt{view-map}, \texttt{view-category}) and any user-added \texttt{workspace-N} charts are maintained as a single backend list. After every tool call, the backend (i) re-queries all views against the current filter set, (ii) recomputes per-view summary statistics (e.g., peak month, low-score ratio, top state, top category), (iii) pushes a \texttt{views\_update} event to the frontend for re-render, and (iv) injects a compact textual snapshot of the dashboard --- highlighted view, active filters, total filtered row count, and per-view summary --- back into the LLM as a \texttt{system} message. This \emph{context reinjection} pattern follows the guidance in the GPT-realtime-2 long-context section~\cite{openai_realtime_prompt}: the model is never asked to reconstruct dashboard state from prior turns, only to act on what it is given.
+
+\subsection{Barge-in Mechanism}
+On \texttt{input\_audio\_buffer.speech\_started}:
+\begin{enumerate}
+\item Increment the per-session \texttt{turn\_epoch}; record the in-flight \texttt{response\_id} as invalidated.
+\item Cancel all in-flight tool tasks bound to the cancelled response.
+\item Send \texttt{response.cancel} to OpenAI to terminate audio generation.
+\item Forward \texttt{speech\_started} to the frontend so the UI can stop playback immediately.
+\end{enumerate}
+A double-lock discipline (\texttt{openai\_send\_lock} for outbound messages, \texttt{tool\_state\_lock} for state mutation) and a per-response pending-tool counter ensure that (i) tool results from cancelled responses are discarded by an \texttt{is\_stale\_tool\_call} check before being forwarded to the model, and (ii) when a single model turn issues multiple tool calls, only the final completing call triggers a fresh \texttt{response.create}, preventing duplicate or racing responses.
+
+% =====================================================================
+\section{Case Study: Three Forms of Analytical Intent Revision}
+\label{sec:case}
+
+We illustrate the framework with a single session on the Olist Brazilian e-commerce dataset (96{,}478 delivered orders; 110{,}196 order items spanning 73 product categories and 27 states; September 2016 -- August 2018). The analyst, a domain non-expert, was asked to explore customer satisfaction with no predetermined goal.
+
+\subsection{Initial State} The system greets the user, names the dataset, and walks through the four base views: monthly order trend, review-score distribution, orders by state, top-15 categories by revenue. The system then asks the analyst what they would like to explore. The analyst responds, ``Let's look at the trend.''
+
+\subsection{Type 1 --- Goal Shift}
+\emph{System (mid-utterance):} ``Order volume peaks in November 2017, roughly 4$\times$ the average month. Let me decompose that by product category to see whether it's a Black Friday effect across categories or concentrated in --- ''
+\emph{Analyst (barge-in):} ``I care more about ratings, not sales.''
+
+The barge-in fires \texttt{response.cancel}; the redirecting utterance is interpreted; the controller emits \texttt{highlight\_visual(view-review)} and the assistant continues: ``The review distribution is heavily concentrated at 5 stars but with a non-trivial 1- and 2-star tail. Want me to filter to low-rated orders and see what they share?'' The intent has shifted from a sales decomposition to a satisfaction investigation; the analyst was spared the remainder of the category breakdown.
+
+\subsection{Type 2 --- Hypothesis Correction}
+\emph{System (mid-utterance):} ``Electronics-adjacent categories such as \texttt{computers\_accessories} and \texttt{electronics} show below-average ratings. This is often attributable to product quality issues with --- ''
+\emph{Analyst (barge-in):} ``It's logistics, not the products.''
+
+The system invokes \texttt{append\_visual(scatter, delivery\_days, review\_score)} followed by \texttt{filter\_data(review\_score, lte, 2)}; the resulting scatter shows the low-rated tail clustering at high delivery days. The assistant continues: ``You're right --- low-rated orders disproportionately have delivery times above 20 days; the product-quality story doesn't hold up.'' The intent revision substituted a delivery hypothesis for a product-quality hypothesis, and the assistant aborted its prior explanation rather than completing it.
+
+\subsection{Type 3 --- Scope Narrowing}
+\emph{System (mid-utterance):} ``Among states with the worst delivery times, the northeast --- Bahia and Cear\'a --- have averages above 25 days, while --- ''
+\emph{Analyst (barge-in):} ``Just S\~ao Paulo.''
+
+\texttt{filter\_data(customer\_state, eq, "SP")} is issued; all four base views recompute against the SP-only subset; the assistant pivots to ``Within SP, average delivery is 8.4 days; the low-rated tail is much smaller than the national figure.'' Scope contracted from a national survey to a state-level focus, exploiting the analyst's prior interest in SP without the analyst having had to articulate that interest at the start of the session.
+
+\subsection{Summary}
+Each revision corresponds to one of the three framework types; the dashboard, the system narration, and the model's working hypothesis remained synchronized throughout because every cancelled response was followed by a fresh \texttt{conversation.item.create} of dashboard context before the next \texttt{response.create}. We argue this synchrony is the practical value of treating barge-in as a semantic event rather than merely as audio cancellation.
+
+% =====================================================================
+\section{User Study}
+\label{sec:study}
+
+\subsection{Design}
+We plan a within-subjects, counterbalanced study with $N{=}12$ participants (graduate students with prior data-analysis experience, recruited from local mailing lists). Each participant completes two open-ended exploration tasks on the Olist dataset, one per condition; task--condition assignment is counterbalanced across participants. Tasks are matched in scope and difficulty (verified through a 1-participant pilot) and each is allocated 15--20 minutes.
+
+\begin{itemize}
+\item \textbf{Condition A (VerbalVis, full-duplex):} \texttt{BARGE\_IN\_ENABLED=True}; semantic VAD with \texttt{interrupt\_response=True}; the system cancels in-flight responses on user speech onset.
+\item \textbf{Condition B (Turn-based baseline):} \texttt{BARGE\_IN\_ENABLED=False}; identical model (\texttt{gpt-realtime-2}), identical prompt, identical tools, identical dashboard. The user must wait for the system to finish each response before issuing a follow-up. This isolates barge-in as the single independent variable and represents the interaction regime of DataTone, Eviza, NL4DV, Data Formulator~2, and LightVA.
+\end{itemize}
+
+\subsection{Measurements}
+\textbf{Quantitative.}
+\begin{itemize}
+\item \emph{Intent revision count} --- number of user-initiated direction changes per session, coded from session video and the \texttt{barge\_in.log} timeline.
+\item \emph{Exploration breadth} --- number of distinct analytical dimensions touched (fields, views, filter expressions) during the session.
+\item \emph{Insight count} --- number of substantive findings reported in the post-task summary, coded by two raters with Cohen's $\kappa$ reported.
+\item \emph{Time-to-first-audio (TTFA)} and \emph{tool-call duration}, recorded automatically by the existing \texttt{\_response\_metrics} instrumentation in \texttt{realtime.py}.
+\end{itemize}
+
+\textbf{Qualitative.}
+\begin{itemize}
+\item Think-aloud transcripts, coded thematically.
+\item Semi-structured post-task interviews (10--15 min).
+\item NASA-TLX (six standard sub-scales).
+\item Perceived Control scale (3 Likert-7 items, e.g., ``I felt able to redirect the analysis whenever I wanted.'').
+\end{itemize}
+
+\subsection{Hypotheses}
+\begin{itemize}
+\item \textbf{H1:} Intent revision count is higher under VerbalVis than under the turn-based baseline.
+\item \textbf{H2:} Exploration breadth and insight count are higher under VerbalVis.
+\item \textbf{H3:} Perceived control is higher under VerbalVis; NASA-TLX is not higher (i.e., interruption capability does not increase cognitive load).
+\item \textbf{H4:} The advantage of VerbalVis correlates with the proportion of \emph{Hypothesis Correction} and \emph{Scope Narrowing} revisions, which are most punished by turn-based latency.
+\end{itemize}
+
+\subsection{Results (to be reported)}
+\emph{Placeholder.} Tables and figures will report per-condition means and within-subject differences with Wilcoxon signed-rank tests; qualitative themes will be illustrated with representative quotations. The instrumentation already in place yields TTFA, per-turn latency, tool-call duration, and a per-session dashboard context snapshot for every tool invocation, providing both the quantitative and the trace data required.
+
+\subsection{Anticipated Discussion}
+We expect the analyses to show that (a) the three revision types in our framework appear in the data with distinguishable distributions across participants; (b) the full-duplex advantage is largest on tasks involving Hypothesis Correction, where turn-based interaction forces users to passively witness verifications of rejected hypotheses; and (c) Perceived Control correlates positively with intent revision count, supporting the framing of barge-in as user agency rather than as interruption noise.
+
+% =====================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\textbf{Limitations.} The current prototype implements six of the fifteen taxonomy operations; while the six cover all four \emph{what} categories, claims about the taxonomy's completeness require the remaining nine to be validated in deployment. The planned study has $N{=}12$, which is appropriate for a within-subject design with clear effects but limits the resolution of subgroup analyses (e.g., revisions correlated with individual differences in domain knowledge). The Olist dataset, while rich, is domain-specific; generalization to clinical, financial, or scientific datasets remains future work. Finally, the full-duplex affordance is currently English/Chinese-tested; multilingual behavior under accented input requires more investigation, in line with the cautions of the GPT-realtime-2 language-control guidance~\cite{openai_realtime_prompt}.
+
+\textbf{Implications.} If barge-in is treated as a semantic event, the conversational VA design space expands: the system can use the \emph{timing} of an interruption (early vs.\ late in a response), not only the redirecting utterance, as a signal. Late interruptions plausibly indicate dissatisfaction with the conclusion; early interruptions plausibly indicate dissatisfaction with the direction itself. Exploiting this distinction is a natural next step.
+
+\textbf{Generalization beyond voice.} The framework is voice-motivated but not voice-bound. Any modality with a true interruption primitive --- including streaming-LLM text chat with mid-response edits, or gestural systems that can preempt animations --- can be analyzed through the same Intent Evolution lens. We see VerbalVis as a concrete instantiation of a broader design pattern.
+
+\textbf{Future work.} Beyond completing the tool taxonomy and broadening data domains, we plan (i) a longitudinal study examining whether users' Intent Revision strategies stabilize over repeated sessions, (ii) an extension to multi-analyst sessions where barge-ins from different participants might disagree, and (iii) a comparison with a text-chat ablation of VerbalVis to separate the effect of modality from the effect of full-duplex.
+
+% =====================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+We have presented VerbalVis, a full-duplex conversational visual analytics system motivated by the observation that user barge-in, far from being interaction noise, is the most directly observable manifestation of analytical intent evolution. The Intent Evolution framework identifies three recurring revision types --- Goal Shift, Hypothesis Correction, and Scope Narrowing --- and motivates a synchronous cancel-and-replan architecture. Built on GPT-realtime-2, a tool-calling LLM controller, and an in-memory DuckDB analytics layer with a shared, continuously-reinjected dashboard context, VerbalVis demonstrates that intent revision can be a first-class system event rather than a between-turn afterthought. A case study on the Olist e-commerce dataset illustrates all three revision types in a single session; a planned 12-participant within-subjects study compares full-duplex against an identically-instrumented turn-based baseline. We hope that framing barge-in as semantics, rather than as noise, contributes to a more truthful account of what conversational visual analytics is for.
+
+% =====================================================================
+\bibliographystyle{IEEEtran}
+
+%% Inline bibliography (no external .bib needed). For final submission, move into a .bib file.
+\begin{thebibliography}{99}
+
+\bibitem{pirolli2005sensemaking}
+P.~Pirolli and S.~Card, ``The sensemaking process and leverage points for analyst technology as identified through cognitive task analysis,'' in \emph{Proc.\ Int.\ Conf.\ Intelligence Analysis}, vol.~5, no.~1, McLean, VA, USA, 2005, pp.\ 2--4.
+
+\bibitem{kandel2012enterprise}
+S.~Kandel, A.~Paepcke, J.~M. Hellerstein, and J.~Heer, ``Enterprise data analysis and visualization: An interview study,'' \emph{IEEE Trans.\ Vis.\ Comput.\ Graphics}, vol.~18, no.~12, pp.\ 2917--2926, 2012.
+
+\bibitem{heer2008graphical}
+J.~Heer, J.~Mackinlay, C.~Stolte, and M.~Agrawala, ``Graphical histories for visualization: Supporting analysis, communication, and evaluation,'' \emph{IEEE Trans.\ Vis.\ Comput.\ Graphics}, vol.~14, no.~6, pp.\ 1189--1196, 2008.
+
+\bibitem{brehmer2013multi}
+M.~Brehmer and T.~Munzner, ``A multi-level typology of abstract visualization tasks,'' \emph{IEEE Trans.\ Vis.\ Comput.\ Graphics}, vol.~19, no.~12, pp.\ 2376--2385, 2013.
+
+\bibitem{yi2007toward}
+J.~S. Yi, Y.~Kang, J.~Stasko, and J.~A. Jacko, ``Toward a deeper understanding of the role of interaction in information visualization,'' \emph{IEEE Trans.\ Vis.\ Comput.\ Graphics}, vol.~13, no.~6, pp.\ 1224--1231, 2007.
+
+\bibitem{gao2015datatone}
+T.~Gao, M.~Dontcheva, E.~Adar, Z.~Liu, and K.~G. Karahalios, ``DataTone: Managing ambiguity in natural language interfaces for data visualization,'' in \emph{Proc.\ ACM UIST}, 2015, pp.\ 489--500.
+
+\bibitem{setlur2016eviza}
+V.~Setlur, S.~E. Battersby, M.~Tory, R.~Gossweiler, and A.~X. Chang, ``Eviza: A natural language interface for visual analysis,'' in \emph{Proc.\ ACM UIST}, 2016, pp.\ 365--377.
+
+\bibitem{narechania2020nl4dv}
+A.~Narechania, A.~Srinivasan, and J.~Stasko, ``NL4DV: A toolkit for generating analytic specifications for data visualization from natural language queries,'' \emph{IEEE Trans.\ Vis.\ Comput.\ Graphics}, vol.~27, no.~2, pp.\ 369--379, 2020.
+
+\bibitem{wang2025dataformulator2}
+C.~Wang, B.~Lee, S.~Drucker, D.~Marshall, and J.~Gao, ``Data Formulator 2: Iterative creation of data visualizations, with AI transforming data along the way,'' in \emph{Proc.\ ACM CHI}, 2025.
+
+\bibitem{maddigan2023chat2vis}
+P.~Maddigan and T.~Susnjak, ``Chat2VIS: Generating data visualisations via natural language using ChatGPT, Codex, and GPT-3 large language models,'' \emph{IEEE Access}, vol.~11, pp.\ 45\,181--45\,193, 2023.
+
+\bibitem{dibia2023lida}
+V.~Dibia, ``LIDA: A tool for automatic generation of grammar-agnostic visualizations and infographics using large language models,'' in \emph{Proc.\ ACL System Demonstrations}, 2023.
+
+\bibitem{zhao2024lightva}
+Y.~Zhao et al., ``LightVA: Lightweight visual analytics with LLM agent-based task planning and execution,'' \emph{IEEE Trans.\ Vis.\ Comput.\ Graphics}, 2024, early access.
+
+\bibitem{he2025proactiveva}
+``ProactiveVA: Proactive visual analytics with LLM-based UI agent,'' arXiv:2507.18165, 2025.
+
+\bibitem{cheng2025dashchat}
+``DashChat: Interactive authoring of industrial dashboard design prototypes through conversation with LLM-powered agents,'' arXiv:2504.12865, 2025.
+
+\bibitem{shen2025datatodashboard}
+``Data-to-Dashboard: Multi-agent LLM framework for dashboard generation,'' arXiv:2505.23695, 2025.
+
+\bibitem{openai_realtime_docs}
+OpenAI, ``Realtime API documentation,'' \url{https://developers.openai.com/api/docs/guides/realtime}, accessed 2026.
+
+\bibitem{openai_realtime_prompt}
+OpenAI, ``Realtime models prompting guide,'' \url{https://developers.openai.com/api/docs/guides/realtime-models-prompting?realtime-model=gpt-realtime-2}, accessed 2026.
+
+\bibitem{olist2018}
+Olist and A.~Sionek, ``Brazilian e-commerce public dataset by Olist,'' Kaggle, 2018. \url{https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce}
+
+\end{thebibliography}
+
+\end{document}

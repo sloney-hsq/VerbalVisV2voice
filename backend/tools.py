@@ -17,6 +17,7 @@ from db import (
     aggregate_query,
     build_where,
     get_connection,
+    resolve_column,
     stats_query,
     total_rows,
 )
@@ -52,6 +53,7 @@ BASE_VIEWS_DEFS = [
         "agg_expr": "COUNT(*)",
         "agg_alias": "order_count",
         "order_by": "order_month",
+        "source_table": "fact_order",
     },
     {
         "id": "view-review",
@@ -64,6 +66,7 @@ BASE_VIEWS_DEFS = [
         "agg_expr": "COUNT(*)",
         "agg_alias": "order_count",
         "order_by": "review_score",
+        "source_table": "fact_order",
     },
     {
         "id": "view-map",
@@ -76,8 +79,12 @@ BASE_VIEWS_DEFS = [
         "agg_expr": "COUNT(*)",
         "agg_alias": "order_count",
         "order_by": "order_count DESC",
+        "source_table": "fact_order",
     },
     {
+        # NOTE: queries fact_item (item grain). Revenue is SUM of per-item
+        # (price + freight) — not the previous "whole-order payment misallocated
+        # to alphabetically-first category" bug.
         "id": "view-category",
         "label": "view 4-category",
         "chart_type": "bar",
@@ -85,10 +92,11 @@ BASE_VIEWS_DEFS = [
         "x_field": "product_category",
         "y_field": "revenue",
         "group_field": "product_category",
-        "agg_expr": "ROUND(SUM(revenue), 2)",
+        "agg_expr": "ROUND(SUM(item_revenue), 2)",
         "agg_alias": "revenue",
         "order_by": "revenue DESC",
         "limit": 15,
+        "source_table": "fact_item",
     },
 ]
 
@@ -365,8 +373,13 @@ def _exec_append_visual(args: dict) -> dict:
     workspace_counter += 1
     view_id = f"workspace-{workspace_counter}"
 
+    # Route to fact_item whenever product_category is involved (x / y / color);
+    # otherwise stay on fact_order. Keeps revenue at item grain when grouping
+    # by category, and avoids cross-grain joins when not needed.
+    source_table = _decide_table(x, y, color)
+
     # Determine aggregation
-    agg_expr, agg_alias, group_field, order_by = _infer_agg(chart_type, x, y)
+    agg_expr, agg_alias, group_field, order_by = _infer_agg(chart_type, x, y, source_table)
 
     # color is only meaningful as a *grouping* dimension for bar/line charts.
     # Scatter draws raw rows (color column requested directly); histogram
@@ -387,13 +400,14 @@ def _exec_append_visual(args: dict) -> dict:
         "agg_expr": agg_expr,
         "agg_alias": agg_alias,
         "order_by": order_by,
+        "source_table": source_table,
         "data": [],
         "statistics": {},
     }
 
     # Query data
     if chart_type == "scatter":
-        view_def["data"] = _scatter_data(x, y, color)
+        view_def["data"] = _scatter_data(x, y, color, source_table)
     else:
         view_def["data"] = aggregate_query(
             group_field=group_field,
@@ -402,6 +416,7 @@ def _exec_append_visual(args: dict) -> dict:
             filters=active_filters,
             order_by=order_by,
             extra_group_fields=extra_group_fields,
+            table=source_table,
         )
 
     view_def["statistics"] = _compute_view_stats(view_def)
@@ -422,31 +437,62 @@ def _exec_append_visual(args: dict) -> dict:
     }
 
 
-def _infer_agg(chart_type: str, x: str, y: str):
-    """Infer SQL aggregation from chart type and fields."""
+def _decide_table(x: str, y: str, color: str | None) -> str:
+    """Choose source table for an append_visual call.
+
+    Any reference to product_category forces fact_item (item grain). Otherwise
+    fact_order is enough — all order-level filter fields exist on it.
+    """
+    if "product_category" in (x, y, color):
+        return "fact_item"
+    return "fact_order"
+
+
+def _infer_agg(chart_type: str, x: str, y: str, table: str):
+    """Infer SQL aggregation from chart type, fields, and source table."""
     if chart_type == "scatter":
         return y, y, x, x  # no aggregation needed
     if chart_type == "histogram":
         return "COUNT(*)", "count", x, x
     # bar / line
     if y == "revenue":
-        return "ROUND(SUM(revenue), 2)", "revenue", x, f"revenue DESC"
+        # On fact_item revenue = SUM(price + freight); on fact_order it's the
+        # per-order payment total. These are semantically different — pick the
+        # column that matches the table the query will run against.
+        col = "item_revenue" if table == "fact_item" else "order_revenue"
+        return f"ROUND(SUM({col}), 2)", "revenue", x, "revenue DESC"
     if y == "delivery_days":
         return "ROUND(AVG(delivery_days), 1)", "delivery_days", x, x
     # default: count
     return "COUNT(*)", "order_count", x, x
 
 
-def _scatter_data(x: str, y: str, color: str | None = None) -> list[dict]:
-    """Get raw rows for scatter plot (sampled to 2000 max)."""
+def _scatter_data(
+    x: str, y: str, color: str | None = None, table: str = "fact_order"
+) -> list[dict]:
+    """Get raw rows for scatter plot (sampled to 2000 max).
+
+    Filter-system names like "revenue" are resolved to the right physical
+    column on the chosen table and aliased back so the returned rows carry
+    the original field name the frontend expects.
+    """
     con = get_connection()
-    where = build_where(active_filters)
-    cols = f"{x}, {y}"
+    where = build_where(active_filters, table=table)
+
+    def _proj(field: str) -> str:
+        col = resolve_column(field, table)
+        return f"{col} AS {field}" if col != field else field
+
+    x_col = resolve_column(x, table)
+    y_col = resolve_column(y, table)
+    select_parts = [_proj(x), _proj(y)]
     if color:
-        cols += f", {color}"
+        select_parts.append(_proj(color))
+    cols_sql = ", ".join(select_parts)
+
     sql = f"""
-        SELECT {cols} FROM main_table
-        WHERE {where} AND {x} IS NOT NULL AND {y} IS NOT NULL
+        SELECT {cols_sql} FROM {table}
+        WHERE {where} AND {x_col} IS NOT NULL AND {y_col} IS NOT NULL
         USING SAMPLE 2000
     """
     result = con.execute(sql)
@@ -461,9 +507,10 @@ def _scatter_data(x: str, y: str, color: str | None = None) -> list[dict]:
 def _refresh_all_views() -> None:
     """Re-query data + stats for all views using current active_filters."""
     for view in views:
+        table = view.get("source_table", "fact_order")
         if view["chart_type"] == "scatter":
             view["data"] = _scatter_data(
-                view["x_field"], view["y_field"], view.get("color")
+                view["x_field"], view["y_field"], view.get("color"), table
             )
         else:
             limit = view.get("limit")
@@ -478,6 +525,7 @@ def _refresh_all_views() -> None:
                 filters=active_filters,
                 order_by=view.get("order_by"),
                 extra_group_fields=extra_group_fields,
+                table=table,
             )
             if limit:
                 data = data[:limit]
