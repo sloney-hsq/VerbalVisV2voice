@@ -1,0 +1,213 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1000" viewBox="0 0 1800 1000">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#6B7280"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2563EB"/>
+    </marker>
+    <style>
+      .bg { fill: #FFFFFF; }
+      .panel { fill: #FFFFFF; stroke: #D1D5DB; stroke-width: 2; rx: 12; }
+      .panel-title { font-family: Arial, Helvetica, sans-serif; font-weight: 700; font-size: 22px; fill: #111827; }
+      .subtle { font-family: Arial, Helvetica, sans-serif; font-size: 14px; fill: #6B7280; }
+      .label { font-family: Arial, Helvetica, sans-serif; font-weight: 700; font-size: 16px; fill: #111827; }
+      .small { font-family: Arial, Helvetica, sans-serif; font-size: 12px; fill: #4B5563; }
+      .tiny { font-family: Arial, Helvetica, sans-serif; font-size: 10px; fill: #4B5563; }
+      .mono { font-family: Consolas, "Courier New", monospace; font-size: 13px; fill: #111827; }
+      .lane { fill: #F9FAFB; stroke: #E5E7EB; stroke-width: 1.5; rx: 10; }
+      .lane-title { font-family: Arial, Helvetica, sans-serif; font-weight: 700; font-size: 18px; fill: #2563EB; }
+      .lane-sub { font-family: Arial, Helvetica, sans-serif; font-size: 12px; fill: #6B7280; }
+      .bubble-user { fill: #EFF6FF; stroke: #2563EB; stroke-width: 1.6; rx: 14; }
+      .bubble-system { fill: #F5F3FF; stroke: #8B5CF6; stroke-width: 1.6; rx: 14; }
+      .bubble-cancel { fill: #FFF7ED; stroke: #F97316; stroke-width: 2; rx: 14; }
+      .screen { fill: #F9FAFB; stroke: #CBD5E1; stroke-width: 1.5; rx: 8; }
+      .axis { stroke: #9CA3AF; stroke-width: 1.2; }
+      .dash { stroke-dasharray: 8 8; }
+      .callout { fill: #FFF7ED; stroke: #F97316; stroke-width: 1.5; rx: 8; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1800" height="1000"/>
+  <text x="70" y="45" style="font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:28px;fill:#111827">
+    VerbalVis: full-duplex barge-in synchronizes voice, tool calls, and dashboard state
+  </text>
+  <text x="70" y="70" class="subtle">
+    A mid-response interruption becomes an actionable redirect: cancel the stale response, replan with current dashboard context, and update the visual workspace.
+  </text>
+
+  <!-- Top storyboard panels -->
+  <rect x="70" y="95" width="500" height="455" class="panel"/>
+  <rect x="650" y="95" width="500" height="455" class="panel"/>
+  <rect x="1230" y="95" width="500" height="455" class="panel"/>
+
+  <text x="95" y="132" class="panel-title">1. Initial analytical intent</text>
+  <text x="675" y="132" class="panel-title">2. User barges in</text>
+  <text x="1255" y="132" class="panel-title">3. Replanned dashboard</text>
+
+  <!-- Panel 1 dashboard -->
+  <rect x="105" y="155" width="430" height="245" class="screen"/>
+  <text x="130" y="185" class="label">Sales by State</text>
+  <line x1="145" y1="355" x2="490" y2="355" class="axis"/>
+  <line x1="145" y1="215" x2="145" y2="355" class="axis"/>
+  <rect x="175" y="240" width="42" height="115" fill="#2563EB"/>
+  <rect x="235" y="275" width="42" height="80" fill="#60A5FA"/>
+  <rect x="295" y="292" width="42" height="63" fill="#93C5FD"/>
+  <rect x="355" y="312" width="42" height="43" fill="#BFDBFE"/>
+  <rect x="415" y="325" width="42" height="30" fill="#DBEAFE"/>
+  <text x="178" y="377" class="tiny">SP</text>
+  <text x="238" y="377" class="tiny">RJ</text>
+  <text x="298" y="377" class="tiny">MG</text>
+  <text x="358" y="377" class="tiny">PR</text>
+  <text x="418" y="377" class="tiny">BA</text>
+  <rect x="105" y="420" width="350" height="60" class="bubble-user"/>
+  <text x="128" y="445" class="label" fill="#1D4ED8">User</text>
+  <text x="128" y="468" class="small">"Show me sales by state."</text>
+
+  <!-- Panel 2 dashboard -->
+  <rect x="685" y="155" width="430" height="245" class="screen"/>
+  <text x="710" y="185" class="label">In-flight explanation</text>
+  <line x1="725" y1="355" x2="1070" y2="355" class="axis"/>
+  <line x1="725" y1="215" x2="725" y2="355" class="axis"/>
+  <rect x="755" y="240" width="42" height="115" fill="#93C5FD"/>
+  <rect x="815" y="275" width="42" height="80" fill="#BFDBFE"/>
+  <rect x="875" y="292" width="42" height="63" fill="#DBEAFE"/>
+  <rect x="935" y="312" width="42" height="43" fill="#E0F2FE"/>
+  <line x1="748" y1="222" x2="1005" y2="370" stroke="#F97316" stroke-width="5"/>
+  <line x1="1005" y1="222" x2="748" y2="370" stroke="#F97316" stroke-width="5"/>
+  <rect x="720" y="392" width="175" height="62" class="bubble-cancel"/>
+  <text x="742" y="417" class="label" fill="#C2410C">System canceled</text>
+  <text x="742" y="440" class="small">in-flight audio + stale tools</text>
+  <rect x="900" y="420" width="205" height="70" class="bubble-user"/>
+  <text x="922" y="445" class="label" fill="#1D4ED8">User</text>
+  <text x="922" y="468" class="small">"Actually, show me by</text>
+  <text x="922" y="485" class="small">product category instead."</text>
+
+  <!-- Panel 3 dashboard -->
+  <rect x="1265" y="155" width="430" height="245" class="screen"/>
+  <text x="1290" y="185" class="label">Sales by Category</text>
+  <line x1="1310" y1="355" x2="1650" y2="355" class="axis"/>
+  <line x1="1310" y1="215" x2="1310" y2="355" class="axis"/>
+  <rect x="1310" y="230" width="275" height="26" fill="#10B981"/>
+  <rect x="1310" y="268" width="225" height="26" fill="#34D399"/>
+  <rect x="1310" y="306" width="190" height="26" fill="#6EE7B7"/>
+  <text x="1320" y="248" class="tiny" fill="#064E3B">health_beauty</text>
+  <text x="1320" y="286" class="tiny" fill="#064E3B">watches_gifts</text>
+  <text x="1320" y="324" class="tiny" fill="#064E3B">bed_bath_table</text>
+  <rect x="1265" y="420" width="350" height="60" class="bubble-system"/>
+  <text x="1288" y="445" class="label" fill="#6D28D9">System</text>
+  <text x="1288" y="468" class="small">"Switching to category view..."</text>
+
+  <!-- Storyboard arrows -->
+  <line x1="585" y1="325" x2="635" y2="325" stroke="#6B7280" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="585" y="303" class="small">tool call</text>
+  <text x="582" y="342" class="small">append_visual</text>
+  <line x1="1165" y1="325" x2="1215" y2="325" stroke="#F97316" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="1155" y="303" class="small" fill="#C2410C">cancel</text>
+  <text x="1155" y="342" class="small" fill="#C2410C">and replan</text>
+
+  <!-- Shared swimlane region -->
+  <text x="70" y="585" class="panel-title">System activity trace</text>
+
+  <rect x="70" y="605" width="1660" height="90" class="lane"/>
+  <rect x="70" y="725" width="1660" height="90" class="lane"/>
+  <rect x="70" y="845" width="1660" height="90" class="lane"/>
+
+  <!-- Lane labels -->
+  <text x="105" y="642" class="lane-title">Voice</text>
+  <text x="105" y="664" class="lane-sub">user <-> gpt-realtime-2</text>
+  <circle cx="91" cy="637" r="8" fill="#2563EB"/>
+  <path d="M88 637 C88 627,94 627,94 637 C94 647,88 647,88 637" fill="none" stroke="#FFFFFF" stroke-width="2"/>
+
+  <text x="105" y="762" class="lane-title">Tools</text>
+  <text x="105" y="784" class="lane-sub">schema-based controller</text>
+  <path d="M86 755 L100 769 M100 755 L86 769" stroke="#2563EB" stroke-width="3" stroke-linecap="round"/>
+
+  <text x="105" y="882" class="lane-title">Dashboard</text>
+  <text x="105" y="904" class="lane-sub">context reinjected</text>
+  <rect x="84" y="872" width="20" height="18" fill="none" stroke="#2563EB" stroke-width="2"/>
+  <line x1="84" y1="878" x2="104" y2="878" stroke="#2563EB" stroke-width="2"/>
+
+  <!-- Time alignment guide lines -->
+  <line x1="260" y1="595" x2="260" y2="950" stroke="#E5E7EB" stroke-width="1"/>
+  <line x1="776" y1="595" x2="776" y2="950" stroke="#F97316" stroke-width="3" class="dash"/>
+  <line x1="1040" y1="595" x2="1040" y2="950" stroke="#2563EB" stroke-width="2.5" class="dash"/>
+  <line x1="1700" y1="595" x2="1700" y2="950" stroke="#E5E7EB" stroke-width="1"/>
+
+  <!-- Voice waveform segments -->
+  <path d="M260 650 C275 620,290 680,305 650 C320 620,335 680,350 650 C365 620,380 680,395 650 C410 620,425 680,440 650 C455 620,470 680,485 650" fill="none" stroke="#2563EB" stroke-width="3"/>
+  <text x="260" y="625" class="small" fill="#1D4ED8">user: show sales by state</text>
+
+  <path d="M500 650 C520 622,540 678,560 650 C580 622,600 678,620 650 C640 622,660 678,680 650 C700 622,720 678,740 650" fill="none" stroke="#8B5CF6" stroke-width="3"/>
+  <text x="505" y="625" class="small" fill="#6D28D9">system explains state pattern...</text>
+
+  <circle cx="776" cy="650" r="9" fill="#F97316"/>
+  <text x="740" y="628" class="label" fill="#C2410C">BARGE-IN</text>
+
+  <path d="M795 650 C810 620,825 680,840 650 C855 620,870 680,885 650 C900 620,915 680,930 650 C945 620,960 680,975 650" fill="none" stroke="#2563EB" stroke-width="3"/>
+  <text x="810" y="675" class="small" fill="#1D4ED8">user: switch to product category</text>
+
+  <path d="M1080 650 C1100 622,1120 678,1140 650 C1160 622,1180 678,1200 650 C1220 622,1240 678,1260 650 C1280 622,1300 678,1320 650 C1340 622,1360 678,1380 650 C1400 622,1420 678,1440 650 C1460 622,1480 678,1500 650 C1520 622,1540 678,1560 650" fill="none" stroke="#8B5CF6" stroke-width="3"/>
+  <text x="1080" y="625" class="small" fill="#6D28D9">system: switching to category view...</text>
+
+  <!-- Tool track -->
+  <line x1="260" y1="770" x2="1700" y2="770" stroke="#D1D5DB" stroke-width="1.5" class="dash"/>
+  <rect x="450" y="744" width="155" height="42" rx="9" fill="#2563EB"/>
+  <text x="472" y="770" style="font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:14px;fill:#FFFFFF">append_visual</text>
+  <text x="456" y="803" class="tiny">bar, x=customer_state</text>
+
+  <rect x="696" y="744" width="160" height="42" rx="9" fill="#F97316"/>
+  <text x="716" y="770" style="font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:14px;fill:#FFFFFF">response.cancel</text>
+  <text x="695" y="803" class="tiny">truncate audio; invalidate epoch</text>
+  <ellipse cx="776" cy="765" rx="98" ry="34" fill="none" stroke="#EF4444" stroke-width="2" class="dash"/>
+
+  <rect x="960" y="744" width="165" height="42" rx="9" fill="#10B981"/>
+  <text x="982" y="770" style="font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:14px;fill:#FFFFFF">append_visual</text>
+  <text x="962" y="803" class="tiny">bar, x=product_category</text>
+
+  <rect x="1165" y="744" width="155" height="42" rx="9" fill="#111827"/>
+  <text x="1188" y="770" style="font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:14px;fill:#FFFFFF">stale guard</text>
+  <text x="1165" y="803" class="tiny">discard old tool results</text>
+
+  <!-- Dashboard state track -->
+  <rect x="320" y="864" width="245" height="56" rx="9" fill="#EFF6FF" stroke="#93C5FD"/>
+  <text x="336" y="884" class="mono">{ charts: [state_bar],</text>
+  <text x="336" y="904" class="mono">  highlighted: null }</text>
+
+  <rect x="680" y="858" width="250" height="68" rx="9" fill="#FED7AA" stroke="#F97316" stroke-width="2"/>
+  <text x="696" y="878" class="mono">{ status: CANCELED,</text>
+  <text x="696" y="898" class="mono">  stale: dropped,</text>
+  <text x="696" y="918" class="mono">  reinject: context }</text>
+
+  <rect x="1005" y="864" width="290" height="56" rx="9" fill="#D1FAE5" stroke="#10B981"/>
+  <text x="1021" y="884" class="mono">{ charts: [state_bar,</text>
+  <text x="1021" y="904" class="mono">  category_bar], active: category }</text>
+
+  <rect x="1340" y="864" width="270" height="56" rx="9" fill="#F3F4F6" stroke="#9CA3AF"/>
+  <text x="1356" y="884" class="mono">system message:</text>
+  <text x="1356" y="904" class="mono">latest filters + view stats</text>
+
+  <!-- Cross-lane callouts -->
+  <line x1="776" y1="650" x2="776" y2="744" stroke="#F97316" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="776" y1="786" x2="776" y2="858" stroke="#F97316" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="810" y="690" width="245" height="34" class="callout"/>
+  <text x="828" y="713" class="label" fill="#C2410C">three-layer synchronization</text>
+
+  <line x1="1040" y1="690" x2="1040" y2="744" stroke="#2563EB" stroke-width="2" marker-end="url(#arrow-blue)"/>
+  <line x1="1040" y1="786" x2="1040" y2="864" stroke="#2563EB" stroke-width="2" marker-end="url(#arrow-blue)"/>
+  <rect x="1065" y="812" width="300" height="34" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5" rx="8"/>
+  <text x="1083" y="835" class="label" fill="#1D4ED8">replanning grounded in state</text>
+
+  <!-- Timeline axis -->
+  <line x1="260" y1="965" x2="1700" y2="965" stroke="#6B7280" stroke-width="2"/>
+  <line x1="260" y1="955" x2="260" y2="975" stroke="#6B7280" stroke-width="2"/>
+  <line x1="740" y1="955" x2="740" y2="975" stroke="#6B7280" stroke-width="2"/>
+  <line x1="776" y1="948" x2="776" y2="982" stroke="#F97316" stroke-width="3"/>
+  <line x1="1220" y1="955" x2="1220" y2="975" stroke="#6B7280" stroke-width="2"/>
+  <line x1="1700" y1="955" x2="1700" y2="975" stroke="#6B7280" stroke-width="2"/>
+  <text x="247" y="992" class="small">t=0s</text>
+  <text x="725" y="992" class="small">t=4s</text>
+  <text x="744" y="946" class="small" fill="#C2410C">t=4.3s barge-in</text>
+  <text x="1205" y="992" class="small">t=8s</text>
+  <text x="1680" y="992" class="small">t=12s</text>
+</svg>

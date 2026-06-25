@@ -70,35 +70,4 @@ export const useDashboardStore = defineStore("dashboard", () => {
     } else if ((tool === "filter_data" || tool === "remove_filter") && msg.success && msg.payload) {
       activeFilters.value = msg.payload.active_filters || [];
     }
-    // append_visual data comes via views_update
-  }
-
-  function addTranscript(role, text) {
-    transcripts.value.push({ role, text, ts: Date.now() });
-    // Keep last 50
-    if (transcripts.value.length > 50) {
-      transcripts.value = transcripts.value.slice(-50);
-    }
-  }
-
-  return {
-    views,
-    activeFilters,
-    highlightedViewId,
-    highlightElement,
-    transcripts,
-    isAssistantSpeaking,
-    connectionStatus,
-    sessionReady,
-    sessionMode,
-    inputMode,
-    viewIds,
-    initViews,
-    setSessionInfo,
-    updateViews,
-    appendView,
-    highlightView,
-    handleToolResult,
-    addTranscript,
-  };
-});
+    // append_visual data comes vi

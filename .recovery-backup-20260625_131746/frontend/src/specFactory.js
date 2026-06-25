@@ -139,40 +139,4 @@ function dynamicSpec(chart_type, x, y, color, title) {
 
     default:
       spec.mark = { type: "bar", tooltip: true };
-      spec.encoding.x = xEncoding(x, x, { sort: isTimeField(x) ? "ascending" : undefined });
-      spec.encoding.y = { field: y, type: "quantitative" };
-  }
-
-  return spec;
-}
-
-function isTimeField(field) {
-  return TIME_FIELDS.has(field);
-}
-
-function xEncoding(field, title, extra = {}) {
-  if (isTimeField(field)) {
-    return timeXEncoding(field, title, extra);
-  }
-  return stripUndefined({
-    field,
-    type: "nominal",
-    title,
-    ...extra,
-  });
-}
-
-function timeXEncoding(field, title, extra = {}) {
-  return stripUndefined({
-    field,
-    type: field === "order_date" ? "temporal" : "ordinal",
-    title,
-    sort: "ascending",
-    axis: field === "order_date" ? { labelAngle: -45 } : undefined,
-    ...extra,
-  });
-}
-
-function stripUndefined(obj) {
-  return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined));
-}
+      spec.encoding.x = xEncoding(x, x, { sort: isTimeField(x) ? "ascendi
