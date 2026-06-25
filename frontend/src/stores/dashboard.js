@@ -22,8 +22,13 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   function updateViews(viewList) {
-    // Preserve order: update existing, append new
-    const existing = new Map(views.value.map((v) => [v.id, v]));
+    // Full replace: removes deleted views, updates/append the rest.
+    const incomingIds = new Set(viewList.map((v) => v.id));
+    // Clear highlight if the highlighted view was removed (e.g. delete_visual).
+    if (highlightedViewId.value && !incomingIds.has(highlightedViewId.value)) {
+      highlightedViewId.value = null;
+      highlightElement.value = null;
+    }
     const updated = viewList.map((v) => ({
       ...v,
       highlighted: v.id === highlightedViewId.value,

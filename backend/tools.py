@@ -211,6 +211,21 @@ TOOL_SCHEMAS = [
             "required": ["chart_type", "x", "y", "title"],
         },
     ),
+    _tool(
+        "delete_visual",
+        "Delete a chart/view from the dashboard grid by its view_id. "
+        "Use this to remove a view the user no longer wants. The remaining views are unaffected.",
+        {
+            "type": "object",
+            "properties": {
+                "view_id": {
+                    "type": "string",
+                    "description": "ID of the view to delete (e.g. 'workspace-1', 'view-trend').",
+                },
+            },
+            "required": ["view_id"],
+        },
+    ),
 ]
 
 
@@ -227,6 +242,8 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             return _exec_highlight_visual(arguments)
         elif name == "append_visual":
             return _exec_append_visual(arguments)
+        elif name == "delete_visual":
+            return _exec_delete_visual(arguments)
         else:
             return {"tool": name, "success": False, "error": f"Unknown tool: {name}"}
     except Exception as exc:
@@ -437,6 +454,38 @@ def _exec_append_visual(args: dict) -> dict:
     }
 
 
+# --- delete_visual ---
+
+def _exec_delete_visual(args: dict) -> dict:
+    global views, highlighted_view
+
+    view_id = args.get("view_id")
+    view_ids = [v["id"] for v in views]
+    if view_id not in view_ids:
+        return {
+            "tool": "delete_visual",
+            "success": False,
+            "error": f"Unknown view_id: '{view_id}'. Available: {', '.join(view_ids)}",
+        }
+
+    deleted = next(v for v in views if v["id"] == view_id)
+    views = [v for v in views if v["id"] != view_id]
+
+    # Clear highlight if the deleted view was the highlighted one.
+    if highlighted_view == view_id:
+        highlighted_view = None
+
+    return {
+        "tool": "delete_visual",
+        "success": True,
+        "payload": {
+            "view_id": view_id,
+            "title": deleted.get("title"),
+            "remaining_view_ids": [v["id"] for v in views],
+        },
+    }
+
+
 def _decide_table(x: str, y: str, color: str | None) -> str:
     """Choose source table for an append_visual call.
 
@@ -631,23 +680,21 @@ def context_text() -> str:
     """Compact text summary for injection via conversation.item.create."""
     ctx = rebuild_context()
 
-    lines = ["Dashboard updated.\n"]
-
-    if ctx["highlighted_view"]:
-        lines.append(f"Highlighted view: {ctx['highlighted_view']}")
-
-    if ctx["active_filters"]:
-        lines.append("Active filters:")
-        for f in ctx["active_filters"]:
-            lines.append(f"  {f['field']} {f['operator']} {f['value']}")
-    else:
-        lines.append("Active filters: none")
-
-    lines.append(f"Total rows: {ctx['filtered_rows']}")
-    lines.append("\nAvailable views:")
+    filters = (
+        "; ".join(f"{f['field']} {f['operator']} {f['value']}" for f in ctx["active_filters"])
+        if ctx["active_filters"]
+        else "none"
+    )
+    lines = [
+        "Dashboard state:",
+        f"filters={filters}",
+        f"rows={ctx['filtered_rows']}",
+        f"highlighted={ctx['highlighted_view'] or 'none'}",
+        "views:",
+    ]
     for v in ctx["views"]:
         stat_str = ", ".join(f"{k}={v_}" for k, v_ in v["statistics"].items() if k != "row_count")
-        lines.append(f"  {v['id']}: {v['title']} [{v['chart_type']}] ({stat_str})")
+        lines.append(f"- {v['id']} | {v['title']} | {v['chart_type']} | {stat_str or 'no_stats'}")
 
     return "\n".join(lines)
 

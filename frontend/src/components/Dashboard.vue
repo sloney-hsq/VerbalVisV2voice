@@ -12,18 +12,15 @@
     <!-- Controls -->
     <section class="dashboard__controls">
       <button
-        v-if="store.connectionStatus === 'connected' && !audio.isRecording.value"
         class="btn btn--record"
-        @click="handleStartRecording"
+        :class="{ 'btn--recording': audio.isRecording.value }"
+        :disabled="store.connectionStatus !== 'connected'"
+        @pointerdown.prevent="handlePointerDown"
+        @pointerup.prevent="endPushToTalk"
+        @pointercancel.prevent="endPushToTalk"
+        @pointerleave.prevent="endPushToTalk"
       >
-        Start Mic
-      </button>
-      <button
-        v-if="audio.isRecording.value"
-        class="btn btn--stop"
-        @click="handleStopRecording"
-      >
-        Stop Mic
+        {{ audio.isRecording.value ? "Recording..." : "Hold Space / Mic" }}
       </button>
 
       <!-- Filter badges -->
@@ -58,7 +55,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from "vue";
+import { computed, onBeforeUnmount, onMounted } from "vue";
 import ChartSlot from "./ChartSlot.vue";
 import { useDashboardStore } from "../stores/dashboard";
 import { useAudio } from "../composables/useAudio";
@@ -67,6 +64,11 @@ import { useWebSocket } from "../composables/useWebSocket";
 const store = useDashboardStore();
 const audio = useAudio();
 const ws = useWebSocket({ enqueue: audio.enqueue, flush: audio.flush, stop: audio.stop });
+
+let sessionPromise = null;
+let isStartingPushToTalk = false;
+let pushToTalkRequestId = 0;
+let sentAudioThisTurn = false;
 
 const statusClass = computed(() => ({
   "status-dot--connected": store.connectionStatus === "connected",
@@ -77,31 +79,101 @@ const statusClass = computed(() => ({
 // Connect backend WS on mount → get views immediately
 onMounted(() => {
   ws.connect();
+  window.addEventListener("keydown", handleKeyDown);
+  window.addEventListener("keyup", handleKeyUp);
 });
 
-async function handleStartRecording() {
-  // Connect OpenAI Realtime on first Start Mic
-  if (!store.sessionReady) {
-    ws.startSession();
-    await new Promise((resolve) => {
-      const check = setInterval(() => {
-        if (store.sessionReady) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 100);
-      setTimeout(() => { clearInterval(check); resolve(); }, 15000);
-    });
-  }
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleKeyDown);
+  window.removeEventListener("keyup", handleKeyUp);
+});
 
-  // Start mic
-  await audio.startRecording((base64pcm) => {
-    ws.sendAudio(base64pcm);
+async function ensureSessionReady() {
+  if (store.sessionReady) return;
+  if (sessionPromise) return sessionPromise;
+
+  sessionPromise = new Promise((resolve) => {
+    ws.startSession();
+    const check = setInterval(() => {
+      if (store.sessionReady) {
+        clearInterval(check);
+        sessionPromise = null;
+        resolve();
+      }
+    }, 100);
+    setTimeout(() => {
+      clearInterval(check);
+      sessionPromise = null;
+      resolve();
+    }, 15000);
   });
+
+  return sessionPromise;
 }
 
-function handleStopRecording() {
+async function beginPushToTalk() {
+  if (isStartingPushToTalk || audio.isRecording.value || store.connectionStatus !== "connected") return;
+
+  const requestId = ++pushToTalkRequestId;
+  isStartingPushToTalk = true;
+  await ensureSessionReady();
+  if (requestId !== pushToTalkRequestId || store.connectionStatus !== "connected") {
+    if (requestId === pushToTalkRequestId) {
+      isStartingPushToTalk = false;
+    }
+    return;
+  }
+
+  sentAudioThisTurn = false;
+  ws.beginPushToTalk();
+  audio.stop();
+  try {
+    await audio.startRecording((base64pcm) => {
+      sentAudioThisTurn = true;
+      ws.sendAudio(base64pcm);
+    });
+  } catch (error) {
+    console.error("Failed to start push-to-talk recording:", error);
+    audio.stopRecording();
+  } finally {
+    if (requestId === pushToTalkRequestId) {
+      isStartingPushToTalk = false;
+    }
+  }
+}
+
+function endPushToTalk() {
+  const wasRecording = audio.isRecording.value;
+
   audio.stopRecording();
+  pushToTalkRequestId += 1;
+  isStartingPushToTalk = false;
+  if (wasRecording && sentAudioThisTurn) {
+    ws.commitAudio();
+  }
+  sentAudioThisTurn = false;
+}
+
+function handlePointerDown(event) {
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  beginPushToTalk();
+}
+
+function handleKeyDown(event) {
+  if (event.code !== "Space" || event.repeat || shouldIgnoreShortcut(event.target)) return;
+  event.preventDefault();
+  beginPushToTalk();
+}
+
+function handleKeyUp(event) {
+  if (event.code !== "Space" || shouldIgnoreShortcut(event.target)) return;
+  event.preventDefault();
+  endPushToTalk();
+}
+
+function shouldIgnoreShortcut(target) {
+  const tagName = target?.tagName?.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || target?.isContentEditable;
 }
 </script>
 
@@ -167,7 +239,8 @@ function handleStopRecording() {
 .btn--primary:hover { background: #2563eb; }
 .btn--record { background: #ef4444; color: #fff; border-color: #ef4444; }
 .btn--record:hover { background: #dc2626; }
-.btn--stop { background: #6b7280; color: #fff; border-color: #6b7280; }
+.btn--record:disabled { background: #9ca3af; border-color: #9ca3af; cursor: not-allowed; }
+.btn--recording { background: #991b1b; border-color: #991b1b; }
 
 .filter-badges {
   display: flex;

@@ -61,10 +61,17 @@ REALTIME_VOICE = os.getenv("OPENAI_REALTIME_VOICE", "alloy")
 TRANSCRIPTION_MODEL = os.getenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe")
 REASONING_EFFORT = os.getenv("OPENAI_REALTIME_REASONING_EFFORT", "low")
 OPENAI_RECONNECT_ATTEMPTS = int(os.getenv("OPENAI_REALTIME_RECONNECT_ATTEMPTS", "2"))
+ENABLE_INPUT_TRANSCRIPTION = os.getenv(
+    "OPENAI_REALTIME_INPUT_TRANSCRIPTION", "false"
+).lower() in {"1", "true", "yes", "on"}
+PUSH_TO_TALK_MODE = os.getenv(
+    "VERBALVIS_PUSH_TO_TALK", "true"
+).lower() not in {"0", "false", "no", "off"}
 
 # Set to False for turn-based baseline (user study control condition).
-# Keep False until ASR/TTS/Tool fully verified end-to-end on GA.
-BARGE_IN_ENABLED = False
+BARGE_IN_ENABLED = os.getenv(
+    "VERBALVIS_BARGE_IN_ENABLED", "true"
+).lower() not in {"0", "false", "no", "off"}
 
 
 class RealtimeSession:
@@ -149,6 +156,7 @@ class RealtimeSession:
             "type": "init",
             "views": get_views_for_frontend(),
             "mode": "barge_in" if BARGE_IN_ENABLED else "turn_based",
+            "input_mode": "push_to_talk" if PUSH_TO_TALK_MODE else "open_mic",
         })
 
         try:
@@ -298,17 +306,19 @@ class RealtimeSession:
             },
         }
 
-        if profile != "minimal" and BARGE_IN_ENABLED:
+        if profile != "minimal" and BARGE_IN_ENABLED and not PUSH_TO_TALK_MODE:
             audio_input["turn_detection"] = {
-                "type": "semantic_vad",
-                "eagerness": "low",
+                "type": "server_vad",
+                "threshold": 0.5,
+                "prefix_padding_ms": 300,
+                "silence_duration_ms": 500,
                 "create_response": True,
                 # The actual barge-in switch — server auto-cancels in-progress
                 # response when speech_started fires.
                 "interrupt_response": True,
             }
 
-        if profile in {"primary", "no_reasoning"}:
+        if ENABLE_INPUT_TRANSCRIPTION and profile in {"primary", "no_reasoning"}:
             audio_input["transcription"] = {"model": TRANSCRIPTION_MODEL}
 
         session: dict[str, Any] = {
@@ -355,6 +365,7 @@ class RealtimeSession:
                     "model": REALTIME_MODEL,
                     "profile": self._session_update_profiles[self._session_update_profile_index],
                     "mode": "barge_in" if BARGE_IN_ENABLED else "turn_based",
+                    "input_mode": "push_to_talk" if PUSH_TO_TALK_MODE else "open_mic",
                 })
                 return
 
@@ -387,6 +398,9 @@ class RealtimeSession:
                         "type": "input_audio_buffer.append",
                         "audio": msg["data"],
                     })
+                elif msg_type == "ptt_start":
+                    self._record_timeline("client.ptt_start")
+                    await self._invalidate_current_response(source="ptt_start", send_cancel=True)
                 elif msg_type == "commit":
                     self._last_manual_commit_at = time.perf_counter()
                     self._record_timeline("client.commit")
@@ -438,6 +452,7 @@ class RealtimeSession:
                     "model": REALTIME_MODEL,
                     "profile": self._session_update_profiles[self._session_update_profile_index],
                     "mode": "barge_in" if BARGE_IN_ENABLED else "turn_based",
+                    "input_mode": "push_to_talk" if PUSH_TO_TALK_MODE else "open_mic",
                 })
 
             elif etype == "response.created":
@@ -515,6 +530,9 @@ class RealtimeSession:
 
             elif etype == "error":
                 error = event.get("error", {})
+                if error.get("code") == "response_cancel_not_active":
+                    log.debug("Ignoring stale response.cancel error: %s", event)
+                    continue
                 if await self._retry_session_update_after_schema_error(error):
                     continue
                 log.error("OpenAI error: %s", event)
@@ -526,20 +544,26 @@ class RealtimeSession:
                 })
 
     async def _handle_speech_started(self) -> None:
+        await self._invalidate_current_response(source="speech_started", send_cancel=False)
+
+    async def _invalidate_current_response(self, source: str, send_cancel: bool) -> None:
         self._turn_epoch += 1
         invalidated_response_id = self.current_response_id
         if invalidated_response_id:
             self._invalidated_response_ids.add(invalidated_response_id)
 
-        log.info("Barge-in detected; invalidating response %s", invalidated_response_id)
+        log.info("Barge-in detected via %s; invalidating response %s", source, invalidated_response_id)
         if self._bargein_logger:
-            self._bargein_logger.info("BARGE_IN invalidated=%s epoch=%d", invalidated_response_id, self._turn_epoch)
-        self._record_timeline("barge_in", response_id=invalidated_response_id)
+            self._bargein_logger.info(
+                "BARGE_IN source=%s invalidated=%s epoch=%d",
+                source, invalidated_response_id, self._turn_epoch,
+            )
+        self._record_timeline("barge_in", source=source, response_id=invalidated_response_id)
 
         for task in list(self._tool_tasks):
             task.cancel()
 
-        if invalidated_response_id:
+        if send_cancel and invalidated_response_id:
             await self._send_openai({"type": "response.cancel"})
 
         await self._send_client({
@@ -631,7 +655,7 @@ class RealtimeSession:
                 **result,
             })
 
-            if tool_name in ("filter_data", "append_visual"):
+            if tool_name in ("filter_data", "append_visual", "delete_visual"):
                 if self._dashboard_logger:
                     self._dashboard_logger.info(
                         "VIEWS_UPDATE tool=%s args=%s",

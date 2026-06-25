@@ -115,10 +115,25 @@ export function useWebSocket(audioPlayer) {
 
   function sendAudio(base64pcm) {
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      console.log("mic chunk", base64pcm.length);
       socket.value.send(JSON.stringify({ type: "audio", data: base64pcm }));
     } else {
       console.warn("sendAudio: socket not open, readyState =", socket.value?.readyState);
+    }
+  }
+
+  function beginPushToTalk() {
+    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      socket.value.send(JSON.stringify({ type: "ptt_start" }));
+    } else {
+      console.warn("beginPushToTalk: socket not open, readyState =", socket.value?.readyState);
+    }
+  }
+
+  function commitAudio() {
+    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      socket.value.send(JSON.stringify({ type: "commit" }));
+    } else {
+      console.warn("commitAudio: socket not open, readyState =", socket.value?.readyState);
     }
   }
 
@@ -131,5 +146,5 @@ export function useWebSocket(audioPlayer) {
 
   onBeforeUnmount(disconnect);
 
-  return { socket, connect, startSession, sendAudio, disconnect };
+  return { socket, connect, startSession, beginPushToTalk, sendAudio, commitAudio, disconnect };
 }

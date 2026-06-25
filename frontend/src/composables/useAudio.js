@@ -7,11 +7,15 @@ const SAMPLE_RATE = 24000; // Realtime API PCM16 rate
  */
 export function useAudio() {
   const isRecording = ref(false);
+  const isMicReady = ref(false);
 
   let audioCtx = null;
   let mediaStream = null;
+  let sourceNode = null;
   let workletNode = null;
   let onAudioChunk = null; // callback: (base64pcm) => void
+  let setupPromise = null;
+  let recordingRequestId = 0;
 
   // ---- Playback state ----
   let playbackCtx = null;
@@ -23,60 +27,86 @@ export function useAudio() {
   // Recording (mic → PCM16 base64 chunks)
   // ------------------------------------------------------------------
 
-  async function startRecording(chunkCallback) {
+  async function _ensureMicCapture(chunkCallback) {
     onAudioChunk = chunkCallback;
+    if (setupPromise) return setupPromise;
+    if (audioCtx && mediaStream && workletNode) return;
 
-    audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    setupPromise = (async () => {
+      audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
 
-    // Register worklet for PCM capture
-    const workletCode = `
-      class PCMProcessor extends AudioWorkletProcessor {
-        process(inputs) {
-          const input = inputs[0];
-          if (input && input[0]) {
-            const float32 = input[0];
-            const int16 = new Int16Array(float32.length);
-            for (let i = 0; i < float32.length; i++) {
-              const s = Math.max(-1, Math.min(1, float32[i]));
-              int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      // Register worklet for PCM capture
+      const workletCode = `
+        class PCMProcessor extends AudioWorkletProcessor {
+          process(inputs) {
+            const input = inputs[0];
+            if (input && input[0]) {
+              const float32 = input[0];
+              const int16 = new Int16Array(float32.length);
+              for (let i = 0; i < float32.length; i++) {
+                const s = Math.max(-1, Math.min(1, float32[i]));
+                int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              }
+              this.port.postMessage(int16.buffer, [int16.buffer]);
             }
-            this.port.postMessage(int16.buffer, [int16.buffer]);
+            return true;
           }
-          return true;
         }
-      }
-      registerProcessor('pcm-processor', PCMProcessor);
-    `;
-    const blob = new Blob([workletCode], { type: "application/javascript" });
-    const url = URL.createObjectURL(blob);
-    await audioCtx.audioWorklet.addModule(url);
-    URL.revokeObjectURL(url);
+        registerProcessor('pcm-processor', PCMProcessor);
+      `;
+      const blob = new Blob([workletCode], { type: "application/javascript" });
+      const url = URL.createObjectURL(blob);
+      await audioCtx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
 
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { sampleRate: SAMPLE_RATE, channelCount: 1, echoCancellation: true },
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: { sampleRate: SAMPLE_RATE, channelCount: 1, echoCancellation: true },
+      });
+
+      sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+      workletNode = new AudioWorkletNode(audioCtx, "pcm-processor");
+
+      workletNode.port.onmessage = (event) => {
+        if (isRecording.value && onAudioChunk) {
+          onAudioChunk(_arrayBufferToBase64(event.data));
+        }
+      };
+
+      sourceNode.connect(workletNode);
+      workletNode.connect(audioCtx.destination); // needed to keep processing
+      isMicReady.value = true;
+    })().finally(() => {
+      setupPromise = null;
     });
 
-    const source = audioCtx.createMediaStreamSource(mediaStream);
-    workletNode = new AudioWorkletNode(audioCtx, "pcm-processor");
+    return setupPromise;
+  }
 
-    workletNode.port.onmessage = (event) => {
-      if (onAudioChunk) {
-        const b64 = _arrayBufferToBase64(event.data);
-        console.log("worklet chunk", b64.length);
-        onAudioChunk(b64);
-      }
-    };
+  async function startRecording(chunkCallback) {
+    const requestId = ++recordingRequestId;
+    await _ensureMicCapture(chunkCallback);
+    if (requestId !== recordingRequestId) return;
 
-    source.connect(workletNode);
-    workletNode.connect(audioCtx.destination); // needed to keep processing
+    if (audioCtx?.state === "suspended") {
+      await audioCtx.resume();
+    }
     isRecording.value = true;
   }
 
   function stopRecording() {
+    recordingRequestId += 1;
     isRecording.value = false;
+  }
+
+  function disposeRecording() {
+    stopRecording();
     if (workletNode) {
       workletNode.disconnect();
       workletNode = null;
+    }
+    if (sourceNode) {
+      sourceNode.disconnect();
+      sourceNode = null;
     }
     if (mediaStream) {
       mediaStream.getTracks().forEach((t) => t.stop());
@@ -87,6 +117,7 @@ export function useAudio() {
       audioCtx = null;
     }
     onAudioChunk = null;
+    isMicReady.value = false;
   }
 
   // ------------------------------------------------------------------
@@ -152,7 +183,7 @@ export function useAudio() {
   }
 
   onBeforeUnmount(() => {
-    stopRecording();
+    disposeRecording();
     stop();
   });
 
@@ -162,8 +193,10 @@ export function useAudio() {
 
   return {
     isRecording,
+    isMicReady,
     startRecording,
     stopRecording,
+    disposeRecording,
     getMicStream,
     // Playback interface (passed to useWebSocket)
     enqueue,
