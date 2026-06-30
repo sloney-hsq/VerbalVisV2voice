@@ -10,11 +10,10 @@ export function useWebSocket(audioPlayer) {
   const socket = ref(null);
 
   let assistantTranscriptBuffer = "";
-  let reconnectTimer = null;
-  let reconnectAttempts = 0;
   let manualClose = false;
+  let lastUrl = null;
 
-  function connect(url = `ws://${location.host}/ws`) {
+  function connect(url = `ws://${location.host}/ws?model=qwen3.5-omni-plus-realtime`) {
     if (
       socket.value &&
       (socket.value.readyState === WebSocket.OPEN || socket.value.readyState === WebSocket.CONNECTING)
@@ -23,26 +22,28 @@ export function useWebSocket(audioPlayer) {
     }
 
     manualClose = false;
-    clearReconnectTimer();
+    lastUrl = url;
     store.connectionStatus = "connecting";
     const ws = new WebSocket(url);
     socket.value = ws;
 
     ws.onopen = () => {
-      reconnectAttempts = 0;
       store.connectionStatus = "connected";
       console.log("%c[WS] connected to backend", "color: #22c55e; font-weight: bold");
     };
 
     ws.onclose = () => {
       store.connectionStatus = "disconnected";
-      socket.value = null;
-      scheduleReconnect(url);
+      store.sessionReady = false;
+      if (socket.value === ws) {
+        socket.value = null;
+      }
     };
 
     ws.onerror = (event) => {
       console.warn("[WS] backend connection error", event);
       store.connectionStatus = "disconnected";
+      store.sessionReady = false;
     };
 
     ws.onmessage = (event) => {
@@ -58,6 +59,10 @@ export function useWebSocket(audioPlayer) {
         store.setSessionInfo({
           mode: msg.mode,
           inputMode: msg.input_mode,
+          provider: msg.provider,
+          model: msg.model,
+          inputAudioRate: msg.input_audio_rate,
+          outputAudioRate: msg.output_audio_rate,
         });
         break;
 
@@ -71,6 +76,7 @@ export function useWebSocket(audioPlayer) {
           audioPlayer.enqueue(msg.data, {
             item_id: msg.item_id,
             content_index: msg.content_index,
+            sample_rate: msg.sample_rate,
           });
         }
         break;
@@ -123,6 +129,10 @@ export function useWebSocket(audioPlayer) {
         store.setSessionInfo({
           mode: msg.mode,
           inputMode: msg.input_mode,
+          provider: msg.provider,
+          model: msg.model,
+          inputAudioRate: msg.input_audio_rate,
+          outputAudioRate: msg.output_audio_rate,
         });
         // Store session info for recording upload
         window.__verbalvis_session_id = msg.session_id || "";
@@ -134,26 +144,10 @@ export function useWebSocket(audioPlayer) {
     }
   }
 
-  function clearReconnectTimer() {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-  }
-
-  function scheduleReconnect(url) {
-    if (manualClose || reconnectTimer) return;
-    reconnectAttempts += 1;
-    const delayMs = Math.min(3000, 500 * reconnectAttempts);
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      connect(url);
-    }, delayMs);
-  }
-
   function startSession() {
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
       console.log("%c[WS] sending start_session", "color: #f59e0b; font-weight: bold");
+      store.sessionReady = false;
       socket.value.send(JSON.stringify({ type: "start_session" }));
     } else {
       console.error("[WS] cannot send start_session — socket not open, readyState:", socket.value?.readyState);
@@ -165,14 +159,6 @@ export function useWebSocket(audioPlayer) {
       socket.value.send(JSON.stringify({ type: "audio", data: base64pcm }));
     } else {
       console.warn("sendAudio: socket not open, readyState =", socket.value?.readyState);
-    }
-  }
-
-  function beginPushToTalk(assistantAudio = null) {
-    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      socket.value.send(JSON.stringify({ type: "ptt_start", assistant_audio: assistantAudio }));
-    } else {
-      console.warn("beginPushToTalk: socket not open, readyState =", socket.value?.readyState);
     }
   }
 
@@ -193,11 +179,16 @@ export function useWebSocket(audioPlayer) {
 
   function disconnect() {
     manualClose = true;
-    clearReconnectTimer();
     if (socket.value) {
       socket.value.close();
       socket.value = null;
     }
+    store.sessionReady = false;
+  }
+
+  function reconnect() {
+    disconnect();
+    connect(lastUrl || undefined);
   }
 
   onBeforeUnmount(disconnect);
@@ -206,10 +197,10 @@ export function useWebSocket(audioPlayer) {
     socket,
     connect,
     startSession,
-    beginPushToTalk,
     truncateAssistantAudio,
     sendAudio,
     commitAudio,
     disconnect,
+    reconnect,
   };
 }

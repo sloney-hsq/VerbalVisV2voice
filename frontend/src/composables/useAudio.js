@@ -1,17 +1,21 @@
 import { ref, onBeforeUnmount } from "vue";
 
-const SAMPLE_RATE = 24000; // Realtime API PCM16 rate
+const DEFAULT_INPUT_SAMPLE_RATE = 16000; // Qwen realtime input rate
+const DEFAULT_OUTPUT_SAMPLE_RATE = 24000;
 const CHUNK_MS = 100;
-const CHUNK_SIZE = Math.round((SAMPLE_RATE * CHUNK_MS) / 1000);
 const PREFIX_CHUNKS = 3;
-const TRAILING_SILENCE_CHUNKS = 5;
-const SPEECH_RMS_THRESHOLD = 0.008;
-const SILENCE_RMS_THRESHOLD = 0.005;
+const TRAILING_SILENCE_CHUNKS = 9;
+const SPEECH_RMS_THRESHOLD = 0.014;
+const SILENCE_RMS_THRESHOLD = 0.006;
 
 /**
  * Audio composable – handles microphone capture and PCM16 playback.
  */
-export function useAudio() {
+export function useAudio(options = {}) {
+  const inputSampleRate = Number(options.inputSampleRate) || DEFAULT_INPUT_SAMPLE_RATE;
+  const outputSampleRate = Number(options.outputSampleRate) || DEFAULT_OUTPUT_SAMPLE_RATE;
+  const chunkSize = Math.round((inputSampleRate * CHUNK_MS) / 1000);
+
   const isRecording = ref(false);
   const isMicReady = ref(false);
 
@@ -46,11 +50,11 @@ export function useAudio() {
     if (audioCtx && mediaStream && workletNode) return;
 
     setupPromise = (async () => {
-      audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      audioCtx = new AudioContext({ sampleRate: inputSampleRate });
 
       // Register worklet for PCM capture
       const workletCode = `
-        const CHUNK_SIZE = ${CHUNK_SIZE};
+        const CHUNK_SIZE = ${chunkSize};
         class PCMProcessor extends AudioWorkletProcessor {
           constructor() {
             super();
@@ -96,7 +100,7 @@ export function useAudio() {
 
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: SAMPLE_RATE,
+          sampleRate: inputSampleRate,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
@@ -174,7 +178,7 @@ export function useAudio() {
 
   function _ensurePlaybackCtx() {
     if (!playbackCtx || playbackCtx.state === "closed") {
-      playbackCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      playbackCtx = new AudioContext({ sampleRate: outputSampleRate });
     }
     return playbackCtx;
   }
@@ -191,7 +195,7 @@ export function useAudio() {
       float32[i] = int16[i] / 0x8000;
     }
 
-    const buffer = ctx.createBuffer(1, float32.length, SAMPLE_RATE);
+    const buffer = ctx.createBuffer(1, float32.length, outputSampleRate);
     buffer.getChannelData(0).set(float32);
 
     const now = ctx.currentTime;
@@ -207,7 +211,7 @@ export function useAudio() {
   }
 
   function flush() {
-    // No-op: audio plays to completion naturally
+    currentPlayback = null;
   }
 
   function stop() {
@@ -362,6 +366,8 @@ export function useAudio() {
     getMicStream,
     getPlaybackCursor,
     resetSpeechGate,
+    inputSampleRate,
+    outputSampleRate,
     // Playback interface (passed to useWebSocket)
     enqueue,
     flush,

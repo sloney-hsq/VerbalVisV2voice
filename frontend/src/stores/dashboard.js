@@ -12,7 +12,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const connectionStatus = ref("disconnected"); // disconnected | connecting | connected
   const sessionReady = ref(false);
   const sessionMode = ref("barge_in"); // barge_in | turn_based
-  const inputMode = ref("local_vad"); // local_vad | push_to_talk | open_mic
+  const inputMode = ref("local_vad");
+  const provider = ref("qwen");
+  const model = ref("qwen3.5-omni-plus-realtime");
+  const inputAudioRate = ref(16000);
+  const outputAudioRate = ref(24000);
 
   // ---- getters ----
   const viewIds = computed(() => views.value.map((v) => v.id));
@@ -26,6 +30,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
   function setSessionInfo(info = {}) {
     if (info.mode) sessionMode.value = info.mode;
     if (info.inputMode) inputMode.value = info.inputMode;
+    if (info.provider) provider.value = info.provider;
+    if (info.model) model.value = info.model;
+    if (info.inputAudioRate) inputAudioRate.value = info.inputAudioRate;
+    if (info.outputAudioRate) outputAudioRate.value = info.outputAudioRate;
   }
 
   function updateViews(viewList) {
@@ -92,6 +100,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
     sessionReady,
     sessionMode,
     inputMode,
+    provider,
+    model,
+    inputAudioRate,
+    outputAudioRate,
     viewIds,
     initViews,
     setSessionInfo,

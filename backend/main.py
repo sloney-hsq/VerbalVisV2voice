@@ -11,7 +11,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from db import initialize_db
-from realtime import RealtimeSession
+from realtime_qwen import QwenRealtimeSession
+
+QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,7 +33,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    log.info("Initialising DuckDB…")
+    log.info("Initialising DuckDB...")
     initialize_db()
     log.info("Ready.")
 
@@ -43,14 +45,29 @@ async def health_check() -> dict[str, str]:
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
+    """Default VerbalVis realtime endpoint: Qwen only."""
+    await _run_qwen_session(websocket)
+
+
+@app.websocket("/ws/qwen")
+async def websocket_qwen_endpoint(websocket: WebSocket) -> None:
+    """Compatibility alias for the Qwen-only realtime endpoint."""
+    await _run_qwen_session(websocket)
+
+
+async def _run_qwen_session(websocket: WebSocket) -> None:
     await websocket.accept()
     session_id = f"session-{uuid.uuid4().hex[:8]}"
-    log.info("Client connected: %s", session_id)
+    log.info("Client connected (qwen): %s model=%s", session_id, QWEN_REALTIME_MODEL)
 
-    session = RealtimeSession(client_ws=websocket, session_id=session_id)
+    session = QwenRealtimeSession(
+        client_ws=websocket,
+        session_id=session_id,
+        model=QWEN_REALTIME_MODEL,
+    )
     try:
         await session.start()
     except WebSocketDisconnect:
         log.info("Client disconnected: %s", session_id)
     except Exception as exc:
-        log.exception("Session error: %s", exc)
+        log.exception("Qwen session error: %s", exc)

@@ -16,10 +16,6 @@
         :class="{ 'btn--recording': audio.isRecording.value }"
         :disabled="recordButtonDisabled"
         @click.prevent="handleRecordClick"
-        @pointerdown.prevent="handlePointerDown"
-        @pointerup.prevent="endPushToTalk"
-        @pointercancel.prevent="endPushToTalk"
-        @pointerleave.prevent="endPushToTalk"
       >
         {{ recordButtonLabel }}
       </button>
@@ -63,13 +59,25 @@ import { useAudio } from "../composables/useAudio";
 import { useWebSocket } from "../composables/useWebSocket";
 
 const store = useDashboardStore();
-const audio = useAudio();
+const QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime";
+const realtimeInputSampleRate = getNumericOption(
+  "inputRate",
+  "VITE_REALTIME_INPUT_SAMPLE_RATE",
+  16000
+);
+const realtimeOutputSampleRate = getNumericOption(
+  "outputRate",
+  "VITE_REALTIME_OUTPUT_SAMPLE_RATE",
+  24000
+);
+const audio = useAudio({
+  inputSampleRate: realtimeInputSampleRate,
+  outputSampleRate: realtimeOutputSampleRate,
+});
 const ws = useWebSocket({ enqueue: audio.enqueue, flush: audio.flush, stop: audio.stop });
 
 let sessionPromise = null;
-let isStartingPushToTalk = false;
 let isStartingListening = false;
-let pushToTalkRequestId = 0;
 let sentAudioThisTurn = false;
 let localInterruptArmed = false;
 
@@ -79,20 +87,12 @@ const statusClass = computed(() => ({
   "status-dot--disconnected": store.connectionStatus === "disconnected",
 }));
 
-const usesToggleMic = computed(() => store.inputMode !== "push_to_talk");
-
 const recordButtonDisabled = computed(() => (
   store.connectionStatus !== "connected" ||
   (store.sessionMode === "turn_based" && store.isAssistantSpeaking)
 ));
 
 const recordButtonLabel = computed(() => {
-  if (store.inputMode === "push_to_talk") {
-    return audio.isRecording.value ? "Recording..." : "Hold Space / Mic";
-  }
-  if (store.inputMode === "open_mic") {
-    return audio.isRecording.value ? "Open Mic On" : "Start Open Mic";
-  }
   if (store.isAssistantSpeaking && store.sessionMode !== "turn_based") {
     return "Interrupt";
   }
@@ -101,17 +101,20 @@ const recordButtonLabel = computed(() => {
 
 // Connect backend WS on mount → get views immediately
 onMounted(() => {
-  ws.connect();
+  ws.connect(buildRealtimeWsUrl());
   window.addEventListener("keydown", handleKeyDown);
-  window.addEventListener("keyup", handleKeyUp);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", handleKeyDown);
-  window.removeEventListener("keyup", handleKeyUp);
 });
 
-async function ensureSessionReady() {
+async function ensureSessionReady({ fresh = false } = {}) {
+  if (fresh) {
+    sessionPromise = null;
+    store.sessionReady = false;
+    await waitForSocketOpen();
+  }
   if (store.sessionReady) return;
   if (sessionPromise) return sessionPromise;
 
@@ -134,62 +137,25 @@ async function ensureSessionReady() {
   return sessionPromise;
 }
 
-async function beginPushToTalk() {
-  if (
-    usesToggleMic.value ||
-    isStartingPushToTalk ||
-    audio.isRecording.value ||
-    recordButtonDisabled.value
-  ) return;
-
-  const requestId = ++pushToTalkRequestId;
-  isStartingPushToTalk = true;
-  await ensureSessionReady();
-  if (requestId !== pushToTalkRequestId || store.connectionStatus !== "connected") {
-    if (requestId === pushToTalkRequestId) {
-      isStartingPushToTalk = false;
-    }
-    return;
-  }
-
-  sentAudioThisTurn = false;
-  const assistantAudio = audio.stop();
-  ws.beginPushToTalk(assistantAudio);
-  try {
-    await audio.startRecording((base64pcm) => {
-      sentAudioThisTurn = true;
-      ws.sendAudio(base64pcm);
-    });
-  } catch (error) {
-    console.error("Failed to start push-to-talk recording:", error);
-    audio.stopRecording();
-  } finally {
-    if (requestId === pushToTalkRequestId) {
-      isStartingPushToTalk = false;
-    }
-  }
-}
-
-function endPushToTalk() {
-  if (usesToggleMic.value) return;
-  const wasRecording = audio.isRecording.value;
-
-  audio.stopRecording();
-  pushToTalkRequestId += 1;
-  isStartingPushToTalk = false;
-  if (wasRecording && sentAudioThisTurn) {
-    ws.commitAudio();
-  }
-  sentAudioThisTurn = false;
+function waitForSocketOpen(timeoutMs = 5000) {
+  const start = Date.now();
+  return new Promise((resolve) => {
+    const check = setInterval(() => {
+      if (ws.socket.value?.readyState === WebSocket.OPEN || Date.now() - start >= timeoutMs) {
+        clearInterval(check);
+        resolve();
+      }
+    }, 50);
+  });
 }
 
 async function startListeningMic() {
-  if (!usesToggleMic.value || isStartingListening || audio.isRecording.value || recordButtonDisabled.value) {
+  if (isStartingListening || audio.isRecording.value || recordButtonDisabled.value) {
     return;
   }
 
   isStartingListening = true;
-  await ensureSessionReady();
+  await ensureSessionReady({ fresh: true });
   if (recordButtonDisabled.value) {
     isStartingListening = false;
     return;
@@ -244,8 +210,6 @@ function handleLocalSpeechStart() {
     localInterruptArmed = false;
     return;
   }
-  const assistantAudio = audio.stop();
-  ws.beginPushToTalk(assistantAudio);
 }
 
 function handleLocalSpeechEnd() {
@@ -257,7 +221,6 @@ function handleLocalSpeechEnd() {
 }
 
 function handleRecordClick() {
-  if (!usesToggleMic.value) return;
   if (store.inputMode === "local_vad" && store.isAssistantSpeaking) {
     interruptAssistantForLocalVad();
     return;
@@ -277,38 +240,45 @@ async function interruptAssistantForLocalVad() {
   store.isAssistantSpeaking = false;
   sentAudioThisTurn = false;
   localInterruptArmed = true;
-  ws.beginPushToTalk(assistantAudio);
+  ws.truncateAssistantAudio(assistantAudio);
   if (!audio.isRecording.value) {
     startListeningMic();
   }
 }
 
-function handlePointerDown(event) {
-  if (usesToggleMic.value) return;
-  event.currentTarget.setPointerCapture?.(event.pointerId);
-  beginPushToTalk();
-}
-
 function handleKeyDown(event) {
   if (event.code !== "Space" || event.repeat || shouldIgnoreShortcut(event.target)) return;
   event.preventDefault();
-  if (usesToggleMic.value) {
-    handleRecordClick();
-    return;
-  }
-  beginPushToTalk();
-}
-
-function handleKeyUp(event) {
-  if (event.code !== "Space" || shouldIgnoreShortcut(event.target)) return;
-  event.preventDefault();
-  if (usesToggleMic.value) return;
-  endPushToTalk();
+  handleRecordClick();
 }
 
 function shouldIgnoreShortcut(target) {
   const tagName = target?.tagName?.toLowerCase();
   return tagName === "input" || tagName === "textarea" || target?.isContentEditable;
+}
+
+function getNumericOption(queryKey, envKey, fallback) {
+  const params = new URLSearchParams(window.location.search);
+  const value = Number(params.get(queryKey) || import.meta.env[envKey]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function buildRealtimeWsUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const explicitUrl = params.get("ws") || import.meta.env.VITE_REALTIME_WS_URL;
+  if (explicitUrl) return explicitUrl;
+
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const configuredPath = (
+    params.get("wsPath") ||
+    import.meta.env.VITE_REALTIME_WS_PATH ||
+    "/ws"
+  );
+  const path = configuredPath.startsWith("/") ? configuredPath : `/${configuredPath}`;
+  const url = new URL(`${protocol}://${window.location.host}${path}`);
+  url.searchParams.set("model", QWEN_REALTIME_MODEL);
+
+  return url.toString();
 }
 </script>
 
