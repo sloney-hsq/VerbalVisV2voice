@@ -78,8 +78,6 @@ const ws = useWebSocket({ enqueue: audio.enqueue, flush: audio.flush, stop: audi
 
 let sessionPromise = null;
 let isStartingListening = false;
-let sentAudioThisTurn = false;
-let localInterruptArmed = false;
 
 const statusClass = computed(() => ({
   "status-dot--connected": store.connectionStatus === "connected",
@@ -93,9 +91,6 @@ const recordButtonDisabled = computed(() => (
 ));
 
 const recordButtonLabel = computed(() => {
-  if (store.isAssistantSpeaking && store.sessionMode !== "turn_based") {
-    return "Interrupt";
-  }
   return audio.isRecording.value ? "Listening..." : "Start Mic";
 });
 
@@ -161,24 +156,13 @@ async function startListeningMic() {
     return;
   }
 
-  sentAudioThisTurn = false;
   try {
     await audio.startRecording({
-      gateSilence: store.inputMode !== "open_mic",
-      shouldStartSpeech: () => (
-        store.inputMode !== "local_vad" ||
-        !store.isAssistantSpeaking
-      ),
-      onSpeechStart: handleLocalSpeechStart,
-      onSpeechEnd: handleLocalSpeechEnd,
+      gateSilence: false,
       onChunk: (base64pcm) => {
-        if (
-          store.isAssistantSpeaking &&
-          (store.inputMode === "local_vad" || store.sessionMode === "turn_based")
-        ) {
+        if (store.isAssistantSpeaking && store.sessionMode === "turn_based") {
           return;
         }
-        sentAudioThisTurn = true;
         ws.sendAudio(base64pcm);
       },
     });
@@ -191,57 +175,14 @@ async function startListeningMic() {
 }
 
 function stopListeningMic() {
-  const wasRecording = audio.isRecording.value;
   audio.stopRecording();
   isStartingListening = false;
-  localInterruptArmed = false;
-  if (wasRecording && store.inputMode === "local_vad" && sentAudioThisTurn) {
-    ws.commitAudio();
-  }
-  sentAudioThisTurn = false;
-}
-
-function handleLocalSpeechStart() {
-  if (store.inputMode !== "local_vad") return;
-  if (store.isAssistantSpeaking) return;
-
-  sentAudioThisTurn = false;
-  if (localInterruptArmed) {
-    localInterruptArmed = false;
-    return;
-  }
-}
-
-function handleLocalSpeechEnd() {
-  if (store.inputMode !== "local_vad") return;
-  if (sentAudioThisTurn) {
-    ws.commitAudio();
-  }
-  sentAudioThisTurn = false;
 }
 
 function handleRecordClick() {
-  if (store.inputMode === "local_vad" && store.isAssistantSpeaking) {
-    interruptAssistantForLocalVad();
-    return;
-  }
   if (audio.isRecording.value) {
     stopListeningMic();
   } else {
-    startListeningMic();
-  }
-}
-
-async function interruptAssistantForLocalVad() {
-  if (store.sessionMode === "turn_based") return;
-  await ensureSessionReady();
-  const assistantAudio = audio.stop();
-  audio.resetSpeechGate();
-  store.isAssistantSpeaking = false;
-  sentAudioThisTurn = false;
-  localInterruptArmed = true;
-  ws.truncateAssistantAudio(assistantAudio);
-  if (!audio.isRecording.value) {
     startListeningMic();
   }
 }

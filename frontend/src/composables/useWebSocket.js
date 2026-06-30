@@ -101,14 +101,11 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "speech_started":
-        if (store.inputMode === "open_mic") {
-          // Server VAD owns barge-in only in open-mic mode. In local_vad/ptt,
-          // the client has already stopped playback and sent truncate metadata.
+        if (store.inputMode === "server_vad") {
           store.isAssistantSpeaking = false;
           assistantTranscriptBuffer = "";
           if (audioPlayer) {
-            const cursor = audioPlayer.stop();
-            truncateAssistantAudio(cursor);
+            audioPlayer.stop();
           }
         }
         break;
@@ -169,14 +166,6 @@ export function useWebSocket(audioPlayer) {
     }
   }
 
-  function commitAudio() {
-    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      socket.value.send(JSON.stringify({ type: "commit" }));
-    } else {
-      console.warn("commitAudio: socket not open, readyState =", socket.value?.readyState);
-    }
-  }
-
   function disconnect() {
     manualClose = true;
     if (socket.value) {
@@ -199,7 +188,6 @@ export function useWebSocket(audioPlayer) {
     startSession,
     truncateAssistantAudio,
     sendAudio,
-    commitAudio,
     disconnect,
     reconnect,
   };

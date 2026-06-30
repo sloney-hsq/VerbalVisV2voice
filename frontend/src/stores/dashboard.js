@@ -12,7 +12,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const connectionStatus = ref("disconnected"); // disconnected | connecting | connected
   const sessionReady = ref(false);
   const sessionMode = ref("barge_in"); // barge_in | turn_based
-  const inputMode = ref("local_vad");
+  const inputMode = ref("server_vad");
   const provider = ref("qwen");
   const model = ref("qwen3.5-omni-plus-realtime");
   const inputAudioRate = ref(16000);

@@ -676,6 +676,18 @@ def simple_audio_session_config() -> dict[str, Any]:
     return session
 
 
+def enable_server_vad(session: dict[str, Any]) -> None:
+    session["input_audio_transcription"] = {"model": "qwen3-asr-flash-realtime"}
+    session["turn_detection"] = {
+        "type": "server_vad",
+        "threshold": 0.5,
+        "prefix_padding_ms": 300,
+        "silence_duration_ms": 800,
+        "create_response": True,
+        "interrupt_response": True,
+    }
+
+
 def tool_result_text(result: dict[str, Any]) -> str:
     return json.dumps({
         "success": result.get("success", False),
@@ -721,7 +733,7 @@ def wait_for_audio_response(
     handle_tools: bool,
     reply_wav: Path | None = None,
     player: RealtimePCMPlayer | None = None,
-) -> tuple[bool, str, str, list[dict[str, Any]]]:
+) -> tuple[bool, str, str, list[dict[str, Any]], set[str]]:
     deadline = time.time() + timeout
     seen: list[str] = []
     assistant_parts: list[str] = []
@@ -789,7 +801,7 @@ def wait_for_audio_response(
             sent_tool_response = True
         elif event_type == "error":
             print("  [ERR]", json.dumps(event, ensure_ascii=False)[:1200])
-            return False, user_transcript, "".join(assistant_parts), tool_calls
+            return False, user_transcript, "".join(assistant_parts), tool_calls, set(seen)
         else:
             print(f"  <- {event_type}")
 
@@ -799,10 +811,10 @@ def wait_for_audio_response(
                     write_pcm_wav(reply_wav, bytes(reply_audio), sample_rate=24000)
                     print(f"  reply_wav: {reply_wav} bytes={reply_wav.stat().st_size}")
                 print(f"  response.done=True events={len(seen)}")
-                return True, user_transcript, "".join(assistant_parts), tool_calls
+                return True, user_transcript, "".join(assistant_parts), tool_calls, set(seen)
 
     print(f"  [TIMEOUT] events={len(seen)}")
-    return False, user_transcript, "".join(assistant_parts), tool_calls
+    return False, user_transcript, "".join(assistant_parts), tool_calls, set(seen)
 
 
 def test_wav_audio_reply(
@@ -810,10 +822,11 @@ def test_wav_audio_reply(
     wav_path: Path,
     *,
     audio_mode: str,
+    turn_mode: str,
     reply_wav: Path | None,
     play_audio: bool,
 ) -> bool:
-    print(f"\n=== WAV audio input realtime reply test ({audio_mode}) ===")
+    print(f"\n=== WAV audio input realtime reply test ({audio_mode}, {turn_mode}) ===")
     pcm, duration_seconds = load_wav_as_qwen_pcm(wav_path)
     print(
         f"  wav={wav_path} converted=pcm16/mono/16000Hz "
@@ -826,6 +839,8 @@ def test_wav_audio_reply(
     else:
         session_config = simple_audio_session_config()
         handle_tools = False
+    if turn_mode == "server_vad":
+        enable_server_vad(session_config)
 
     player: RealtimePCMPlayer | None = None
     if play_audio:
@@ -841,22 +856,29 @@ def test_wav_audio_reply(
         if not send_session_update(ws, session_config):
             return False
 
+        if turn_mode == "server_vad":
+            # Give server VAD enough trailing silence to close the utterance.
+            pcm += b"\x00\x00" * 16000
+
         chunk_count = append_pcm_audio(ws, pcm)
         print(f"  -> input_audio_buffer.append chunks={chunk_count}")
 
-        ws.send(json.dumps({
-            "event_id": "evt_" + uuid.uuid4().hex,
-            "type": "input_audio_buffer.commit",
-        }, ensure_ascii=False))
-        print("  -> input_audio_buffer.commit")
+        if turn_mode == "manual":
+            ws.send(json.dumps({
+                "event_id": "evt_" + uuid.uuid4().hex,
+                "type": "input_audio_buffer.commit",
+            }, ensure_ascii=False))
+            print("  -> input_audio_buffer.commit")
 
-        ws.send(json.dumps({
-            "event_id": "evt_" + uuid.uuid4().hex,
-            "type": "response.create",
-        }, ensure_ascii=False))
-        print("  -> response.create")
+            ws.send(json.dumps({
+                "event_id": "evt_" + uuid.uuid4().hex,
+                "type": "response.create",
+            }, ensure_ascii=False))
+            print("  -> response.create")
+        else:
+            print("  -> server_vad awaiting automatic committed/response.created")
 
-        ok, user_transcript, assistant_transcript, tool_calls = wait_for_audio_response(
+        ok, user_transcript, assistant_transcript, tool_calls, seen_events = wait_for_audio_response(
             ws,
             timeout=60,
             handle_tools=handle_tools,
@@ -865,6 +887,15 @@ def test_wav_audio_reply(
         )
         print(f"  user_transcript: {user_transcript or '(no user transcript captured)'}")
         print(f"  assistant_transcript: {assistant_transcript[:500] or '(no assistant transcript captured)'}")
+        if turn_mode == "server_vad":
+            server_vad_ok = {
+                "input_audio_buffer.speech_started",
+                "input_audio_buffer.speech_stopped",
+                "input_audio_buffer.committed",
+                "response.created",
+            }.issubset(seen_events)
+            print(f"  server_vad_events: {'PASS' if server_vad_ok else 'FAIL'}")
+            ok = ok and server_vad_ok
         if handle_tools:
             print(f"  tool_calls={len(tool_calls)}")
             for tool_call in tool_calls:
@@ -976,6 +1007,15 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--turn-mode",
+        choices=["server_vad", "manual"],
+        default="server_vad",
+        help=(
+            "For --wav: use Qwen server_vad automatic commit/response, or "
+            "manual input_audio_buffer.commit + response.create."
+        ),
+    )
+    parser.add_argument(
         "--reply-wav",
         type=Path,
         help="Save Qwen's output audio deltas as a 24 kHz mono PCM WAV file.",
@@ -1001,6 +1041,7 @@ def main() -> int:
             args.region,
             args.wav,
             audio_mode=args.audio_mode,
+            turn_mode=args.turn_mode,
             reply_wav=args.reply_wav,
             play_audio=args.play,
         )

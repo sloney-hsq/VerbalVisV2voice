@@ -59,8 +59,6 @@ IMPORTANT_EVENTS = {
     "error",
 }
 
-MIN_TRANSCRIPT_CHARS_TO_RESPOND = int(os.getenv("VERBALVIS_MIN_TRANSCRIPT_CHARS", "1"))
-
 # ---------------------------------------------------------------------------
 # Provider configuration.
 # ---------------------------------------------------------------------------
@@ -115,12 +113,14 @@ SEND_INPUT_TRANSCRIPTION_CONFIG = os.getenv(
     "QWEN_REALTIME_SEND_TRANSCRIPTION_CONFIG", "false"
 ).lower() in {"1", "true", "yes", "on"}
 
-MIN_COMMIT_AUDIO_MS = int(os.getenv("VERBALVIS_MIN_COMMIT_AUDIO_MS", "160"))
 QWEN_RECONNECT_ATTEMPTS = int(os.getenv("QWEN_REALTIME_RECONNECT_ATTEMPTS", "2"))
 
-# VerbalVis Qwen mode is local VAD only. This keeps turn handling in one path.
-INPUT_MODE = "local_vad"
-MANUAL_COMMIT_MODE = True
+# VerbalVis uses Qwen's native server VAD flow:
+# input_audio_buffer.append -> speech_started/stopped -> committed -> response.
+INPUT_MODE = "server_vad"
+QWEN_VAD_THRESHOLD = float(os.getenv("QWEN_REALTIME_VAD_THRESHOLD", "0.5"))
+QWEN_VAD_PREFIX_PADDING_MS = int(os.getenv("QWEN_REALTIME_VAD_PREFIX_PADDING_MS", "300"))
+QWEN_VAD_SILENCE_DURATION_MS = int(os.getenv("QWEN_REALTIME_VAD_SILENCE_DURATION_MS", "800"))
 
 BARGE_IN_ENABLED = os.getenv(
     "VERBALVIS_BARGE_IN_ENABLED", "true"
@@ -205,22 +205,18 @@ class QwenRealtimeSession:
 
         self._pending_tool_calls: dict[str, int] = {}
         self._pending_should_respond: dict[str, bool] = {}
-        self._pending_response_after_transcript = False
-
         self._session_update_pending = False
         self._session_updated = asyncio.Event()
         self._qwen_ready = False
         self._qwen_generation = 0
 
         self._last_user_speech_stopped_at: float | None = None
-        self._last_manual_commit_at: float | None = None
         self._response_metrics: dict[str, dict[str, Any]] = {}
         self._timeline: list[dict[str, Any]] = []
         self._current_assistant_audio_item_id: str | None = None
         self._current_assistant_audio_content_index = 0
         self._current_assistant_audio_generated_ms = 0
         self._assistant_transcript_buffer = ""
-        self._pending_audio_ms = 0
         self._dashboard_context = ""
 
         self._log_dir: Path | None = None
@@ -341,8 +337,6 @@ class QwenRealtimeSession:
         self._qwen_ready = False
         self.current_response_id = None
         self._assistant_transcript_buffer = ""
-        self._pending_audio_ms = 0
-        self._pending_response_after_transcript = False
         self._pending_tool_calls.clear()
         self._pending_should_respond.clear()
         self._invalidated_response_ids.clear()
@@ -455,17 +449,14 @@ class QwenRealtimeSession:
             "tools": _qwen_tool_schemas(),
         }
 
-        if MANUAL_COMMIT_MODE or not BARGE_IN_ENABLED:
-            # Disable server VAD; rely on client-side commit.
-            session["turn_detection"] = None
-        else:
-            session["turn_detection"] = {
-                "type": "server_vad",
-                "threshold": 0.5,
-                # OpenAI realtime2 original included prefix_padding_ms.
-                # Qwen client-event docs list threshold/silence_duration_ms.
-                "silence_duration_ms": 500,
-            }
+        session["turn_detection"] = {
+            "type": "server_vad",
+            "threshold": QWEN_VAD_THRESHOLD,
+            "prefix_padding_ms": QWEN_VAD_PREFIX_PADDING_MS,
+            "silence_duration_ms": QWEN_VAD_SILENCE_DURATION_MS,
+            "create_response": True,
+            "interrupt_response": BARGE_IN_ENABLED,
+        }
 
         if ENABLE_INPUT_TRANSCRIPTION and SEND_INPUT_TRANSCRIPTION_CONFIG:
             # Qwen server events document qwen3-asr-flash-realtime as built-in
@@ -527,7 +518,6 @@ class QwenRealtimeSession:
                         if self._event_logger:
                             self._event_logger.info("CLIENT audio ignored: qwen not ready")
                         continue
-                    self._pending_audio_ms += self._audio_ms_from_base64(msg.get("data", ""))
                     await self._send_qwen({
                         "type": "input_audio_buffer.append",
                         "audio": msg["data"],
@@ -536,25 +526,6 @@ class QwenRealtimeSession:
                     if not self._qwen_ready:
                         continue
                     await self._truncate_assistant_audio(msg.get("assistant_audio") or msg)
-                elif msg_type == "commit":
-                    if not self._qwen_ready:
-                        if self._event_logger:
-                            self._event_logger.info("CLIENT commit ignored: qwen not ready")
-                        continue
-                    self._last_manual_commit_at = time.perf_counter()
-                    self._record_timeline("client.commit", audio_ms=self._pending_audio_ms)
-                    if self._pending_audio_ms < MIN_COMMIT_AUDIO_MS:
-                        if self._event_logger:
-                            self._event_logger.info(
-                                "CLIENT commit skipped: audio_ms=%s min=%s",
-                                self._pending_audio_ms, MIN_COMMIT_AUDIO_MS,
-                            )
-                        await self._send_qwen({"type": "input_audio_buffer.clear"})
-                        self._pending_audio_ms = 0
-                        continue
-                    self._pending_response_after_transcript = True
-                    await self._send_qwen({"type": "input_audio_buffer.commit"})
-                    self._pending_audio_ms = 0
                 elif msg_type == "start_session":
                     try:
                         await self._restart_qwen_session("client.start_session")
@@ -648,16 +619,6 @@ class QwenRealtimeSession:
                 elif self._event_logger:
                     self._event_logger.info("EMPTY_TRANSCRIPT_IGNORED")
 
-                if self._pending_response_after_transcript:
-                    self._pending_response_after_transcript = False
-                    if len(clean_transcript) >= MIN_TRANSCRIPT_CHARS_TO_RESPOND:
-                        await self._create_response_if_idle("transcript.completed")
-                    elif self._event_logger:
-                        self._event_logger.info(
-                            "RESPONSE_CREATE_SKIPPED empty_or_too_short_transcript len=%d",
-                            len(clean_transcript),
-                        )
-
             elif etype == "response.function_call_arguments.done":
                 if self._tool_logger:
                     self._tool_logger.info("TOOL_EVENT %s", json.dumps(event, ensure_ascii=False)[:2000])
@@ -736,16 +697,6 @@ class QwenRealtimeSession:
         bytes_per_ms = max(1.0, (QWEN_OUTPUT_SAMPLE_RATE * 2) / 1000)
         self._current_assistant_audio_generated_ms += round(byte_count / bytes_per_ms)
 
-    def _audio_ms_from_base64(self, audio: str) -> int:
-        if not audio:
-            return 0
-        try:
-            byte_count = len(base64.b64decode(audio))
-        except Exception:
-            return 0
-        bytes_per_ms = max(1.0, (QWEN_INPUT_SAMPLE_RATE * 2) / 1000)
-        return round(byte_count / bytes_per_ms)
-
     async def _create_response_if_idle(self, reason: str) -> bool:
         if self.current_response_id:
             if self._event_logger:
@@ -812,11 +763,6 @@ class QwenRealtimeSession:
         self._current_assistant_audio_generated_ms = 0
 
     async def _handle_speech_started(self) -> None:
-        if MANUAL_COMMIT_MODE:
-            self._record_timeline("speech_started.ignored", input_mode=INPUT_MODE)
-            if self._event_logger:
-                self._event_logger.info("IGNORED speech_started in input_mode=%s", INPUT_MODE)
-            return
         # OpenAI realtime2 original used send_cancel=False because GA server VAD
         # handles interruption. Qwen exposes response.cancel but not truncate, so
         # cancel the active response on server-side speech start.
@@ -837,7 +783,6 @@ class QwenRealtimeSession:
                 source, invalidated_response_id, self._turn_epoch,
             )
         self._assistant_transcript_buffer = ""
-        self._pending_response_after_transcript = False
         self._record_timeline("barge_in", source=source, response_id=invalidated_response_id)
 
         for task in list(self._tool_tasks):
@@ -1093,7 +1038,7 @@ class QwenRealtimeSession:
         if not response_id:
             return
         now = time.perf_counter()
-        start_at = self._last_user_speech_stopped_at or self._last_manual_commit_at
+        start_at = self._last_user_speech_stopped_at
         self._response_metrics[response_id] = {
             "response_id": response_id,
             "created_at": now,
@@ -1108,7 +1053,7 @@ class QwenRealtimeSession:
             return
         now = time.perf_counter()
         metrics["first_audio_at"] = now
-        start_at = self._last_user_speech_stopped_at or self._last_manual_commit_at or metrics.get("created_at")
+        start_at = self._last_user_speech_stopped_at or metrics.get("created_at")
         metrics["ttfa_ms"] = round((now - start_at) * 1000, 2) if start_at else None
         metrics["response_created_to_first_audio_ms"] = (
             round((now - metrics["created_at"]) * 1000, 2)
