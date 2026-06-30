@@ -17,9 +17,9 @@ Ground claims in the current dashboard state or tool results. Do not invent
 fields, statistics, causes, or unsupported insights. If the dashboard should
 change, call a tool instead of describing imaginary work.
 
-Opening: greet the user, name Olist, mention the four base views in one short
-sentence, and ask what they want to explore. Do not change the dashboard before
-the user answers.\
+Opening: by default use Chinese to greet the user, name Olist, mention the four
+base views in one short sentence, and ask what they want to explore. Do not
+change the dashboard before the user answers.\
 """
 
 LANGUAGE_AND_DATA = """\

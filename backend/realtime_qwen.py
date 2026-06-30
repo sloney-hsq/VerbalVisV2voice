@@ -115,6 +115,9 @@ SEND_INPUT_TRANSCRIPTION_CONFIG = os.getenv(
 ).lower() in {"1", "true", "yes", "on"}
 
 QWEN_RECONNECT_ATTEMPTS = int(os.getenv("QWEN_REALTIME_RECONNECT_ATTEMPTS", "2"))
+QWEN_OPENING_ENABLED = os.getenv(
+    "QWEN_REALTIME_OPENING_ENABLED", "true"
+).lower() in {"1", "true", "yes", "on"}
 
 # VerbalVis uses Qwen's native server VAD flow:
 # input_audio_buffer.append -> speech_started/stopped -> committed -> response.
@@ -333,6 +336,7 @@ class QwenRealtimeSession:
         self._log_connection("SESSION_UPDATED")
         self._qwen_ready = True
         await self._send_client({"type": "session_ready"})
+        await self._send_opening_response()
 
     async def _restart_qwen_session(self, reason: str) -> None:
         self._qwen_generation += 1
@@ -714,6 +718,14 @@ class QwenRealtimeSession:
             return False
         await self._send_qwen({"type": "response.create"})
         return True
+
+    async def _send_opening_response(self) -> None:
+        if not QWEN_OPENING_ENABLED:
+            return
+        self._record_timeline("opening.response.create")
+        if self._event_logger:
+            self._event_logger.info("OPENING_RESPONSE_CREATE")
+        await self._create_response_if_idle("session.opening")
 
     async def _truncate_assistant_audio(self, assistant_audio: Any = None) -> None:
         cursor = assistant_audio if isinstance(assistant_audio, dict) else {}
