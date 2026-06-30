@@ -134,14 +134,14 @@ TOOL_SCHEMAS = [
     _tool(
         "filter_data",
         "Apply a filter to the global dataset. All dashboard views update automatically. "
-        "Pass field=null to clear all filters.",
+        "Pass field='__all__' to clear all filters.",
         {
             "type": "object",
             "properties": {
                 "field": {
                     "type": ["string", "null"],
-                    "enum": FIELDS + [None],
-                    "description": "Field to filter on. null clears all filters.",
+                    "enum": FIELDS + ["__all__", None],
+                    "description": "Field to filter on. Use '__all__' to clear all filters.",
                 },
                 "operator": {
                     "type": "string",
@@ -149,7 +149,7 @@ TOOL_SCHEMAS = [
                     "description": "Comparison operator.",
                 },
                 "value": {
-                    "description": "Filter value (string, number, null, or array for 'in').",
+                    "description": "Filter value. Use a string/number, or an array for 'in' and 'between'.",
                 },
                 "append": {
                     "type": "boolean",
@@ -271,13 +271,37 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return {"tool": name, "success": False, "error": str(exc)}
 
 
+def normalize_tool_arguments(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    user_transcript: str = "",
+) -> dict[str, Any]:
+    """Normalize small speech-model argument slips before executing a tool."""
+    normalized = dict(arguments or {})
+    if name != "filter_data":
+        return normalized
+
+    transcript = user_transcript.strip()
+    if (
+        normalized.get("field") == "review_score"
+        and str(normalized.get("operator", "")).lower() == "lte"
+        and str(normalized.get("value", "")).strip() in {"3", "3.0"}
+        and any(phrase in transcript for phrase in ("低于三分", "小于三分", "低于3分", "小于3分"))
+        and not any(phrase in transcript for phrase in ("及以下", "以下含", "包含三", "包括三"))
+    ):
+        normalized["value"] = "2"
+
+    return normalized
+
+
 # --- filter_data ---
 
 def _exec_filter_data(args: dict) -> dict:
     global active_filters
 
     field = args.get("field")
-    if field is None:
+    if field in (None, "__all__"):
         active_filters = []
         _refresh_all_views()
         return {
@@ -306,6 +330,18 @@ def _exec_filter_data(args: dict) -> dict:
         }
     value = args.get("value")
     append = args.get("append", False)
+    append = bool(append) if isinstance(append, bool) else str(append).lower() == "true"
+
+    if operator == "in" and not isinstance(value, list):
+        value = [value]
+    if operator == "between" and (
+        not isinstance(value, list) or len(value) != 2
+    ):
+        return {
+            "tool": "filter_data",
+            "success": False,
+            "error": "Operator 'between' requires value to be a two-item array.",
+        }
 
     new_filter = {"field": field, "operator": operator, "value": value}
 

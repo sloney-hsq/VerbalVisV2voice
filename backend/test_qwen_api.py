@@ -699,7 +699,7 @@ def tool_result_text(result: dict[str, Any]) -> str:
 
 def handle_verbalvis_tool_call(event: dict[str, Any]) -> dict[str, Any]:
     sys.path.insert(0, str(BACKEND_DIR))
-    from tools import context_text, execute_tool, get_views_for_frontend
+    from tools import context_text, execute_tool, get_views_for_frontend, normalize_tool_arguments
 
     name = event.get("name", "")
     call_id = event.get("call_id", "")
@@ -708,6 +708,12 @@ def handle_verbalvis_tool_call(event: dict[str, Any]) -> dict[str, Any]:
         arguments = json.loads(args_text)
     except json.JSONDecodeError:
         arguments = {}
+    user_transcript = event.get("_user_transcript", "")
+    arguments = normalize_tool_arguments(
+        name,
+        arguments,
+        user_transcript=user_transcript,
+    )
 
     print(f"  [TOOL] call name={name} call_id={call_id} args={arguments}")
     result = execute_tool(name, arguments)
@@ -781,6 +787,7 @@ def wait_for_audio_response(
             if not handle_tools:
                 print("  [WARN] Tool call received but tool handling is disabled")
                 continue
+            event["_user_transcript"] = user_transcript
             tool_call = handle_verbalvis_tool_call(event)
             tool_calls.append(tool_call)
             ws.send(json.dumps({

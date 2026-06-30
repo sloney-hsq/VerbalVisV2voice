@@ -33,6 +33,7 @@ from tools import (
     get_views_for_frontend,
     init_views,
     log_tool_call,
+    normalize_tool_arguments,
 )
 
 load_dotenv()
@@ -217,6 +218,7 @@ class QwenRealtimeSession:
         self._current_assistant_audio_content_index = 0
         self._current_assistant_audio_generated_ms = 0
         self._assistant_transcript_buffer = ""
+        self._last_user_transcript = ""
         self._dashboard_context = ""
 
         self._log_dir: Path | None = None
@@ -610,6 +612,7 @@ class QwenRealtimeSession:
                 transcript = event.get("transcript", "")
                 clean_transcript = transcript.strip()
                 if clean_transcript:
+                    self._last_user_transcript = clean_transcript
                     self._log_conversation("You", clean_transcript)
                     await self._send_client({
                         "type": "transcript",
@@ -809,6 +812,11 @@ class QwenRealtimeSession:
             arguments = json.loads(args_str)
         except json.JSONDecodeError:
             arguments = {}
+        arguments = normalize_tool_arguments(
+            tool_name,
+            arguments,
+            user_transcript=self._last_user_transcript,
+        )
 
         should_respond = False
         try:
