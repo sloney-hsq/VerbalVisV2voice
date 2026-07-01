@@ -6,6 +6,8 @@
 
 \usepackage{cite}
 \usepackage{graphicx}
+\graphicspath{{png/}}
+\usepackage{capt-of}
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{algorithmic}
 \usepackage{booktabs}
@@ -17,128 +19,292 @@
 
 \begin{document}
 
-% \title{VerbalVis: Supporting Analytical Intent Evolution through Full-Duplex Conversational Visual Analytics}
-\title{VerbalVis: Hands-Free Exploratory Data Analysis with Full-Duplex Speech Interaction}
+% =====================================================================
+% Title
+% =====================================================================
+\title{VerbalVis: Full-Duplex Conversational Visual Analytics for Analytical Intent Revision}
 
 \author{Anonymous Author(s)%
-\thanks{Manuscript submitted to IEEE Transactions on Visualization and Computer Graphics. Source code, prompts, and study materials available at the project repository upon publication.}}
+\thanks{Manuscript submitted to IEEE Transactions on Visualization and Computer Graphics. Source code, prompts, and study materials will be made available upon publication.}}
 
-\markboth{IEEE Transactions on Visualization and Computer Graphics,~Vol.~XX, No.~X, Month~Year}%
-{Author \MakeLowercase{\textit{et al.}}: VerbalVis}
+
+\IEEEaftertitletext{%
+\begin{center}
+\includegraphics[width=\textwidth]{teaser-main.png}
+\captionof{figure}{Overview of a barge-in episode in VerbalVis. While the assistant is explaining a visualization, the user interrupts to redirect the exploratory analysis from sales by state to sales by product category. VerbalVis immediately cancels obsolete speech, replans visualization actions through tool execution, reinjects the updated dashboard state as contextual grounding for the language model, and synchronously updates both the dashboard and spoken response. The aligned voice, tool, and dashboard timelines illustrate the coordinated full-duplex interaction that enables continuous analytical intent evolution without explicit turn switching.}
+\label{fig:teaser}
+\end{center}
+}
+
 
 \maketitle
 
 % =====================================================================
+% Abstract
+% =====================================================================
+
+
 \begin{abstract}
-Exploratory data analysis (EDA) is fundamentally a process of \emph{analytical intent evolution}: analysts continuously revise their direction as observations surface hypotheses, refute them, and prompt further questions. Existing speech- and language-driven visual analytics (VA) systems are largely turn-based, confining intent revision to discrete handoff points between user and system. Recent full-duplex speech-to-speech models make a different interaction regime possible: one in which the analyst can redirect an analysis mid-utterance while a response is still unfolding. We treat barge-in as a \emph{structural supersession signal}: the interruption event indicates that the current response and its pending actions may no longer be valid, while the redirecting utterance supplies the semantic specification of the revised intent. We present \textbf{VerbalVis}, a hands-free, full-duplex conversational VA system built on \texttt{gpt-realtime-2} and an in-memory DuckDB analytics layer. VerbalVis implements a reusable supersession control protocol that cancels or truncates stale response work, invalidates in-flight tool calls through response epochs, captures the redirecting utterance, and replans against a dashboard state that reflects prior valid tool calls. We contribute (1) an \emph{Intent Evolution} framework identifying three recurring revision types observed in conversational EDA --- \emph{Goal Shift}, \emph{Hypothesis Correction}, and \emph{Scope Narrowing}; (2) a 15-operation tool taxonomy aligned to the Brehmer--Munzner \emph{why} and Yi et al.\ \emph{how} axes, with a representative dashboard-operation subset realized in the prototype; (3) the VerbalVis prototype on the Olist Brazilian e-commerce dataset; and (4) an evaluation plan comprising a case study, an $N{=}12$--$16$ within-subjects study whose primary comparison is \textbf{VerbalVis-FullDuplex} versus \textbf{VerbalVis-NoBarge}, a supplementary cascaded turn-based baseline, and a 250-trial technical benchmark of the supersession mechanism.
+Exploratory data analysis is iterative: observations may cause analysts to
+redirect their questions, revise provisional explanations, or change the data
+scope under investigation. Existing speech- and language-driven visual
+analytics systems generally support such revisions only after the current
+response has completed. Full-duplex speech interaction allows users to redirect
+an analysis while the assistant is still speaking, but stopping speech alone is
+insufficient when the superseded response may also have initiated analytical
+actions that modify a persistent dashboard. We present \textbf{VerbalVis}, a
+full-duplex conversational visual analytics system that coordinates spoken
+output, schema-grounded tool execution, and dashboard state during
+mid-response redirection. VerbalVis truncates obsolete speech, supersedes the
+active response, invalidates response-bound analytical actions, rejects stale
+results, and replans from the latest committed dashboard state. To describe
+analytical redirection, we distinguish three theory-informed, non-exhaustive,
+and potentially overlapping objects of revision: the analytical goal, a
+working hypothesis, and the analytical scope. These constructs guide design
+inquiry and behavioral coding rather than runtime classification. A lightweight
+formative inquiry informed requirements for cross-layer cancellation,
+state-grounded replanning, and visible execution feedback. We evaluate
+VerbalVis through an illustrative scenario and an exploratory within-subjects
+study comparing full-duplex and turn-based conversational visual analysis.
 \end{abstract}
 
 \begin{IEEEkeywords}
-Visual analytics, conversational interfaces, natural language interfaces, speech interaction, large language models, full-duplex dialogue, exploratory data analysis.
+Visual analytics, conversational interfaces, speech interaction, full-duplex
+dialogue, analytical intent revision, exploratory data analysis.
 \end{IEEEkeywords}
-
-% =====================================================================
 \section{Introduction}
 \label{sec:intro}
-\IEEEPARstart{E}{xploratory} data analysis (EDA) is an inherently iterative process. An analyst glances at a trend, forms a hypothesis, queries the data for confirmation; the data refutes the hypothesis; the analyst pivots to a related question; that question splinters into sub-questions; and so on~\cite{pirolli2005sensemaking,kandel2012enterprise}. The \emph{shape} of this trajectory --- where the analyst turns, why, and how quickly --- is not incidental; it is the substance of sensemaking. Supporting EDA in a conversational visual analytics (VA) system therefore means supporting not query answering alone but \emph{analytical intent evolution}: the continuous, often mid-utterance revision of analytical direction.
 
-\textbf{The structural limitation of current conversational VA.}
-Representative natural-language interfaces for visualization --- DataTone~\cite{gao2015datatone}, Eviza~\cite{setlur2016eviza}, NL4DV~\cite{narechania2021nl4dv}, and recent LLM-based systems including Data Formulator~2~\cite{wang2024dataformulator2}, LightVA~\cite{zhao2024lightva}, and DashChat~\cite{cheng2026dashchat} --- are organized around turns: the user speaks or types, the system processes, the system responds, and the user speaks again. Intent revision is consequently confined to discrete handoff points. When the system is mid-response with an analysis that has already deviated from the user's interest, the user has no recourse except to wait, then issue a correction, then wait again. The cost compounds in voice modalities, where responses unfold at speaking rate and a misdirected explanation may consume tens of seconds before the user regains the floor.
+\IEEEPARstart{E}{xploratory} data analysis (EDA) is inherently iterative.
+Analysts rarely follow a fully specified plan; instead, they move among
+observations, questions, tentative explanations, and new analytical actions as
+evidence emerges. Patterns and anomalies can expose limitations in the current
+direction and prompt analysts to reconsider what they are asking, what they
+believe, or which data are relevant
+\cite{russell1993cost,pirolli2005sensemaking,
+sacha2014knowledge,battle2019characterizing}. We use
+\emph{analytical intent revision} to denote an episode in which an analyst
+supersedes, qualifies, or materially changes an active analytical commitment.
 
-\textbf{The key observation.}
-Full-duplex speech-to-speech models such as OpenAI's \texttt{gpt-realtime-2} expose a different temporal affordance: the user can interrupt the system at any instant, and the system can detect the interruption, cancel or truncate the in-flight response, and continue from the newest user input~\cite{openai_realtime_docs}. Crucially for VA, this does not mean that the interruption event by itself determines the user's analytical meaning. A barge-in may be a backchannel, an ASR correction, accidental noise, a device check, or a true analytical redirect. We therefore treat barge-in more narrowly and more operationally: it provides a \emph{structural supersession signal} that the current response and its pending actions may no longer be valid, while the redirecting utterance provides the semantic specification of the revised intent. This reframing requires an architecture that first prevents stale speech and tool work from committing, then interprets the newest user utterance against the preserved dashboard state.
+Natural-language interfaces and LLM-powered visual analytics systems
+increasingly support contextual queries, visualization generation,
+conversational refinement, and multistep analytical tool use
+\cite{gao2015datatone,setlur2016eviza,narechania2021nl4dv,
+dibia2023lida,wang2024dataformulator2,zhao2024lightva}. These capabilities make
+it easier to express complex analytical requests and iteratively refine visual
+results. However, refinement is generally organized around completed turns: a
+user submits a request, the system produces an explanation or executes a
+sequence of analytical actions, and the user changes direction only after that
+response has finished. This organization is particularly restrictive for
+speech, where system output unfolds over time and an analyst may recognize a
+misdirected analysis well before the assistant has finished speaking. The
+interaction therefore delays the system's response to a change that has already
+occurred in the analyst's reasoning.
 
-\textbf{VerbalVis.}
-We present \textbf{VerbalVis}, a hands-free, full-duplex conversational VA system. The contribution of VerbalVis is not a new model-level mechanism for barge-in detection; it is a reusable \emph{supersession control protocol} for connecting interruption-aware speech with stateful analytical tools. The protocol combines (i) native speech-onset and response-cancellation primitives from \texttt{gpt-realtime-2}; (ii) response epochs that assign ownership to tool calls and discard late results from superseded turns; (iii) schema-based analytical tools over an in-memory DuckDB backend; and (iv) continuously reinjected dashboard context that grounds post-interruption replanning in what the analyst actually sees. The current prototype instantiates this protocol on the Olist Brazilian e-commerce dataset with a Vue/Vega-Lite dashboard and tool operations for filtering data, removing filters, highlighting views, appending charts, and deleting views. After every successful tool call, the backend re-queries affected views, sends a \texttt{views\_update} event to the frontend, and reinjects a compact dashboard snapshot --- active filters, highlighted view, available views, filtered row count, and per-view statistics --- as system context. Prior LLM-agent VA systems achieve subsets of this combination: LightVA~\cite{zhao2024lightva} provides agentic task execution but relies on runtime code generation, while DashChat~\cite{cheng2026dashchat} provides conversational LLM coordination for dashboard authoring rather than analytical use. VerbalVis focuses on the control problem that arises when spoken redirection and analytical tool execution overlap in time.
+Full-duplex interaction provides a different regime by allowing the system to
+continue listening while speaking. An analyst can redirect an ongoing analysis
+through barge-in rather than waiting for a turn boundary. Yet barge-in alone
+does not solve the visual analytics problem. Barge-in is a temporal event, not
+necessarily evidence of analytical revision: a user may interrupt to correct
+recognition, request clarification, acknowledge the assistant, or stop an
+overly long response. More importantly, stopping speech does not necessarily
+stop the analytical consequences of the superseded response. Analytical tool
+actions and pending dashboard updates may continue after the user has changed
+direction, and late results may still modify the visible state. The assistant
+could therefore acknowledge the revised request while the dashboard continues
+evolving according to the obsolete one. Full-duplex conversational visual
+analytics consequently introduces a cross-layer consistency problem spanning
+spoken output, analytical execution, and persistent dashboard state.
 
-\textbf{Contributions.} We make four contributions:
+We present \textbf{VerbalVis}, a full-duplex conversational visual analytics
+system designed to keep these layers aligned during mid-response redirection.
+VerbalVis combines real-time speech interaction, schema-grounded analytical
+tools, and a persistent dashboard through a visual-analytics-specific
+orchestration layer. When a new request supersedes an active response, the
+system truncates obsolete speech and advances a response-bound execution epoch.
+Tool actions remain associated with the response that produced them; actions
+and results from earlier epochs are treated as stale and cannot commit changes
+to the dashboard. The revised request is then interpreted against the latest
+committed dashboard state, including active filters, highlights, and
+visualizations, so that replanning begins from what the analyst currently sees
+rather than from speculative work associated with the cancelled response.
+VerbalVis does not introduce a new speech model or interruption detector. Its
+contribution is the response-supersession mechanism that coordinates speech
+cancellation, analytical validity, and dashboard-grounded replanning.
+
+Drawing on research in sensemaking and exploratory analysis, we characterize
+analytical revisions through three potentially overlapping objects of change:
+the analytical goal, a working hypothesis, and the analytical scope
+\cite{pirolli2005sensemaking,klein2007dataframe,
+bates1989berrypicking,battle2019characterizing}. These constructs provide a
+vocabulary for describing how an active investigation is redirected, but they
+do not imply that every interruption constitutes a revision or that every
+revision belongs to only one category. They serve as theory-informed
+sensitizing concepts and post-hoc coding dimensions rather than an exhaustive
+taxonomy or runtime intent classes. A lightweight formative inquiry refined
+their operational boundaries and informed requirements for cancellation, state
+preservation, visible feedback, and recoverable dashboard interaction.
+
+We evaluate VerbalVis through an illustrative usage scenario and an exploratory
+within-subjects mixed-methods study with eight participants. The study compares
+a \emph{Full-Duplex} condition, in which participants may redirect the assistant
+while it is speaking, with a matched \emph{Turn-Based} condition, in which they
+must wait for the current response to finish. We examine interaction
+responsiveness, perceived control, state consistency, workload, exploratory
+behavior, and analytical outcomes, with particular attention to when
+participants revise an ongoing analysis and what they expect the system to
+cancel, preserve, and update.
+
+\textbf{Contributions.}
 \begin{enumerate}
-\item An \textbf{Intent Evolution framework} that conceptualizes intent revision in EDA and identifies three recurring revision types observed in conversational analytical sessions --- \emph{Goal Shift}, \emph{Hypothesis Correction}, and \emph{Scope Narrowing} --- with their triggering conditions and dashboard-level consequences. These types are conceptual categories used to organize observation; VerbalVis treats them with uniform downstream processing rather than per-type runtime dispatch.
-\item A reusable \textbf{supersession control protocol} that connects native barge-in handling, response epochs, stale-tool invalidation, schema-based tool calling, and continuously reinjected dashboard context, enabling intent revision to move from discrete handoff points to a continuously available action without introducing new model-level mechanisms.
-\item The \textbf{VerbalVis system}: a prototype implementation with a 15-operation analytical tool taxonomy, a representative dashboard-operation subset realized end-to-end, realtime speech I/O, Vega-Lite dashboard views, and logging for response latency, tool latency, stale calls, and dashboard state.
-\item A \textbf{case study and evaluation plan}: an $N{=}12$--$16$ within-subjects study whose primary causal comparison is \textbf{VerbalVis-FullDuplex} versus \textbf{VerbalVis-NoBarge}, a supplementary \textbf{VerbalVis-Cascade} ecological baseline, and a 250-trial technical benchmark that isolates mechanism-level effects of the supersession path.
+\setlength{\itemsep}{1pt}
+\setlength{\parskip}{0pt}
+
+\item A design framing for overlapping user speech in full-duplex
+conversational visual analytics. We distinguish non-interruptive backchannels
+from floor-taking barge-ins and characterize analytical revisions through
+changes to analytical goals, working hypotheses, and analytical scope.
+
+\item \textbf{VerbalVis}, a full-duplex conversational visual analytics system
+that coordinates assistant speech, analytical tool execution, and persistent
+dashboard state when an active analytical response is superseded. It supports
+speech truncation, response-bound tool execution, stale-result rejection, and
+replanning from the latest committed dashboard state.
+
+\item An exploratory mixed-methods comparison of full-duplex and turn-based
+speech interaction during open-ended visual analysis, examining
+responsiveness, perceived control, interaction flow, state understanding,
+workload, exploratory behavior, and analytical outcomes.
+
 \end{enumerate}
 
-The remainder of the paper is organized as follows. Section~\ref{sec:related} positions our work relative to NLI-for-visualization, LLM-agent VA, sensemaking theory, and full-duplex conversational AI. Section~\ref{sec:framework} introduces the Intent Evolution framework. Section~\ref{sec:system} describes the design and implementation of VerbalVis. Section~\ref{sec:case} reports a case study illustrating all three revision types, Section~\ref{sec:study} presents the user-study and benchmark design, and Sections~\ref{sec:discussion}--\ref{sec:conclusion} discuss limitations and conclude.
 
-% =====================================================================
+
 \section{Related Work}
 \label{sec:related}
+
+VerbalVis connects research on natural-language interaction for visualization,
+LLM-powered visual analytics, full-duplex spoken dialogue, and analytical
+sensemaking. We review how these areas support conversational refinement,
+analytical steering, interruption, and changes to an ongoing investigation.
 
 \subsection{Natural-Language Interaction for Visualization}
 \label{sec:rw-nli}
 
-Natural-language interfaces for visualization (V-NLIs) investigate how users express analytical operations in language and how systems ground those expressions in data, visualization specifications, and the current visual state. Early systems established that this problem is not simply text-to-chart generation. DataTone exposes alternative interpretations through interactive ambiguity widgets rather than silently committing to a single parse~\cite{gao2015datatone}, whereas Eviza grounds a probabilistic grammar in the active dataset and visualization to support filtering, comparison, selection, and navigation of an existing view~\cite{setlur2016eviza}. NL4DV subsequently externalized an interpretation as a structured analytic specification containing inferred attributes, analytical tasks, ambiguities, and candidate Vega-Lite specifications~\cite{narechania2021nl4dv}. Together, these systems framed language interaction as coordination among linguistic intent, data semantics, analytical tasks, and visual state.
+Natural-language interfaces for visualization translate utterances into data
+attributes, analytical tasks, and visual specifications. DataTone exposes
+alternative interpretations through interactive ambiguity widgets
+\cite{gao2015datatone}, while Eviza grounds language in both the dataset and
+the active visualization to support contextual references and follow-up
+questions~\cite{setlur2016eviza}. NL4DV provides a reusable pipeline for
+extracting attributes and analytical tasks and generating candidate
+visualizations~\cite{narechania2021nl4dv}. These systems establish language
+grounding, ambiguity management, and contextual interpretation as central
+requirements for conversational visual analysis.
 
-Later work broadened V-NLIs from isolated commands toward contextual and multimodal analysis. Orko combines natural language with direct manipulation for visual network exploration, allowing speech and graphical selection to complement one another~\cite{srinivasan2018orko}. The conversational extension of NL4DV supports follow-up utterances that augment, remove, or replace components of earlier specifications while maintaining multiple dialogue contexts~\cite{mitra2022conversational}. Snowy recommends executable follow-up utterances based on the current data and interaction context, thereby supporting both analytical guidance and discoverability of the language interface~\cite{srinivasan2021snowy}. These systems show that prior V-NLIs can be iterative, context-aware, conversational, and multimodal; speech is not necessarily used only as a substitute for typed text.
-
-The remaining distinction is temporal. In most V-NLIs, contextual refinement is processed after a user utterance or system update has reached a recognizable boundary. Even systems that continuously observe conversation do not necessarily allow a user to speak over an incrementally generated system response, terminate response work associated with a superseded request, and prevent a late analytical result from overwriting the revised state. VerbalVis builds on contextual and multimodal V-NLIs but shifts revision from a between-turn operation to a within-response operation. Its contribution in this research stream is therefore not a new language-to-visualization parser, but the coupling of full-duplex speech, schema-grounded analytical tools, and dashboard-state grounding so that an interruption can redirect the active analysis while the assistant is still speaking.
+Multimodal systems extend this interaction by combining language with visible
+references and direct manipulation. Orko integrates speech and touch for
+network exploration~\cite{srinivasan2018orko}; InChorus characterizes
+operations expressed through speech, pen, and touch
+\cite{srinivasan2020inchorus}; and DataBreeze interweaves speech with direct
+manipulation over flexible unit visualizations
+\cite{srinivasan2021databreeze}. Snowy and conversational extensions of
+NL4DV further support follow-up utterances and modification of existing views
+\cite{srinivasan2021snowy,mitra2022conversational}. However, these systems
+generally organize refinement around completed user and system turns.
+VerbalVis instead considers redirection while speech and associated analytical
+actions are still unfolding.
 
 \subsection{LLM-Powered and Agentic Visual Analytics}
-\label{sec:rw-agentic-va}
+\label{sec:rw-agentic}
 
-Large language models extend visualization interfaces beyond semantic parsing by generating data transformations and visualizations, planning analyses, executing code or tools, and organizing analytical results. LIDA, for example, decomposes visualization generation into data summarization, goal generation, code generation, execution, and refinement~\cite{dibia2023lida}. Data Formulator~2 blends graphical specification with natural-language prompting and delegates required data transformations to AI; its data-thread history supports revisiting completed states, reusing designs, and branching into alternative authoring directions~\cite{wang2024dataformulator2}. These systems establish iterative refinement and non-linear analytical histories as prior capabilities.
+Large language models extend conversational visualization beyond mapping one
+utterance to one chart. LIDA decomposes visualization generation into data
+summarization, goal generation, chart creation, and evaluation
+\cite{dibia2023lida}. Data Formulator combines natural-language concepts with
+directly specified visual encodings, while Data Formulator~2 supports iterative
+authoring and navigation through alternative data and visualization histories
+\cite{wang2024dataformulator,wang2024dataformulator2}. These systems broaden
+the role of language from chart specification to data transformation and
+iterative visual design.
 
-Agentic systems expand the unit of work from a requested chart to a multi-step analytical process. LightVA uses a planner--executor--controller architecture to recursively decompose high-level goals into data-analysis and visualization tasks~\cite{zhao2024lightva}. ProactiveVA grounds an LLM-based UI agent in interaction logs and the active interface, allowing the agent to perceive visual-analytics state and provide context-sensitive assistance~\cite{he2025proactiveva}. WaitGPT makes streamed analytical code visible as editable data operations, enabling users to inspect, modify, rerun, and resume portions of an LLM-generated analysis before the full process has completed~\cite{xie2024waitgpt}. DashChat addresses another stage of the visualization lifecycle: it coordinates LLM-powered agents and design patterns to conversationally generate and modify industrial dashboard prototypes~\cite{cheng2026dashchat}. Whereas DashChat supports dashboard authoring from textual requirements, VerbalVis operates on a live dashboard during exploratory analysis.
+Agentic systems further delegate analytical planning and execution to
+LLM-based components. InsightPilot and LightVA translate higher-level
+analytical goals into sequences of tasks, visualizations, and findings
+\cite{ma2023insightpilot,zhao2024lightva}. WaitGPT externalizes intermediate
+analysis operations for inspection and modification
+\cite{xie2024waitgpt}, while InsightLens links conversation, code,
+visualizations, and findings across an extended analysis
+\cite{weng2025insightlens}. Such systems make analytical processes more
+steerable and inspectable. Nevertheless, steering is usually performed through
+subsequent prompts, graphical controls, or explicit checkpoints. Existing work
+rarely specifies whether an unfinished action generated by an earlier response
+remains valid after the user has redirected the analysis.
 
-The closest prior systems thus expose complementary forms of human control. Data Formulator~2 supports revision across persistent authoring states; LightVA exposes task planning and execution; WaitGPT supports intervention in an ongoing code-based process; and ProactiveVA acts on a live interface. However, these controls are primarily expressed through text, direct manipulation, completed-state branching, or explicit inspection of intermediate operations. They do not report a unified coordination mechanism in which a spoken intervention during agent output simultaneously terminates stale speech, changes the ownership or validity of pending analytical actions, and resumes from the last valid dashboard state.
+\subsection{Full-Duplex Dialogue and Interruption}
+\label{sec:rw-duplex}
 
-VerbalVis addresses this temporal coordination problem rather than claiming novelty from LLM agency alone. Its schema-based tools constrain analytical actions to auditable dashboard operations, while each response and tool task is associated with the current interaction epoch. When a new utterance supersedes an active response, VerbalVis cancels in-flight work where possible and rejects late results from stale epochs before they can update the dashboard. Dashboard context is then reinjected for subsequent planning. LightVA and DashChat remain important conceptual precedents for agent-based and conversational VA, and their turn-mediated interaction regime motivates the cascaded baseline used as supplementary ecological context in our evaluation; VerbalVis differs by studying how human control is exercised during response production rather than only between completed turns.
+Streaming speech systems incrementally process or generate audio, whereas
+full-duplex systems continue listening while speaking. They must distinguish
+background speech, backchannels, cooperative overlap, and attempts to take the
+conversational floor~\cite{skantze2021turntaking}. Barge-in has traditionally
+referred to detecting user speech during system output and stopping or
+modifying the active response~\cite{heins1997bargein}. Recent systems including
+Duplex Conversation, SyncLLM, Moshi, and SALMONN-omni investigate concurrent
+speech streams, low-latency turn-taking, and context-sensitive interruption
+\cite{lin2022duplex,veluri2024syncllm,
+defossez2024moshi,yu2025salmonnomni}.
 
-\subsection{Full-Duplex Conversational AI and Interruption}
-\label{sec:rw-full-duplex}
+Interruption timing, however, does not determine analytical meaning. A user may
+interrupt to acknowledge the assistant, repair recognition, request
+clarification, or revise the investigation. Conversely, an analyst may revise
+the analysis after the assistant has finished speaking. Moreover, stopping
+audio does not automatically cancel a database query, visualization tool call,
+or pending dashboard update. VerbalVis therefore treats barge-in as a temporal
+signal while separately managing the validity of response-dependent analytical
+work and persistent visual state.
 
-Full-duplex conversational AI studies interaction in which listening and speaking proceed concurrently and newly arriving user speech can alter an agent's ongoing behavior. This property is distinct from streaming, push-to-talk, and ordinary multi-turn dialogue. A streaming system may incrementally recognize or synthesize speech while still enforcing alternating turns; a multi-turn system may preserve conversational context without listening during its own output. Full-duplex interaction additionally requires policies for overlap, backchannels, user barge-in, accidental noise, response termination, and the effect of an interruption on an underlying task.
 
-Duplex Conversation operationalized full-duplex interaction through user-state detection, backchannel selection, and barge-in detection in a deployed spoken-dialogue system~\cite{lin2022duplex}. Wang et al. proposed an LLM-controlled dialogue scheme in which perception and speech generation run concurrently and control tokens determine whether the system should respond, wait, or interrupt~\cite{wang2024fullduplex}. SyncLLM introduces explicit temporal modeling so that an autoregressive language model can generate dialogue synchronously with a real-world clock, supporting overlap, rapid turn-taking, and backchannel behavior~\cite{veluri2024syncllm}. Moshi instead models user and assistant audio in parallel streams, avoiding a strict segmentation into alternating speaker turns and supporting real-time speech-to-speech interaction~\cite{defossez2024moshi}. These works primarily advance conversational timing and architectures for simultaneous listening and speaking.
-
-Recent research has begun to connect full-duplex dialogue with structured action generation. DuplexSLA jointly decodes assistant audio and a textual action stream on a shared temporal grid, allowing planning text, control decisions, and structured tool calls to be produced while speech continues~\cite{zhang2026duplexsla}. Full-Duplex-Bench-v3 evaluates real voice agents using human speech containing hesitation and self-correction together with scenarios that require chained API calls, and reports accuracy, latency, and turn-taking behavior across full-duplex and cascaded systems~\cite{lin2026fdbv3}. These developments establish in-conversation tool use as an emerging problem; VerbalVis is not the first full-duplex system to call tools.
-
-The unresolved issue for visual analytics is action validity within a persistent, mutable visual state. Generic tool-use benchmarks evaluate whether the final sequence and arguments of API calls are correct, but a dashboard may already contain filters, highlights, derived views, and results produced by previous calls. If a user revises intent while a response is speaking, an old tool task may already be queued or executing, and its late result may arrive after the revised analysis has begun. Stopping audio alone does not preserve state consistency. VerbalVis therefore extends full-duplex interruption from conversational floor control to cross-channel coordination: it terminates or truncates stale speech, invalidates tool tasks associated with superseded response epochs, rejects late stale results, and replans against the current dashboard snapshot. The contribution lies in coordinating these mechanisms for visual analysis, not in introducing a new speech model or interruption detector.
-
-\subsection{Sensemaking and Analytical Intent Evolution}
+\subsection{Sensemaking and Analytical Revision}
 \label{sec:rw-sensemaking}
 
-Sensemaking research explains why analytical direction cannot be assumed to remain fixed. Russell et al. describe sensemaking as a search for representations that reduce the cost of organizing and interpreting information; when a representation becomes inadequate, analysts must change how evidence is structured~\cite{russell1993cost}. Pirolli and Card characterize analysis as movement between information-foraging and sensemaking loops, through which evidence and hypotheses repeatedly reshape one another~\cite{pirolli2005sensemaking}. Studies of enterprise analysis likewise show that analysts work with incomplete goals, repeatedly reformulate questions, and alternate among data acquisition, transformation, exploration, model construction, and communication~\cite{kandel2012enterprise}. Analytical revision is therefore a normal part of exploratory work rather than an exceptional recovery from user error.
+Sensemaking research characterizes analysis as an iterative process in which
+questions, explanations, and data focus evolve as evidence is encountered
+\cite{russell1993cost,pirolli2005sensemaking,sacha2014knowledge}.
+For \emph{Analytical Goal Shift}, information-seeking studies describe evolving
+queries and the refinement of broad goals into focused analytical subtasks
+\cite{bates1989berrypicking,vakkari2001changes,battle2019characterizing}.
+For \emph{Working-Hypothesis Revision}, Data--Frame Theory and scientific
+reasoning show that provisional explanations may be questioned or replaced
+when observations conflict with prior expectations
+\cite{klein2007dataframe,klahr1988dual,chinn1993anomalous}.
+For \emph{Analytical Scope Refinement}, information-foraging and visualization
+task frameworks distinguish analytical purpose from the data target and its
+progressive restriction by population, variable, time, geography, category, or
+granularity
+\cite{pirolli1999information,brehmer2013multilevel,
+wongsuphasawat2016voyager}.
 
-Visual analytics models and systems make aspects of this process explicit. The Knowledge Generation Model connects exploration, verification, and knowledge-generation loops, emphasizing reciprocal transitions among data, visualizations, hypotheses, insights, and knowledge~\cite{sacha2014knowledge}. Analytical-provenance research distinguishes interaction, insight, and rationale provenance~\cite{ragan2016provenance}. SensePath combines interaction logs with think-aloud data to reconstruct sensemaking trajectories~\cite{nguyen2016sensepath}, while Graphical Histories supports revisitation, comparison, and branching over prior visualization states~\cite{heer2008graphical}. Longitudinal evidence further shows that analysts change their organizational and sensemaking strategies as familiarity, evidence, and task understanding develop~\cite{davidson2023evolution}. Collectively, this literature provides theoretical and empirical grounding for studying evolving analytical goals, hypotheses, and scopes.
+These traditions provide theoretical support for the three forms, but do not
+establish a universal, exhaustive, or mutually exclusive taxonomy. We therefore
+treat them as theory-informed sensitizing concepts.
+Section~\ref{sec:formative} presents participants' utterances as empirical
+instances and specifies the coding boundaries adopted in this work; it does
+not serve as the theoretical evidence that these forms of revision exist.
 
-VerbalVis uses \emph{Goal Shift}, \emph{Hypothesis Correction}, and \emph{Scope Narrowing} as a design-oriented coding lens for this evolution. Goal Shift denotes a change in the primary analytical objective or frame. Hypothesis Correction revises or rejects an interpretation while retaining continuity with the broader problem. Scope Narrowing preserves the high-level objective while restricting the relevant population, period, region, variables, comparison set, or level of detail. These categories synthesize related ideas from reframing, hypothesis verification, conceptual restructuring, focused search, and changes of analytical strategy. They are paper-level analytical categories rather than runtime classifiers, mutually exclusive tool-dispatch branches, or an exhaustive taxonomy of sensemaking behavior.
 
-The difference from provenance and branching systems is again temporal and operational. Provenance usually records a trajectory after actions occur, and a branch usually begins from a stable or completed state. Such systems help analysts understand, revisit, or compare the path of analysis, but they do not generally specify what should happen when a revised intention is voiced while an AI-generated explanation and its associated actions are still active. VerbalVis connects the cognitive account of evolving intent to a full-duplex control mechanism: a spoken intervention can supersede active response work, prevent stale analytical results from changing the view, and resume the conversation from dashboard-grounded context. Thus, sensemaking theory explains \emph{why} intent evolves, while VerbalVis investigates how a conversational VA architecture can respond when that evolution is expressed.
 
-Taken together, these four research streams establish complementary foundations. V-NLIs ground language in data and visual state; agentic VA systems plan and execute multi-step analytical work; full-duplex models permit intervention during speech and increasingly support tool use; and sensemaking research explains why analytical objectives and hypotheses evolve. VerbalVis addresses the coordination problem at their intersection: maintaining a consistent analytical state when a spoken intervention supersedes an active response and the visualization actions associated with it.
 
-% =====================================================================
-\section{The Intent Evolution Framework}
-\label{sec:framework}
+Across these areas, prior work supports contextual language interaction,
+multistep analytical execution, spoken interruption, and evolving analytical
+histories. VerbalVis connects these capabilities by coordinating the validity
+of spoken output, analytical actions, and persistent dashboard state when an
+unfolding response is superseded.
 
-\subsection{A Cyclic Model of Intent Revision}
-We model EDA as a cycle whose nominal trajectory is repeatedly perturbed by revisions:
-\[
-\textsc{Observation} \rightarrow \textsc{Suspicion} \rightarrow \textsc{Interruption} \rightarrow \textsc{Intent Revision} \rightarrow
-\]
-\[
-\textsc{Analytical Replanning} \rightarrow \textsc{New Visualization} \rightarrow \textsc{Observation} \cdots
-\]
-The cycle is conventional in sensemaking literature~\cite{pirolli2005sensemaking}; our contribution is to identify \emph{Interruption} as an explicit, machine-detectable supersession cue that, in a full-duplex system, can be acted on synchronously rather than discovered after the fact from a transcript.
 
-\noindent\textbf{Scope of the framework.}
-The three revision types below are conceptual categories for describing observed analytical behavior, not separate runtime mechanisms. VerbalVis does not classify barge-in events into these types during execution. Instead, it handles all interruptions through the same downstream process: cancel or truncate stale response work, invalidate stale tool calls, accept the redirecting utterance, and regenerate against the latest dashboard context. Type-aware response policies are an important future extension, but they are not required for the architectural contribution in this paper.
 
-\subsection{Three Revision Types}
-Across our case study sessions and pilot interactions, we observe that intent revisions cluster into three recurring types, each with characteristic triggering conditions:
 
-\textbf{Type 1: Goal Shift.} The analyst's stated goal pivots to a different analytical question. Trigger: the current direction is mismatched with the analyst's actual interest, often because the system has chosen a plausible-but-tangential expansion. Example: while the system narrates category-level sales decomposition for November 2017, the analyst interrupts with ``I care about ratings, not sales.''
 
-\textbf{Type 2: Hypothesis Correction.} The analyst rejects the explanatory hypothesis under construction and substitutes an alternative. Trigger: a conflict between the system's tentative explanation and the analyst's domain prior. Example: the system attributes low-rated electronics to ``product quality issues''; the analyst interrupts with ``I think it is logistics, not the goods.''
-
-\textbf{Type 3: Scope Narrowing.} The analyst voluntarily contracts the analytical scope to a subset they already know to be relevant. Trigger: the analyst possesses business knowledge that renders the full sweep unnecessary. Example: during a national breakdown by state, the analyst interrupts with ``Only S\~ao Paulo.''
-
-These categories are not exhaustive, but in our case study they cover every revision we observed. Section~\ref{sec:case} illustrates each in detail.
-
-\subsection{Why Full-Duplex Matters}
-In a turn-based system, intent revisions can only occur at handoff points; a misdirected response must run to completion before the revision is even expressible. In a full-duplex system, intent revisions are continuously available: the user reclaims the floor by speaking, and the system, on detecting speech onset, can cancel the in-flight response and re-plan. The framework thus motivates a direct system-level requirement --- the controller must support synchronous cancellation, state preservation across the cancellation, and rapid replanning against the unchanged dashboard --- which we address in Section~\ref{sec:system}.
 
 % =====================================================================
 \section{System Design and Implementation}

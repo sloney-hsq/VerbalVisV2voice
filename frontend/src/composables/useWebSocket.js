@@ -10,6 +10,7 @@ export function useWebSocket(audioPlayer) {
   const socket = ref(null);
 
   let assistantTranscriptBuffer = "";
+  let suppressCurrentAssistantTranscript = false;
   let manualClose = false;
   let lastUrl = null;
 
@@ -83,18 +84,26 @@ export function useWebSocket(audioPlayer) {
 
       case "transcript":
         if (msg.role === "assistant") {
-          assistantTranscriptBuffer += msg.delta || "";
+          if (!suppressCurrentAssistantTranscript) {
+            assistantTranscriptBuffer += msg.delta || "";
+          }
         } else if (msg.role === "user") {
           store.addTranscript("user", msg.text);
         }
         break;
 
+      case "suppress_assistant_buffer":
+        assistantTranscriptBuffer = "";
+        suppressCurrentAssistantTranscript = true;
+        break;
+
       case "response_done":
         store.isAssistantSpeaking = false;
-        if (assistantTranscriptBuffer.trim()) {
+        if (!suppressCurrentAssistantTranscript && assistantTranscriptBuffer.trim()) {
           store.addTranscript("assistant", assistantTranscriptBuffer.trim());
         }
         assistantTranscriptBuffer = "";
+        suppressCurrentAssistantTranscript = false;
         if (audioPlayer) {
           audioPlayer.flush();
         }
@@ -104,6 +113,7 @@ export function useWebSocket(audioPlayer) {
         if (store.inputMode === "server_vad") {
           store.isAssistantSpeaking = false;
           assistantTranscriptBuffer = "";
+          suppressCurrentAssistantTranscript = false;
           if (audioPlayer) {
             audioPlayer.stop();
           }
@@ -112,6 +122,7 @@ export function useWebSocket(audioPlayer) {
 
       case "tool_call":
         console.log(`%c>>> TOOL CALL: ${msg.name}(${msg.arguments})`, "color: #f59e0b; font-weight: bold");
+        store.recordToolCall({ name: msg.name, arguments: msg.arguments });
         break;
 
       case "tool_result":

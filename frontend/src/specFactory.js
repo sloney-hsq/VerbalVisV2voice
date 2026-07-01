@@ -48,14 +48,16 @@ function reviewSpec(title) {
     title,
     width: CHART_WIDTH,
     height: CHART_HEIGHT,
-    mark: { type: "bar", tooltip: true },
+    mark: { type: "bar", tooltip: true, cornerRadiusEnd: 3 },
     encoding: {
       x: { field: "review_score", type: "ordinal", title: "Review Score" },
       y: { field: "order_count", type: "quantitative", title: "Count" },
       color: {
         field: "review_score",
         type: "ordinal",
-        scale: { scheme: "orangered" },
+        scale: {
+          range: ["#dbeafe", "#bfdbfe", "#93c5fd", "#2563eb", "#0f2f66"],
+        },
         legend: null,
       },
     },

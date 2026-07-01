@@ -16,7 +16,7 @@ import Dashboard from "./components/Dashboard.vue";
 }
 
 body {
-  background: #f9fafb;
+  background: #fff;
   min-height: 100vh;
 }
 </style>

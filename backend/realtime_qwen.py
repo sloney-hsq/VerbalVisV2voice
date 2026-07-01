@@ -209,6 +209,7 @@ class QwenRealtimeSession:
 
         self._pending_tool_calls: dict[str, int] = {}
         self._pending_should_respond: dict[str, bool] = {}
+        self._responses_with_tool_calls: set[str] = set()
         self._session_update_pending = False
         self._session_updated = asyncio.Event()
         self._qwen_ready = False
@@ -345,6 +346,7 @@ class QwenRealtimeSession:
         self._assistant_transcript_buffer = ""
         self._pending_tool_calls.clear()
         self._pending_should_respond.clear()
+        self._responses_with_tool_calls.clear()
         self._invalidated_response_ids.clear()
         for task in list(self._tool_tasks):
             task.cancel()
@@ -636,12 +638,18 @@ class QwenRealtimeSession:
                     self._tool_logger.info("TOOL_CALL name=%s args=%s", _tool_name, _tool_args)
 
                 await self._send_client({
+                    "type": "suppress_assistant_buffer",
+                    "reason": "tool_call",
+                    "response_id": response_id,
+                })
+                await self._send_client({
                     "type": "tool_call",
                     "name": _tool_name,
                     "arguments": _tool_args,
                 })
 
                 if response_id:
+                    self._responses_with_tool_calls.add(response_id)
                     self._pending_tool_calls[response_id] = (
                         self._pending_tool_calls.get(response_id, 0) + 1
                     )
@@ -655,9 +663,18 @@ class QwenRealtimeSession:
 
             elif etype == "response.done":
                 self._finish_response_metrics(response_id, event.get("response", {}))
-                if self._assistant_transcript_buffer.strip():
+                has_tool_call = bool(response_id and response_id in self._responses_with_tool_calls)
+                if self._assistant_transcript_buffer.strip() and not has_tool_call:
                     self._log_conversation("AI", self._assistant_transcript_buffer.strip())
+                elif has_tool_call and self._event_logger:
+                    self._event_logger.info(
+                        "SUPPRESSED_PRE_TOOL_TRANSCRIPT response_id=%s text=%s",
+                        response_id,
+                        self._assistant_transcript_buffer.strip()[:500],
+                    )
                 self._assistant_transcript_buffer = ""
+                if response_id:
+                    self._responses_with_tool_calls.discard(response_id)
                 self.current_response_id = None
                 self._current_assistant_audio_item_id = None
                 self._current_assistant_audio_content_index = 0

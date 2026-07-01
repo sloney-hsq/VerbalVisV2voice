@@ -17,6 +17,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const model = ref("qwen3.5-omni-plus-realtime");
   const inputAudioRate = ref(16000);
   const outputAudioRate = ref(24000);
+  const recentToolCalls = ref([]);
 
   // ---- getters ----
   const viewIds = computed(() => views.value.map((v) => v.id));
@@ -81,12 +82,26 @@ export const useDashboardStore = defineStore("dashboard", () => {
     // append_visual data comes via views_update
   }
 
+  function recordToolCall(call = {}) {
+    const item = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: call.name || "tool",
+      arguments: call.arguments || "",
+      ts: Date.now(),
+    };
+    recentToolCalls.value = [item, ...recentToolCalls.value].slice(0, 3);
+  }
+
   function addTranscript(role, text) {
     transcripts.value.push({ role, text, ts: Date.now() });
     // Keep last 50
     if (transcripts.value.length > 50) {
       transcripts.value = transcripts.value.slice(-50);
     }
+  }
+
+  function clearTranscripts() {
+    transcripts.value = [];
   }
 
   return {
@@ -104,6 +119,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     model,
     inputAudioRate,
     outputAudioRate,
+    recentToolCalls,
     viewIds,
     initViews,
     setSessionInfo,
@@ -111,6 +127,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
     appendView,
     highlightView,
     handleToolResult,
+    recordToolCall,
     addTranscript,
+    clearTranscripts,
   };
 });

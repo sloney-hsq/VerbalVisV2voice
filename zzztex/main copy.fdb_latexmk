@@ -1,14 +1,14 @@
 # Fdb version 4
-["bibtex main"] 1782914107.38336 "main.aux" "main.bbl" "main" 1782914107.84081 2
+["bibtex main copy"] 1782910638.21227 "main copy.aux" "main copy.bbl" "main copy" 1782910640.89016 0
   "./main.bib" 1782909290 35008 483773d1f011c83eab778899a1f78b4f ""
   "f:/texlive/2025/texmf-dist/bibtex/bst/ieeetran/IEEEtran.bst" 1763528537 57748 7c8250ecf02814ce6ddc0cdbb63df1dd ""
-  "main.aux" 1782914106 10504 76e43273878ba968ef0c298ad370ed7d "pdflatex"
+  "main copy.aux" 1782910639 17458 a67e3559baf0458769f2d74199497da4 "pdflatex"
   (generated)
-  "main.bbl"
-  "main.blg"
+  "main copy.bbl"
+  "main copy.blg"
   (rewritten before read)
-["pdflatex"] 1782914105.08481 "f:/VerbalVis2/zzztex/main.tex" "main.pdf" "main" 1782914107.84108 0
-  "f:/VerbalVis2/zzztex/main.tex" 1782914101 48283 4272a75bde09e4aeb23190a66cbe9468 ""
+["pdflatex"] 1782910638.6664 "f:/VerbalVis2/zzztex/main copy.tex" "main copy.pdf" "main copy" 1782910640.89082 2
+  "f:/VerbalVis2/zzztex/main copy.tex" 1782910275 93311 adcfd46871f25e02ddc147ea4659547e ""
   "f:/texlive/2025/texmf-dist/fonts/enc/dvips/base/8r.enc" 1763528239 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "f:/texlive/2025/texmf-dist/fonts/map/fontname/texfonts.map" 1763528377 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "f:/texlive/2025/texmf-dist/fonts/tfm/adobe/courier/pcrr7t.tfm" 1763528141 960 379cc0019370a9e0208a0a3f949f847a ""
@@ -121,14 +121,14 @@
   "f:/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1763529780 5512713 9e413cc0f983b4aca678246d178017b7 ""
   "f:/texlive/2025/texmf-var/web2c/pdftex/pdflatex.fmt" 1763530042 3346019 8c1f0a52e620bcfef80d4041c138b18c ""
   "f:/texlive/2025/texmf.cnf" 1763529761 713 e69b156964470283e0530f5060668171 ""
-  "main.aux" 1782914106 10504 76e43273878ba968ef0c298ad370ed7d "pdflatex"
-  "main.bbl" 1782914107 10973 93289f01ba6c5853c2028c2d48903005 "bibtex main"
-  "main.out" 1782914106 5222 c715fd6fd9f795cc65a5db854179c6c6 "pdflatex"
-  "main.tex" 1782914101 48283 4272a75bde09e4aeb23190a66cbe9468 ""
+  "main copy.aux" 1782910639 17458 a67e3559baf0458769f2d74199497da4 "pdflatex"
+  "main copy.bbl" 0 -1 0 "bibtex main copy"
+  "main copy.out" 1782910639 9885 c07757a181742a076f049cfb362cca90 "pdflatex"
+  "main copy.tex" 1782910275 93311 adcfd46871f25e02ddc147ea4659547e ""
   "png/teaser-main.png" 1782738891 1233377 23a36faf17e48a94ae85b04deac9d2da ""
   (generated)
-  "main.aux"
-  "main.log"
-  "main.out"
-  "main.pdf"
+  "main copy.aux"
+  "main copy.log"
+  "main copy.out"
+  "main copy.pdf"
   (rewritten before read)

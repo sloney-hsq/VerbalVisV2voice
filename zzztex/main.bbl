@@ -20,11 +20,17 @@
 \providecommand{\BIBdecl}{\relax}
 \BIBdecl
 
+\bibitem{russell1993cost}
+D.~M. Russell, M.~J. Stefik, P.~Pirolli, and S.~K. Card, ``The cost structure of sensemaking,'' in \emph{Proceedings of the INTERCHI '93 Conference on Human Factors in Computing Systems}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computing Machinery, 1993, pp. 269--276.
+
 \bibitem{pirolli2005sensemaking}
 P.~Pirolli and S.~Card, ``The sensemaking process and leverage points for analyst technology as identified through cognitive task analysis,'' in \emph{Proceedings of the International Conference on Intelligence Analysis}, vol.~5.\hskip 1em plus 0.5em minus 0.4em\relax McLean, VA, USA, 2005, pp. 2--4.
 
-\bibitem{kandel2012enterprise}
-S.~Kandel, A.~Paepcke, J.~M. Hellerstein, and J.~Heer, ``Enterprise data analysis and visualization: An interview study,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~18, no.~12, pp. 2917--2926, 2012.
+\bibitem{sacha2014knowledge}
+D.~Sacha, A.~Stoffel, F.~Stoffel, B.~C. Kwon, G.~Ellis, and D.~A. Keim, ``Knowledge generation model for visual analytics,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~20, no.~12, pp. 1604--1613, 2014.
+
+\bibitem{battle2019characterizing}
+L.~Battle and J.~Heer, ``Characterizing exploratory visual analysis: A literature review and evaluation of analytic provenance in tableau,'' \emph{Computer Graphics Forum}, vol.~38, no.~3, pp. 145--159, 2019.
 
 \bibitem{gao2015datatone}
 T.~Gao, M.~Dontcheva, E.~Adar, Z.~Liu, and K.~G. Karahalios, ``{DataTone}: Managing ambiguity in natural language interfaces for data visualization,'' in \emph{Proceedings of the 28th Annual ACM Symposium on User Interface Software and Technology}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computing Machinery, 2015, pp. 489--500.
@@ -35,41 +41,56 @@ V.~Setlur, S.~E. Battersby, M.~Tory, R.~Gossweiler, and A.~X. Chang, ``{Eviza}: 
 \bibitem{narechania2021nl4dv}
 A.~Narechania, A.~Srinivasan, and J.~T. Stasko, ``{NL4DV}: A toolkit for generating analytic specifications for data visualization from natural language queries,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~27, no.~2, pp. 369--379, 2021.
 
+\bibitem{dibia2023lida}
+V.~Dibia, ``{LIDA}: A tool for automatic generation of grammar-agnostic visualizations and infographics using large language models,'' in \emph{Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics: System Demonstrations}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computational Linguistics, 2023, pp. 113--126.
+
 \bibitem{wang2024dataformulator2}
 C.~Wang, B.~Lee, S.~M. Drucker, D.~Marshall, and J.~Gao, ``Data formulator 2: Iteratively creating rich visualizations with ai,'' 2024.
 
 \bibitem{zhao2024lightva}
 Y.~Zhao, J.~Wang, L.~Xiang, X.~Zhang, Z.~Guo, C.~Turkay, Y.~Zhang, and S.~Chen, ``{LightVA}: Lightweight visual analytics with {LLM} agent-based task planning and execution,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, 2024, early Access.
 
-\bibitem{cheng2026dashchat}
-S.~Shen, Z.~Lin, W.~Liu, C.~Xin, W.~Dai, S.~Chen, X.~Wen, and X.~Lan, ``Dashchat: Interactive authoring of performance dashboard design prototypes through conversation with llm-powered agents,'' in \emph{Extended Abstracts of the CHI Conference on Human Factors in Computing Systems}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computing Machinery, 2026.
+\bibitem{klein2007dataframe}
+G.~Klein, J.~K. Phillips, E.~L. Rall, and D.~A. Peluso, ``A data--frame theory of sensemaking,'' in \emph{Expertise Out of Context: Proceedings of the Sixth International Conference on Naturalistic Decision Making}, R.~R. Hoffman, Ed.\hskip 1em plus 0.5em minus 0.4em\relax New York: Lawrence Erlbaum Associates, 2007, pp. 113--155.
 
-\bibitem{openai_realtime_docs}
-{OpenAI}, ``Realtime {API} documentation,'' \url{https://platform.openai.com/docs/guides/realtime}, 2026, accessed: 2026-06-25.
+\bibitem{bates1989berrypicking}
+M.~J. Bates, ``The design of browsing and berrypicking techniques for the online search interface,'' \emph{Online Review}, vol.~13, no.~5, pp. 407--424, 1989.
 
 \bibitem{srinivasan2018orko}
 A.~Srinivasan and J.~T. Stasko, ``{Orko}: Facilitating multimodal interaction for visual exploration and analysis of networks,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~24, no.~1, pp. 511--521, 2018.
 
-\bibitem{mitra2022conversational}
-R.~Mitra, A.~Narechania, A.~Endert, and J.~T. Stasko, ``Facilitating conversational interaction in natural language interfaces for visualization,'' in \emph{2022 IEEE Visualization and Visual Analytics Conference}.\hskip 1em plus 0.5em minus 0.4em\relax IEEE, 2022, pp. 6--10.
+\bibitem{srinivasan2020inchorus}
+A.~Srinivasan, B.~Lee, N.~H. Riche, S.~M. Drucker, and K.~Hinckley, ``{InChorus}: Designing consistent multimodal interactions for data visualization on tablet devices,'' in \emph{Proceedings of the 2020 CHI Conference on Human Factors in Computing Systems}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computing Machinery, 2020, pp. 1--13.
+
+\bibitem{srinivasan2021databreeze}
+A.~Srinivasan, B.~Lee, and J.~T. Stasko, ``Interweaving multimodal interaction with flexible unit visualizations for data exploration,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~27, no.~8, pp. 3519--3533, 2021.
 
 \bibitem{srinivasan2021snowy}
 A.~Srinivasan and V.~Setlur, ``{Snowy}: Recommending utterances for conversational visual analysis,'' in \emph{Proceedings of the 34th Annual ACM Symposium on User Interface Software and Technology}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computing Machinery, 2021, pp. 864--880.
 
-\bibitem{dibia2023lida}
-V.~Dibia, ``{LIDA}: A tool for automatic generation of grammar-agnostic visualizations and infographics using large language models,'' in \emph{Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics: System Demonstrations}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computational Linguistics, 2023, pp. 113--126.
+\bibitem{mitra2022conversational}
+R.~Mitra, A.~Narechania, A.~Endert, and J.~T. Stasko, ``Facilitating conversational interaction in natural language interfaces for visualization,'' in \emph{2022 IEEE Visualization and Visual Analytics Conference}.\hskip 1em plus 0.5em minus 0.4em\relax IEEE, 2022, pp. 6--10.
 
-\bibitem{he2025proactiveva}
-Y.~Zhao, X.~Shu, L.~Fan, L.~Gao, Y.~Zhang, and S.~Chen, ``Proactiveva: Proactive visual analytics with llm-based ui agent,'' \emph{arXiv preprint arXiv:2507.18165}, 2025, preprint.
+\bibitem{wang2024dataformulator}
+C.~Wang, J.~Thompson, and B.~Lee, ``Data formulator: Ai-powered concept-driven visualization authoring,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~30, no.~1, pp. 1128--1138, 2024.
+
+\bibitem{ma2023insightpilot}
+P.~Ma, R.~Ding, S.~Wang, S.~Han, and D.~Zhang, ``{InsightPilot}: An {LLM}-empowered automated data exploration system,'' in \emph{Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing: System Demonstrations}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computational Linguistics, 2023, pp. 346--352.
 
 \bibitem{xie2024waitgpt}
 L.~Xie, C.~Zheng, H.~Xia, H.~Qu, and Z.-T. Chen, ``{WaitGPT}: Monitoring and steering conversational {LLM} agent in data analysis with on-the-fly code visualization,'' in \emph{Proceedings of the 37th Annual ACM Symposium on User Interface Software and Technology}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computing Machinery, 2024.
 
+\bibitem{weng2025insightlens}
+L.~Weng, X.~Wang, J.~Lu, Y.~Feng, Y.~Liu, H.~Feng, D.~Huang, and W.~Chen, ``{InsightLens}: Augmenting llm-powered data analysis with interactive insight management and navigation,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~31, no.~6, pp. 3719--3732, 2025.
+
+\bibitem{skantze2021turntaking}
+G.~Skantze, ``Turn-taking in conversational systems and human-robot interaction: A review,'' \emph{Computer Speech \& Language}, vol.~67, p. 101178, 2021.
+
+\bibitem{heins1997bargein}
+R.~Heins, M.~Franzke, and A.~Bayya, ``Turn-taking as a design principle for barge-in in spoken language systems,'' \emph{International Journal of Speech Technology}, vol.~2, pp. 155--164, 1997.
+
 \bibitem{lin2022duplex}
 T.-E. Lin, Y.~Wu, F.~Huang, L.~Si, J.~Sun, and Y.~Li, ``Duplex conversation: Towards human-like interaction in spoken dialogue systems,'' in \emph{Proceedings of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computing Machinery, 2022, pp. 3299--3308.
-
-\bibitem{wang2024fullduplex}
-P.~Wang, S.~Lu, Y.~Tang, S.~Yan, W.~Xia, and Y.~Xiong, ``A full-duplex speech dialogue scheme based on large language models,'' in \emph{Advances in Neural Information Processing Systems}, vol.~37, 2024, pp. 13\,372--13\,403.
 
 \bibitem{veluri2024syncllm}
 B.~Veluri, B.~N. Peloquin, B.~Yu, H.~Gong, and S.~Gollakota, ``Beyond turn-based interfaces: Synchronous {LLM}s as full-duplex dialogue agents,'' in \emph{Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computational Linguistics, 2024, pp. 21\,390--21\,402.
@@ -77,29 +98,26 @@ B.~Veluri, B.~N. Peloquin, B.~Yu, H.~Gong, and S.~Gollakota, ``Beyond turn-based
 \bibitem{defossez2024moshi}
 A.~D{\'e}fossez, L.~Mazar{\'e}, M.~Orsini, A.~Royer, P.~P{\'e}rez, H.~J{\'e}gou, E.~Grave, and N.~Zeghidour, ``Moshi: A speech-text foundation model for real-time dialogue,'' 2024.
 
-\bibitem{zhang2026duplexsla}
-H.~Zhang, J.~Chen, D.~Wu, Y.~Li, Y.~Zhang, X.~T. Zhang, C.~Liu, Q.~Lin, Y.~Peng, H.~Liu, E.~S. Chng, C.~Yan, B.~Wu, Y.~Huang, X.~Yang, and F.~Tian, ``Duplexsla: A full-duplex spoken language model with synchronized speech, language, and action,'' \emph{arXiv preprint arXiv:2605.20755}, 2026, preprint.
+\bibitem{yu2025salmonnomni}
+W.~Yu, S.~Wang, X.~Yang, X.~Chen, X.~Tian, J.~Zhang, G.~Sun, L.~Lu, Y.~Wang, and C.~Zhang, ``{SALMONN-omni}: A standalone speech {LLM} without codec injection for full-duplex conversation,'' in \emph{Advances in Neural Information Processing Systems}, 2025.
 
-\bibitem{lin2026fdbv3}
-G.-T. Lin, C.~Chen, Z.~Chen, and H.-y. Lee, ``{Full-Duplex-Bench-v3}: Benchmarking tool use for full-duplex voice agents under real-world disfluency,'' 2026.
+\bibitem{vakkari2001changes}
+P.~Vakkari, ``Changes in search tactics and relevance judgements when preparing a research proposal: A summary of the findings of a longitudinal study,'' \emph{Information Retrieval}, vol.~4, no. 3--4, pp. 295--310, 2001.
 
-\bibitem{russell1993cost}
-D.~M. Russell, M.~J. Stefik, P.~Pirolli, and S.~K. Card, ``The cost structure of sensemaking,'' in \emph{Proceedings of the INTERCHI '93 Conference on Human Factors in Computing Systems}.\hskip 1em plus 0.5em minus 0.4em\relax Association for Computing Machinery, 1993, pp. 269--276.
+\bibitem{klahr1988dual}
+D.~Klahr and K.~Dunbar, ``Dual space search during scientific reasoning,'' \emph{Cognitive Science}, vol.~12, no.~1, pp. 1--48, 1988.
 
-\bibitem{sacha2014knowledge}
-D.~Sacha, A.~Stoffel, F.~Stoffel, B.~C. Kwon, G.~Ellis, and D.~A. Keim, ``Knowledge generation model for visual analytics,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~20, no.~12, pp. 1604--1613, 2014.
+\bibitem{chinn1993anomalous}
+C.~A. Chinn and W.~F. Brewer, ``The role of anomalous data in knowledge acquisition: A theoretical framework and implications for science instruction,'' \emph{Review of Educational Research}, vol.~63, no.~1, pp. 1--49, 1993.
 
-\bibitem{ragan2016provenance}
-E.~D. Ragan, A.~Endert, J.~Sanyal, and J.~Chen, ``Characterizing provenance in visualization and data analysis: An organizational framework of provenance types and purposes,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~22, no.~1, pp. 31--40, 2016.
+\bibitem{pirolli1999information}
+P.~Pirolli and S.~K. Card, ``Information foraging,'' \emph{Psychological Review}, vol. 106, no.~4, pp. 643--675, 1999.
 
-\bibitem{nguyen2016sensepath}
-P.~H. Nguyen, K.~Xu, A.~Wheat, B.~L.~W. Wong, S.~Attfield, and B.~Fields, ``{SensePath}: Understanding the sensemaking process through analytic provenance,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~22, no.~1, pp. 41--50, 2016.
+\bibitem{brehmer2013multilevel}
+M.~Brehmer and T.~Munzner, ``A multi-level typology of abstract visualization tasks,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~19, no.~12, pp. 2376--2385, 2013.
 
-\bibitem{heer2008graphical}
-J.~Heer, J.~Mackinlay, C.~Stolte, and M.~Agrawala, ``Graphical histories for visualization: Supporting analysis, communication, and evaluation,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~14, no.~6, pp. 1189--1196, 2008.
-
-\bibitem{davidson2023evolution}
-K.~Davidson, L.~Lisle, K.~Whitley, D.~A. Bowman, and C.~North, ``Exploring the evolution of sensemaking strategies in immersive space to think,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~29, no.~12, pp. 5294--5307, 2023.
+\bibitem{wongsuphasawat2016voyager}
+K.~Wongsuphasawat, D.~Moritz, A.~Anand, J.~Mackinlay, B.~Howe, and J.~Heer, ``Voyager: Exploratory analysis via faceted browsing of visualization recommendations,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~22, no.~1, pp. 649--658, 2016.
 
 \bibitem{brehmer2013multi}
 M.~Brehmer and T.~Munzner, ``A multi-level typology of abstract visualization tasks,'' \emph{IEEE Transactions on Visualization and Computer Graphics}, vol.~19, no.~12, pp. 2376--2385, 2013.

@@ -8,49 +8,70 @@ Reallocated singl_function (elt_size=4) to 100 items from 50.
 Reallocated wiz_functions (elt_size=4) to 6000 items from 3000.
 Reallocated singl_function (elt_size=4) to 100 items from 50.
 Database file #1: main.bib
+Repeated entry---line 1209 of file main.bib
+ : @inproceedings{russell1993cost
+ :                               ,
+I'm skipping whatever remains of this entry
+Repeated entry---line 1251 of file main.bib
+ : @inproceedings{pirolli2005sensemaking
+ :                                      ,
+I'm skipping whatever remains of this entry
+Repeated entry---line 1267 of file main.bib
+ : @incollection{klein2007dataframe
+ :                                 ,
+I'm skipping whatever remains of this entry
+Repeated entry---line 1357 of file main.bib
+ : @article{battle2019characterizing
+ :                                  ,
+I'm skipping whatever remains of this entry
+Repeated entry---line 1423 of file main.bib
+ : @article{sacha2014knowledge
+ :                            ,
+I'm skipping whatever remains of this entry
 -- IEEEtran.bst version 1.14 (2015/08/26) by Michael Shell.
 -- http://www.michaelshell.org/tex/ieeetran/bibtex/
 -- See the "IEEEtran_bst_HOWTO.pdf" manual for usage information.
 
 Done.
-You've used 30 entries,
+You've used 36 entries,
             4087 wiz_defined-function locations,
-            980 strings with 14132 characters,
-and the built_in function-call counts, 25843 in all, are:
-= -- 1969
-> -- 766
-< -- 213
-+ -- 423
-- -- 154
-* -- 1252
-:= -- 3626
-add.period$ -- 71
-call.type$ -- 30
-change.case$ -- 35
-chr.to.int$ -- 513
-cite$ -- 30
-duplicate$ -- 1823
-empty$ -- 2074
-format.name$ -- 169
-if$ -- 6051
+            1023 strings with 15103 characters,
+and the built_in function-call counts, 31871 in all, are:
+= -- 2534
+> -- 823
+< -- 301
++ -- 459
+- -- 145
+* -- 1535
+:= -- 4525
+add.period$ -- 85
+call.type$ -- 36
+change.case$ -- 40
+chr.to.int$ -- 708
+cite$ -- 36
+duplicate$ -- 2233
+empty$ -- 2509
+format.name$ -- 170
+if$ -- 7486
 int.to.chr$ -- 0
-int.to.str$ -- 30
-missing$ -- 353
-newline$ -- 113
-num.names$ -- 30
-pop$ -- 871
+int.to.str$ -- 36
+missing$ -- 394
+newline$ -- 131
+num.names$ -- 38
+pop$ -- 911
 preamble$ -- 1
 purify$ -- 0
 quote$ -- 2
-skip$ -- 1943
+skip$ -- 2440
 stack$ -- 0
-substring$ -- 1268
-swap$ -- 1508
-text.length$ -- 42
+substring$ -- 1716
+swap$ -- 1903
+text.length$ -- 65
 text.prefix$ -- 0
 top$ -- 5
-type$ -- 30
+type$ -- 36
 warning$ -- 0
-while$ -- 110
-width$ -- 32
-write$ -- 306
+while$ -- 154
+width$ -- 38
+write$ -- 376
+(There were 5 error messages)
