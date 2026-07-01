@@ -64,7 +64,7 @@
       </span>
       <div class="filter-badges">
         <span class="filter-badge" v-for="(f, i) in store.activeFilters" :key="i">
-          {{ f.field }} {{ f.operator }} {{ f.value }}
+          {{ filterLabel(f) }}
         </span>
       </div>
     </section>
@@ -346,6 +346,44 @@ function formatTranscriptTime(ts) {
     second: "2-digit",
     hour12: false,
   }).format(new Date(ts || Date.now()));
+}
+
+function filterLabel(filter) {
+  return `${fieldLabel(filter.field)} ${operatorLabel(filter.operator)} ${formatValue(filter.value)}`;
+}
+
+function fieldLabel(field) {
+  const labels = {
+    order_month: "月份",
+    order_week: "周",
+    order_date: "日期",
+    order_dow: "星期",
+    order_hour: "小时",
+    review_score: "评分",
+    customer_state: "州",
+    product_category: "品类",
+    delivery_days: "配送天数",
+    delivery_speed_bucket: "配送速度",
+    revenue: "营收",
+  };
+  return labels[field] || field;
+}
+
+function operatorLabel(operator) {
+  const labels = {
+    eq: "=",
+    neq: "!=",
+    in: "in",
+    gte: ">=",
+    lte: "<=",
+    between: "between",
+  };
+  return labels[operator] || operator;
+}
+
+function formatValue(value) {
+  if (Array.isArray(value)) return value.join(", ");
+  return value ?? "";
 }
 
 function clearTranscript() {

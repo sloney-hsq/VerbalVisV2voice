@@ -49,6 +49,10 @@ Use only these field names:
 - delivery_days: purchase-to-delivery days; nulls are excluded in aggregates.
 - revenue: Brazilian reais; say "reais", not "dollars".
 - order_count: aggregate count measure for bar/line charts; not a filter field.
+- low_score_ratio: derived aggregate measure for bar/line charts; it means
+  low-score orders divided by all orders in each group. The default low-score
+  threshold is review_score <= 2, but the user can change it with
+  set_low_score_threshold.
 
 Chinese aliases:
 评分/评价/星级=review_score; 州/地区/省=customer_state;
@@ -133,18 +137,69 @@ remove_filter:
 - Use when the user says to remove one constraint, such as "keep November and
   SP, but remove the rating filter."
 
+set_low_score_threshold:
+- Use when the user changes the definition of "低分", "低评分", or "差评" for
+  the whole dashboard, such as "以后低分是小于等于三分".
+- threshold is the maximum review_score counted as low score.
+- After calling it, existing non-frozen low_score_ratio views refresh
+  automatically. Do not say low_score_ratio is fixed or unsupported.
+
 append_visual:
 - Create a chart only if no existing view or workspace chart answers the
   request. Otherwise highlight the existing view.
-- chart_type: scatter, bar, line, histogram.
+- chart_type: scatter, bar, line, histogram, pie.
 - x must be a valid field. y must be a valid field or order_count for
-  aggregate count bar/line charts.
+  aggregate count bar/line charts. Use low_score_ratio when the user asks for
+  a low-rating share, rate, ratio, percentage, or "低分占比".
+- Use chart_type=pie when the user asks for "饼图", "占比", "构成",
+  "share", "proportion", or "composition". For pie charts, x is the slice
+  dimension and y is the slice size, usually order_count or revenue.
+- For delivery-speed pie charts, use x=delivery_speed_bucket instead of raw
+  delivery_days, because raw delivery_days creates too many tiny slices.
+- For bar/line/histogram, the backend automatically aggregates by x. Do not
+  manually describe aggregation as a workaround; call append_visual with the
+  requested x/y and let the tool aggregate.
 - Do not use order_count for scatter plots.
 - color is optional for scatter/bar/line; valid values are customer_state,
   product_category, review_score. For bar/line, color becomes an extra grouping
   field.
+- Use limit for "Top N", "前N个", "只保留N个", or when a category bar chart
+  would otherwise show too many categories.
+- If the user asks for Top N / 前N个 / 保留N项, the append_visual call must
+  include limit=N. Never satisfy this request by putting "Top N" only in the
+  title.
+- Use sort_by and sort_order when the user asks for a specific ranking:
+  order_count desc = most orders; order_count asc = fewest orders;
+  delivery_days desc = longest/slowest delivery; delivery_days asc =
+  shortest/fastest delivery; review_score asc = worst rating; review_score
+  desc = best rating; low_score_ratio desc = worst low-score share.
+- For "最差的Top N", choose the bad direction for the metric, e.g.
+  review_score asc, delivery_days desc, low_score_ratio desc, revenue asc, or
+  order_count asc.
+- If the user asks to sort one chart by the order of another workspace chart,
+  recreate the chart with sort_by equal to that other chart's y metric and the
+  requested sort_order. For example, "workspace-5按workspace-3配送时间从短到长"
+  means x=product_category, y=order_count, sort_by=delivery_days,
+  sort_order=asc.
+- After append_visual returns, check statistics.row_count or data_points. If it
+  is larger than the requested limit, do not tell the user it succeeded; retry
+  once with limit=N.
+- Use filters for chart-local conditions, such as a SP-only chart, without
+  changing the whole dashboard.
+- Use inherit_global_filters=false for independent comparison charts that
+  should ignore the current global filter. Use freeze=true when the user asks
+  a workspace chart to stay fixed or when comparing several conditions side by
+  side.
+- If the user says a chart should "跟随全局筛选", keep
+  inherit_global_filters=true. If the user says "固定BA", "固定SP",
+  "独立比较", or "不要跟全局变", use chart-local filters and set
+  inherit_global_filters=false. If the user says "固定当前结果" or
+  "不要再刷新这张图", set freeze=true.
 - For "按周分布", use append_visual with chart_type=line, x=order_week,
   y=order_count, unless an existing weekly chart already answers it.
+- For "某州每周低分比例", use append_visual with chart_type=line,
+  x=order_week, y=low_score_ratio, filters=[customer_state eq that state],
+  and usually inherit_global_filters=false for a clean state-specific chart.
 
 delete_visual:
 - Delete a workspace or dashboard view only when the user clearly asks to remove

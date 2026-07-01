@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,13 @@ from db import (
 log = logging.getLogger(__name__)
 
 COUNT_MEASURE = "order_count"
-APPEND_Y_FIELDS = FIELDS + [COUNT_MEASURE]
+LOW_SCORE_RATIO = "low_score_ratio"
+DERIVED_MEASURES = [LOW_SCORE_RATIO]
+APPEND_Y_FIELDS = FIELDS + [COUNT_MEASURE, *DERIVED_MEASURES]
+SORT_FIELDS = APPEND_Y_FIELDS
+TIME_FIELDS = {"order_month", "order_week", "order_date", "order_dow", "order_hour"}
+MAX_VIEW_LIMIT = 100
+LOW_SCORE_THRESHOLD_DEFAULT = 2
 
 # ------------------------------------------------------------------
 # Runtime state (per-session; single-user prototype)
@@ -35,6 +42,7 @@ active_filters: list[dict[str, Any]] = []
 workspace_counter: int = 0          # workspace-1, workspace-2, …
 views: list[dict[str, Any]] = []    # all views (base + workspace)
 highlighted_view: str | None = None
+low_score_threshold: int = LOW_SCORE_THRESHOLD_DEFAULT
 
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -106,10 +114,11 @@ BASE_VIEWS_DEFS = [
 
 def init_views() -> None:
     """Reset state and populate base views with data."""
-    global active_filters, workspace_counter, views, highlighted_view
+    global active_filters, workspace_counter, views, highlighted_view, low_score_threshold
     active_filters = []
     workspace_counter = 0
     highlighted_view = None
+    low_score_threshold = LOW_SCORE_THRESHOLD_DEFAULT
     views = []
     for defn in BASE_VIEWS_DEFS:
         view = {**defn, "data": [], "statistics": {}}
@@ -198,13 +207,20 @@ TOOL_SCHEMAS = [
     ),
     _tool(
         "append_visual",
-        "Create a new chart and append it to the dashboard grid.",
+        (
+            "Create a new chart and append it to the dashboard grid. "
+                        "The backend automatically aggregates non-scatter charts from x/y: "
+                        "order_count means grouped order count, revenue means grouped sum, "
+                        "delivery_days means grouped average, and low_score_ratio is derived. "
+            "For Top N requests, pass limit as a real argument. For worst/bottom "
+            "Top N or explicit sorting requests, pass sort_by and sort_order."
+        ),
         {
             "type": "object",
             "properties": {
                 "chart_type": {
                     "type": "string",
-                    "enum": ["scatter", "bar", "line", "histogram"],
+                    "enum": ["scatter", "bar", "line", "histogram", "pie"],
                 },
                 "x": {
                     "type": "string",
@@ -214,7 +230,10 @@ TOOL_SCHEMAS = [
                 "y": {
                     "type": "string",
                     "enum": APPEND_Y_FIELDS,
-                    "description": "Y-axis field or order_count for count aggregations.",
+                    "description": (
+                        "Y-axis field, order_count for count aggregations, or "
+                        "low_score_ratio for low-score orders divided by all orders."
+                    ),
                 },
                 "color": {
                     "type": ["string", "null"],
@@ -225,8 +244,91 @@ TOOL_SCHEMAS = [
                     "type": "string",
                     "description": "Human-readable chart title.",
                 },
+                "limit": {
+                    "type": ["integer", "null"],
+                    "description": (
+                        "Optional Top N row limit after backend aggregation and sorting. "
+                        "Required for user requests like Top 15, 前十五个, 保留15个, "
+                        "只显示前N项. Do not express Top N only in the title."
+                    ),
+                },
+                "sort_by": {
+                    "type": ["string", "null"],
+                    "enum": SORT_FIELDS + [None],
+                    "description": (
+                        "Optional metric/field used to sort aggregated rows before limit. "
+                        "Use delivery_days for '按配送时间排序', review_score for score ranking, "
+                        "low_score_ratio for low-score-rate ranking, order_count for count ranking."
+                    ),
+                },
+                "sort_order": {
+                    "type": ["string", "null"],
+                    "enum": ["asc", "desc", None],
+                    "description": (
+                        "Sort direction before applying limit. asc means low-to-high/short-to-long; "
+                        "desc means high-to-low/long-to-short. For worst Top N choose the bad direction "
+                        "for the metric, e.g. review_score asc, delivery_days desc, low_score_ratio desc."
+                    ),
+                },
+                "low_score_threshold": {
+                    "type": ["integer", "null"],
+                    "description": (
+                        "Threshold for low_score_ratio. Default is current dashboard low-score threshold "
+                        "(initially 2). Use 3 when the user defines low-score as review_score <= 3."
+                    ),
+                },
+                "filters": {
+                    "type": ["array", "null"],
+                    "description": (
+                        "Optional chart-local filters applied only to this new view. "
+                        "Each filter has field, operator, and value."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "field": {"type": "string", "enum": FIELDS},
+                            "operator": {"type": "string", "enum": list(OPERATORS)},
+                            "value": {
+                                "description": "Filter value. Use an array for 'in' and 'between'.",
+                            },
+                        },
+                        "required": ["field", "operator", "value"],
+                    },
+                },
+                "inherit_global_filters": {
+                    "type": "boolean",
+                    "description": (
+                        "Whether the new view should also use current global filters. "
+                        "Default true. Set false for independent comparison charts."
+                    ),
+                },
+                "freeze": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, keep this view's data snapshot fixed when global "
+                        "filters later change."
+                    ),
+                },
             },
             "required": ["chart_type", "x", "y", "title"],
+        },
+    ),
+    _tool(
+        "set_low_score_threshold",
+        (
+            "Set the dashboard-wide definition of low-score orders for low_score_ratio. "
+            "For example threshold=3 means review_score <= 3. Existing low_score_ratio "
+            "views refresh automatically unless they were frozen."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "threshold": {
+                    "type": "integer",
+                    "description": "Low-score maximum review_score, from 1 to 5.",
+                },
+            },
+            "required": ["threshold"],
         },
     ),
     _tool(
@@ -262,6 +364,8 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             return _exec_remove_filter(arguments)
         elif name == "append_visual":
             return _exec_append_visual(arguments)
+        elif name == "set_low_score_threshold":
+            return _exec_set_low_score_threshold(arguments)
         elif name == "delete_visual":
             return _exec_delete_visual(arguments)
         else:
@@ -279,6 +383,42 @@ def normalize_tool_arguments(
 ) -> dict[str, Any]:
     """Normalize small speech-model argument slips before executing a tool."""
     normalized = dict(arguments or {})
+    if user_transcript:
+        normalized["_user_transcript"] = user_transcript
+    if name in {"filter_data", "append_visual"} and "value" in normalized:
+        normalized["value"] = _coerce_jsonish(normalized["value"])
+    if name == "append_visual" and normalized.get("limit") in (None, ""):
+        inferred_limit = _infer_limit_from_text(
+            normalized.get("title", ""),
+            user_transcript,
+        )
+        if inferred_limit is not None:
+            normalized["limit"] = inferred_limit
+    if name == "append_visual":
+        text = " ".join(str(v or "") for v in (normalized.get("title"), user_transcript))
+        if _wants_pie_chart(text) and normalized.get("chart_type") in (None, "", "bar"):
+            normalized["chart_type"] = "pie"
+        if _wants_delivery_speed_bucket(text) and normalized.get("x") in (None, "", "delivery_days"):
+            normalized["x"] = "delivery_speed_bucket"
+        if normalized.get("sort_by") in (None, ""):
+            inferred_sort_by = _infer_sort_by_from_text(text)
+            if inferred_sort_by:
+                normalized["sort_by"] = inferred_sort_by
+        if normalized.get("sort_order") in (None, ""):
+            inferred_sort_order = _infer_sort_order_from_text(
+                text,
+                normalized.get("sort_by") or normalized.get("y"),
+            )
+            if inferred_sort_order:
+                normalized["sort_order"] = inferred_sort_order
+        if normalized.get("low_score_threshold") in (None, ""):
+            inferred_threshold = _infer_low_score_threshold_from_text(user_transcript)
+            if inferred_threshold is not None:
+                normalized["low_score_threshold"] = inferred_threshold
+    if name == "set_low_score_threshold" and normalized.get("threshold") in (None, ""):
+        inferred_threshold = _infer_low_score_threshold_from_text(user_transcript)
+        if inferred_threshold is not None:
+            normalized["threshold"] = inferred_threshold
     if name != "filter_data":
         return normalized
 
@@ -314,36 +454,13 @@ def _exec_filter_data(args: dict) -> dict:
             },
         }
 
-    # Validate
-    if field not in FIELDS:
-        return {
-            "tool": "filter_data",
-            "success": False,
-            "error": f"Unknown field: '{field}'. Available: {', '.join(FIELDS)}",
-        }
-    operator = args.get("operator", "eq")
-    if operator not in OPERATORS:
-        return {
-            "tool": "filter_data",
-            "success": False,
-            "error": f"Invalid operator: '{operator}'. Supported: {', '.join(OPERATORS)}",
-        }
-    value = args.get("value")
+    new_filter, error = _normalize_filter(args, tool_name="filter_data")
+    if error:
+        return error
+    assert new_filter is not None
+
     append = args.get("append", False)
     append = bool(append) if isinstance(append, bool) else str(append).lower() == "true"
-
-    if operator == "in" and not isinstance(value, list):
-        value = [value]
-    if operator == "between" and (
-        not isinstance(value, list) or len(value) != 2
-    ):
-        return {
-            "tool": "filter_data",
-            "success": False,
-            "error": "Operator 'between' requires value to be a two-item array.",
-        }
-
-    new_filter = {"field": field, "operator": operator, "value": value}
 
     if append:
         active_filters.append(new_filter)
@@ -399,6 +516,34 @@ def _exec_remove_filter(args: dict) -> dict:
     }
 
 
+# --- set_low_score_threshold ---
+
+def _exec_set_low_score_threshold(args: dict) -> dict:
+    global low_score_threshold
+
+    threshold = _coerce_low_score_threshold(args.get("threshold"))
+    if threshold is None:
+        return {
+            "tool": "set_low_score_threshold",
+            "success": False,
+            "error": "threshold must be an integer from 1 to 5.",
+        }
+
+    low_score_threshold = threshold
+    _refresh_all_views()
+
+    return {
+        "tool": "set_low_score_threshold",
+        "success": True,
+        "payload": {
+            "low_score_threshold": low_score_threshold,
+            "definition": f"review_score <= {low_score_threshold}",
+            "active_filters": active_filters.copy(),
+            "filtered_rows": total_rows(active_filters),
+        },
+    }
+
+
 # --- highlight_visual ---
 
 def _exec_highlight_visual(args: dict) -> dict:
@@ -430,18 +575,41 @@ def _exec_highlight_visual(args: dict) -> dict:
 
 # --- append_visual ---
 
-ALLOWED_CHART_TYPES = {"scatter", "bar", "line", "histogram"}
+ALLOWED_CHART_TYPES = {"scatter", "bar", "line", "histogram", "pie"}
 ALLOWED_COLOR_FIELDS = {"customer_state", "product_category", "review_score"}
 
 
 def _exec_append_visual(args: dict) -> dict:
     global workspace_counter
 
-    chart_type = args.get("chart_type")
     x = args.get("x")
     y = args.get("y")
     color = args.get("color")
     title = args.get("title") or f"{y} by {x}"
+    chart_type = args.get("chart_type")
+    user_text = args.get("_user_transcript") or args.get("user_transcript") or ""
+    if chart_type in {"bar", None, ""} and _wants_pie_chart(title, user_text):
+        chart_type = "pie"
+    sort_by = args.get("sort_by")
+    if sort_by in ("", None):
+        sort_by = None
+    sort_order = args.get("sort_order")
+    if sort_order in ("", None):
+        sort_order = None
+    limit_arg = args.get("limit")
+    if limit_arg in (None, ""):
+        limit_arg = _infer_limit_from_text(title)
+    limit = _coerce_limit(limit_arg)
+    low_score_threshold_arg = args.get("low_score_threshold")
+    low_score_threshold_for_view = _coerce_low_score_threshold(low_score_threshold_arg)
+    inherit_global_filters = _as_bool(args.get("inherit_global_filters", True))
+    freeze = _as_bool(args.get("freeze", args.get("frozen", False)))
+    local_filters, filter_error = _normalize_local_filters(
+        args.get("filters") if args.get("filters") is not None else args.get("view_filters"),
+        tool_name="append_visual",
+    )
+    if filter_error:
+        return filter_error
 
     # Validate (the JSON schema enums constrain a well-behaved model, but the
     # Realtime API does not guarantee enum adherence at runtime — without
@@ -466,17 +634,47 @@ def _exec_append_visual(args: dict) -> dict:
             "success": False,
             "error": f"Unknown field for y: '{y}'. Available: {', '.join(APPEND_Y_FIELDS)}",
         }
+    if sort_by is not None and sort_by not in SORT_FIELDS:
+        return {
+            "tool": "append_visual",
+            "success": False,
+            "error": f"Unknown field for sort_by: '{sort_by}'. Available: {', '.join(SORT_FIELDS)}",
+        }
+    if sort_order is not None and sort_order not in {"asc", "desc"}:
+        return {
+            "tool": "append_visual",
+            "success": False,
+            "error": "sort_order must be 'asc' or 'desc'.",
+        }
+    if low_score_threshold_arg is not None and low_score_threshold_for_view is None:
+        return {
+            "tool": "append_visual",
+            "success": False,
+            "error": "low_score_threshold must be an integer from 1 to 5.",
+        }
     if chart_type == "scatter" and y == COUNT_MEASURE:
         return {
             "tool": "append_visual",
             "success": False,
             "error": "Scatter plots require a raw numeric y field, not order_count. Use a bar or line chart for order_count.",
         }
+    if chart_type == "scatter" and y in DERIVED_MEASURES:
+        return {
+            "tool": "append_visual",
+            "success": False,
+            "error": "Scatter plots require raw numeric fields. Use a bar or line chart for derived metrics like low_score_ratio.",
+        }
     if color is not None and color not in ALLOWED_COLOR_FIELDS:
         return {
             "tool": "append_visual",
             "success": False,
             "error": f"Unknown field for color: '{color}'. Available: {', '.join(sorted(ALLOWED_COLOR_FIELDS))}",
+        }
+    if limit_arg is not None and limit is None:
+        return {
+            "tool": "append_visual",
+            "success": False,
+            "error": f"limit must be an integer between 1 and {MAX_VIEW_LIMIT}.",
         }
 
     workspace_counter += 1
@@ -485,10 +683,19 @@ def _exec_append_visual(args: dict) -> dict:
     # Route to fact_item whenever product_category is involved (x / y / color);
     # otherwise stay on fact_order. Keeps revenue at item grain when grouping
     # by category, and avoids cross-grain joins when not needed.
-    source_table = _decide_table(x, y, color)
+    source_table = _decide_table(x, y, color, sort_by)
+    low_score_threshold_for_view = low_score_threshold_for_view or low_score_threshold
 
     # Determine aggregation
-    agg_expr, agg_alias, group_field, order_by = _infer_agg(chart_type, x, y, source_table)
+    agg_expr, agg_alias, group_field, order_by = _infer_agg(
+        chart_type,
+        x,
+        y,
+        source_table,
+        low_score_threshold_for_view,
+    )
+    sort_by = sort_by or _default_sort_by(chart_type, x, y)
+    sort_order = sort_order or _default_sort_order(chart_type, x, sort_by)
 
     # color is only meaningful as a *grouping* dimension for bar/line charts.
     # Scatter draws raw rows (color column requested directly); histogram
@@ -509,24 +716,36 @@ def _exec_append_visual(args: dict) -> dict:
         "agg_expr": agg_expr,
         "agg_alias": agg_alias,
         "order_by": order_by,
+        "limit": limit,
+        "sort_by": sort_by,
+        "sort_order": sort_order,
+        "low_score_threshold": low_score_threshold_for_view,
+        "filters": local_filters,
+        "inherit_global_filters": inherit_global_filters,
+        "freeze": freeze,
+        "snapshot_filters": [],
         "source_table": source_table,
         "data": [],
         "statistics": {},
     }
 
+    effective_filters = _effective_filters_for_view(view_def)
+    if freeze:
+        view_def["snapshot_filters"] = [*effective_filters]
+
     # Query data
     if chart_type == "scatter":
-        view_def["data"] = _scatter_data(x, y, color, source_table)
+        view_def["data"] = _scatter_data(x, y, color, source_table, filters=effective_filters)
     else:
-        view_def["data"] = aggregate_query(
-            group_field=group_field,
-            agg_expr=agg_expr,
-            agg_alias=agg_alias,
-            filters=active_filters,
-            order_by=order_by,
+        data = _aggregate_visual_data(
+            view_def,
+            filters=effective_filters,
             extra_group_fields=extra_group_fields,
-            table=source_table,
         )
+        if limit:
+            data = data[:limit]
+        _attach_rank(data)
+        view_def["data"] = data
 
     view_def["statistics"] = _compute_view_stats(view_def)
     views.append(view_def)
@@ -541,9 +760,19 @@ def _exec_append_visual(args: dict) -> dict:
             "y": y,
             "color": color,
             "title": title,
+            "limit": limit,
+            "sort_by": sort_by,
+            "sort_order": sort_order,
+            "low_score_threshold": low_score_threshold_for_view,
+            "filters": local_filters,
+            "inherit_global_filters": inherit_global_filters,
+            "freeze": freeze,
+            "filter_scope": _filter_scope(view_def),
+            "effective_filters": effective_filters,
+            "snapshot_filters": view_def.get("snapshot_filters", []),
             "data": view_def["data"],
             "statistics": view_def["statistics"],
-            "filtered_rows": total_rows(active_filters),
+            "filtered_rows": total_rows(effective_filters),
         },
     }
 
@@ -580,38 +809,92 @@ def _exec_delete_visual(args: dict) -> dict:
     }
 
 
-def _decide_table(x: str, y: str, color: str | None) -> str:
+def _decide_table(x: str, y: str, color: str | None, sort_by: str | None = None) -> str:
     """Choose source table for an append_visual call.
 
     Any reference to product_category forces fact_item (item grain). Otherwise
     fact_order is enough — all order-level filter fields exist on it.
     """
-    if "product_category" in (x, y, color):
+    if "product_category" in (x, y, color, sort_by):
         return "fact_item"
     return "fact_order"
 
 
-def _infer_agg(chart_type: str, x: str, y: str, table: str):
+def _infer_agg(chart_type: str, x: str, y: str, table: str, threshold: int | None = None):
     """Infer SQL aggregation from chart type, fields, and source table."""
     if chart_type == "scatter":
         return y, y, x, x  # no aggregation needed
     if chart_type == "histogram":
         return "COUNT(*)", "count", x, x
-    # bar / line
-    if y == "revenue":
-        # On fact_item revenue = SUM(price + freight); on fact_order it's the
-        # per-order payment total. These are semantically different — pick the
-        # column that matches the table the query will run against.
-        col = "item_revenue" if table == "fact_item" else "order_revenue"
-        return f"ROUND(SUM({col}), 2)", "revenue", x, "revenue DESC"
-    if y == "delivery_days":
-        return "ROUND(AVG(delivery_days), 1)", "delivery_days", x, x
-    # default: count
-    return "COUNT(*)", "order_count", x, x
+    # bar / line / pie
+    if y == LOW_SCORE_RATIO:
+        return _low_score_ratio_expr(table, threshold or low_score_threshold), LOW_SCORE_RATIO, x, _default_order_by(chart_type, x, LOW_SCORE_RATIO)
+    expr, alias = _measure_expr(y, table, threshold or low_score_threshold)
+    return expr, alias, x, _default_order_by(chart_type, x, alias)
+
+
+def _aggregate_visual_data(
+    view: dict[str, Any],
+    filters: list[dict[str, Any]],
+    extra_group_fields: list[str] | None,
+) -> list[dict[str, Any]]:
+    con = get_connection()
+    table = view.get("source_table", "fact_order")
+    group_field = view["group_field"]
+    y = view["y_field"]
+    agg_alias = view["agg_alias"]
+    agg_expr = view["agg_expr"]
+    has_view_sort = view.get("sort_by") not in (None, "")
+    sort_by = view.get("sort_by") or _default_sort_by(view["chart_type"], view["x_field"], y)
+    sort_order = view.get("sort_order") or _default_sort_order(view["chart_type"], view["x_field"], sort_by)
+    threshold = view.get("low_score_threshold", low_score_threshold)
+
+    where = build_where(filters, table=table)
+    extra = extra_group_fields or []
+    group_cols = [group_field, *extra]
+    select_cols = ", ".join(group_cols)
+    select_parts = [select_cols]
+    if y == LOW_SCORE_RATIO:
+        low_expr, total_expr = _low_score_count_exprs(table, threshold)
+        select_parts.extend([
+            f"{low_expr} AS low_score_count",
+            f"{total_expr} AS order_count",
+            f"{agg_expr} AS {agg_alias}",
+        ])
+    else:
+        select_parts.append(f"{agg_expr} AS {agg_alias}")
+
+    if not has_view_sort and view.get("order_by"):
+        order_sql = view["order_by"]
+    elif sort_by in (None, group_field):
+        order_col = group_field
+        order_sql = _order_sql(order_col, sort_order)
+    elif sort_by == agg_alias or sort_by == y:
+        order_col = agg_alias
+        order_sql = _order_sql(order_col, sort_order)
+    else:
+        sort_expr, _ = _measure_expr(sort_by, table, threshold)
+        order_col = "sort_value"
+        select_parts.append(f"{sort_expr} AS {order_col}")
+        order_sql = _order_sql(order_col, sort_order)
+    sql = f"""
+        SELECT {", ".join(select_parts)}
+        FROM {table}
+        WHERE {where}
+        GROUP BY {select_cols}
+        ORDER BY {order_sql}
+    """
+    result = con.execute(sql)
+    col_names = [d[0] for d in result.description]
+    return [dict(zip(col_names, row)) for row in result.fetchall()]
 
 
 def _scatter_data(
-    x: str, y: str, color: str | None = None, table: str = "fact_order"
+    x: str,
+    y: str,
+    color: str | None = None,
+    table: str = "fact_order",
+    filters: list[dict[str, Any]] | None = None,
 ) -> list[dict]:
     """Get raw rows for scatter plot (sampled to 2000 max).
 
@@ -620,7 +903,7 @@ def _scatter_data(
     the original field name the frontend expects.
     """
     con = get_connection()
-    where = build_where(active_filters, table=table)
+    where = build_where(active_filters if filters is None else filters, table=table)
 
     def _proj(field: str) -> str:
         col = resolve_column(field, table)
@@ -650,10 +933,17 @@ def _scatter_data(
 def _refresh_all_views() -> None:
     """Re-query data + stats for all views using current active_filters."""
     for view in views:
+        if view.get("freeze"):
+            continue
         table = view.get("source_table", "fact_order")
+        effective_filters = _effective_filters_for_view(view)
         if view["chart_type"] == "scatter":
             view["data"] = _scatter_data(
-                view["x_field"], view["y_field"], view.get("color"), table
+                view["x_field"],
+                view["y_field"],
+                view.get("color"),
+                table,
+                filters=effective_filters,
             )
         else:
             limit = view.get("limit")
@@ -661,17 +951,14 @@ def _refresh_all_views() -> None:
             extra_group_fields = (
                 [color] if (color and view["chart_type"] in ("bar", "line")) else None
             )
-            data = aggregate_query(
-                group_field=view["group_field"],
-                agg_expr=view["agg_expr"],
-                agg_alias=view["agg_alias"],
-                filters=active_filters,
-                order_by=view.get("order_by"),
+            data = _aggregate_visual_data(
+                view,
+                filters=effective_filters,
                 extra_group_fields=extra_group_fields,
-                table=table,
             )
             if limit:
                 data = data[:limit]
+            _attach_rank(data)
             view["data"] = data
         view["statistics"] = _compute_view_stats(view)
 
@@ -686,6 +973,12 @@ def _compute_view_stats(view: dict) -> dict:
     y = view.get("agg_alias") or view["y_field"]
 
     stats: dict[str, Any] = {"row_count": len(data)}
+    if y == LOW_SCORE_RATIO:
+        total_orders = sum(d.get("order_count", 0) or 0 for d in data)
+        low_score_orders = sum(d.get("low_score_count", 0) or 0 for d in data)
+        stats["total_orders"] = total_orders
+        stats["low_score_orders"] = low_score_orders
+        stats["overall_low_score_ratio"] = round(low_score_orders / total_orders, 4) if total_orders else 0
 
     try:
         if vid == "view-trend" or view["chart_type"] == "line":
@@ -693,9 +986,12 @@ def _compute_view_stats(view: dict) -> dict:
             if values:
                 peak = max(values, key=lambda t: t[1])
                 avg_val = sum(v[1] for v in values) / len(values)
-                stats["peak_month"] = str(peak[0])
+                stats["peak_label"] = str(peak[0])
                 stats["peak_value"] = peak[1]
-                stats["avg_monthly"] = round(avg_val, 1)
+                stats["avg_value"] = round(avg_val, 4 if y == LOW_SCORE_RATIO else 1)
+                if view["x_field"] == "order_month":
+                    stats["peak_month"] = str(peak[0])
+                    stats["avg_monthly"] = round(avg_val, 1)
 
         elif vid == "view-review":
             total = sum(d.get(y, 0) for d in data)
@@ -708,10 +1004,13 @@ def _compute_view_stats(view: dict) -> dict:
         elif vid == "view-map":
             if data:
                 top = data[0]
+                bottom = min(data, key=lambda d: d.get(y, 0))
                 total = sum(d.get(y, 0) for d in data)
                 stats["top_state"] = top.get("customer_state")
                 stats["top_state_count"] = top.get(y)
                 stats["top_state_ratio"] = round(top.get(y, 0) / total, 3) if total else 0
+                stats["bottom_state"] = bottom.get("customer_state")
+                stats["bottom_state_count"] = bottom.get(y)
                 stats["state_count"] = len(data)
 
         elif vid == "view-category":
@@ -736,8 +1035,11 @@ def _compute_view_stats(view: dict) -> dict:
             # Generic: find top bucket
             if data:
                 top = max(data, key=lambda d: d.get(y, 0))
+                bottom = min(data, key=lambda d: d.get(y, 0))
                 stats["top_value"] = top.get(y)
                 stats["top_label"] = top.get(view.get("group_field", view["x_field"]))
+                stats["bottom_value"] = bottom.get(y)
+                stats["bottom_label"] = bottom.get(view.get("group_field", view["x_field"]))
     except Exception as exc:
         log.warning("Stats computation error for %s: %s", vid, exc)
 
@@ -758,11 +1060,21 @@ def rebuild_context() -> dict[str, Any]:
             "title": v["title"],
             "x_field": v["x_field"],
             "y_field": v["y_field"],
+            "limit": v.get("limit"),
+            "sort_by": v.get("sort_by"),
+            "sort_order": v.get("sort_order"),
+            "low_score_threshold": v.get("low_score_threshold", low_score_threshold),
+            "filters": v.get("filters", []),
+            "inherit_global_filters": v.get("inherit_global_filters", True),
+            "freeze": v.get("freeze", False),
+            **_view_scope_payload(v),
             "statistics": v["statistics"],
         })
 
     return {
         "active_filters": active_filters.copy(),
+        "low_score_threshold": low_score_threshold,
+        "low_score_definition": f"review_score <= {low_score_threshold}",
         "highlighted_view": highlighted_view,
         "views": ctx_views,
         "available_view_ids": [v["id"] for v in views],
@@ -782,13 +1094,29 @@ def context_text() -> str:
     lines = [
         "Dashboard state:",
         f"filters={filters}",
+        f"low_score_definition=review_score <= {ctx['low_score_threshold']}",
         f"rows={ctx['filtered_rows']}",
         f"highlighted={ctx['highlighted_view'] or 'none'}",
         "views:",
     ]
     for v in ctx["views"]:
         stat_str = ", ".join(f"{k}={v_}" for k, v_ in v["statistics"].items() if k != "row_count")
-        lines.append(f"- {v['id']} | {v['title']} | {v['chart_type']} | {stat_str or 'no_stats'}")
+        meta = []
+        if v.get("limit"):
+            meta.append(f"limit={v['limit']}")
+        if v.get("sort_by"):
+            meta.append(f"sort={v.get('sort_by')} {v.get('sort_order') or ''}".strip())
+        if v.get("low_score_threshold") and v.get("y_field") == LOW_SCORE_RATIO:
+            meta.append(f"low_score<= {v['low_score_threshold']}")
+        if v.get("filters"):
+            meta.append("local_filters=" + _format_filters(v["filters"]))
+        if not v.get("inherit_global_filters", True):
+            meta.append("independent")
+        if v.get("freeze"):
+            meta.append("frozen")
+        meta.append(f"scope={_filter_scope(v)}")
+        meta_str = f" | {'; '.join(meta)}" if meta else ""
+        lines.append(f"- {v['id']} | {v['title']} | {v['chart_type']}{meta_str} | {stat_str or 'no_stats'}")
 
     return "\n".join(lines)
 
@@ -810,6 +1138,14 @@ def get_views_for_frontend() -> list[dict]:
             "x_field": v["x_field"],
             "y_field": v["y_field"],
             "color": v.get("color"),
+            "limit": v.get("limit"),
+            "sort_by": v.get("sort_by"),
+            "sort_order": v.get("sort_order"),
+            "low_score_threshold": v.get("low_score_threshold", low_score_threshold),
+            "filters": v.get("filters", []),
+            "inherit_global_filters": v.get("inherit_global_filters", True),
+            "freeze": v.get("freeze", False),
+            **_view_scope_payload(v),
             "data": v["data"],
             "highlighted": v["id"] == highlighted_view,
         })
@@ -821,10 +1157,410 @@ def get_views_for_frontend() -> list[dict]:
 # ------------------------------------------------------------------
 
 def _filters_summary() -> str:
+    return _format_filters(active_filters) or "none"
+
+
+def _format_filters(filters: list[dict[str, Any]]) -> str:
     parts = []
-    for f in active_filters:
+    for f in filters:
         parts.append(f"{f['field']} {f['operator']} {f['value']}")
-    return " AND ".join(parts) if parts else "none"
+    return " AND ".join(parts)
+
+
+def _coerce_jsonish(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped or stripped[0] not in "[{":
+        return value
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        return value
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _coerce_limit(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return None
+    if limit < 1 or limit > MAX_VIEW_LIMIT:
+        return None
+    return limit
+
+
+def _coerce_low_score_threshold(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        threshold = int(value)
+    except (TypeError, ValueError):
+        return None
+    if threshold < 1 or threshold > 5:
+        return None
+    return threshold
+
+
+def _infer_limit_from_text(*texts: Any) -> int | None:
+    text = " ".join(str(t or "") for t in texts)
+    if not text:
+        return None
+
+    patterns = [
+        r"top\s*(\d{1,3})(?=\D|$)",
+        r"top\s*([一二两三四五六七八九十百零〇]{1,5})",
+        r"(?:前|保留|只保留|显示|展示)\s*(\d{1,3})\s*(?:个|项|名|类|类别|品类)?",
+        r"(?:前|保留|只保留|显示|展示)\s*([一二两三四五六七八九十百零〇]{1,5})\s*(?:个|项|名|类|类别|品类)?",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw = match.group(1)
+        value = int(raw) if raw.isdigit() else _parse_chinese_int(raw)
+        if value is not None and 1 <= value <= MAX_VIEW_LIMIT:
+            return value
+    return None
+
+
+def _parse_chinese_int(text: str) -> int | None:
+    digits = {
+        "零": 0,
+        "〇": 0,
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    text = text.strip()
+    if not text:
+        return None
+    if text == "十":
+        return 10
+    if "百" in text:
+        parts = text.split("百", 1)
+        hundreds = digits.get(parts[0], 1 if parts[0] == "" else None)
+        if hundreds is None:
+            return None
+        rest = _parse_chinese_int(parts[1]) if parts[1] else 0
+        return hundreds * 100 + rest if rest is not None else None
+    if "十" in text:
+        parts = text.split("十", 1)
+        tens = digits.get(parts[0], 1 if parts[0] == "" else None)
+        ones = digits.get(parts[1], 0 if parts[1] == "" else None)
+        if tens is None or ones is None:
+            return None
+        return tens * 10 + ones
+    if len(text) == 1:
+        return digits.get(text)
+    value = 0
+    for ch in text:
+        digit = digits.get(ch)
+        if digit is None:
+            return None
+        value = value * 10 + digit
+    return value
+
+
+def _infer_sort_by_from_text(text: str) -> str | None:
+    if any(phrase in text for phrase in ("配送时间", "配送天数", "送货时间", "物流时间")):
+        return "delivery_days"
+    if any(phrase in text for phrase in ("低分占比", "低评分占比", "差评占比", "低分比例", "低评分比例")):
+        return LOW_SCORE_RATIO
+    if any(phrase in text for phrase in ("评分", "评价", "星级")):
+        return "review_score"
+    if any(phrase in text for phrase in ("订单量", "订单数", "数量", "count")):
+        return COUNT_MEASURE
+    if any(phrase in text for phrase in ("营收", "收入", "销售额", "金额", "revenue")):
+        return "revenue"
+    return None
+
+
+def _infer_sort_order_from_text(text: str, sort_by: str | None) -> str | None:
+    lowered = text.lower()
+    if any(phrase in text for phrase in ("最差", "最坏", "表现差")) or "worst" in lowered:
+        return _bad_direction_for_metric(sort_by)
+    if any(phrase in text for phrase in ("最好", "最佳", "表现好")) or "best" in lowered:
+        return _good_direction_for_metric(sort_by)
+    if any(phrase in text for phrase in ("从短到长", "从低到高", "从少到多", "升序", "最低", "最少", "最小")):
+        return "asc"
+    if any(phrase in text for phrase in ("从长到短", "从高到低", "从多到少", "降序", "最高", "最多", "最大")):
+        return "desc"
+    if "bottom" in lowered:
+        return "asc"
+    if "top" in lowered:
+        return "desc"
+    return None
+
+
+def _infer_low_score_threshold_from_text(text: str) -> int | None:
+    if not text:
+        return None
+    patterns = [
+        r"(?:低分|低评分|差评).*?(?:小于等于|不高于|低于等于|<=|≤)\s*([1-5])",
+        r"(?:小于等于|不高于|低于等于|<=|≤)\s*([1-5])\s*分?.*?(?:低分|低评分|差评)",
+        r"(?:低分|低评分|差评).*?([一二三四五])\s*分?(?:及以下|以下含|以内)",
+        r"([一二三四五])\s*分?(?:及以下|以下含|以内).*?(?:低分|低评分|差评)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        raw = match.group(1)
+        value = int(raw) if raw.isdigit() else _parse_chinese_int(raw)
+        if value is not None and 1 <= value <= 5:
+            return value
+    return None
+
+
+def _wants_pie_chart(*texts: Any) -> bool:
+    text = " ".join(str(t or "") for t in texts).lower()
+    return any(
+        phrase in text
+        for phrase in (
+            "pie",
+            "pie chart",
+            "饼图",
+            "圓餅",
+            "圆饼",
+            "占比图",
+            "构成图",
+            "组成",
+            "share",
+            "proportion",
+            "composition",
+        )
+    )
+
+
+def _wants_delivery_speed_bucket(*texts: Any) -> bool:
+    text = " ".join(str(t or "") for t in texts).lower()
+    return any(
+        phrase in text
+        for phrase in (
+            "配送速度",
+            "配送快慢",
+            "送货速度",
+            "delivery speed",
+            "delivery bucket",
+            "delivery band",
+        )
+    )
+
+
+def _normalize_filter(args: dict[str, Any], *, tool_name: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    field = args.get("field")
+    if field not in FIELDS:
+        return None, {
+            "tool": tool_name,
+            "success": False,
+            "error": f"Unknown field: '{field}'. Available: {', '.join(FIELDS)}",
+        }
+    operator = args.get("operator", "eq")
+    if operator not in OPERATORS:
+        return None, {
+            "tool": tool_name,
+            "success": False,
+            "error": f"Invalid operator: '{operator}'. Supported: {', '.join(OPERATORS)}",
+        }
+
+    value = _coerce_jsonish(args.get("value"))
+    if operator == "in" and not isinstance(value, list):
+        value = [value]
+    if operator == "between" and (
+        not isinstance(value, list) or len(value) != 2
+    ):
+        return None, {
+            "tool": tool_name,
+            "success": False,
+            "error": "Operator 'between' requires value to be a two-item array.",
+        }
+
+    return {"field": field, "operator": operator, "value": value}, None
+
+
+def _normalize_local_filters(value: Any, *, tool_name: str) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    value = _coerce_jsonish(value)
+    if value in (None, ""):
+        return [], None
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list):
+        return [], {
+            "tool": tool_name,
+            "success": False,
+            "error": "filters must be an array of filter objects.",
+        }
+
+    normalized: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            return [], {
+                "tool": tool_name,
+                "success": False,
+                "error": "Each filters item must be an object with field, operator, and value.",
+            }
+        filter_def, error = _normalize_filter(item, tool_name=tool_name)
+        if error:
+            return [], error
+        assert filter_def is not None
+        normalized.append(filter_def)
+    return normalized, None
+
+
+def _effective_filters_for_view(view: dict[str, Any]) -> list[dict[str, Any]]:
+    base = active_filters if view.get("inherit_global_filters", True) else []
+    return [*base, *view.get("filters", [])]
+
+
+def _filter_scope(view: dict[str, Any]) -> str:
+    if view.get("freeze"):
+        return "frozen_snapshot"
+    has_local_filters = bool(view.get("filters"))
+    follows_global = view.get("inherit_global_filters", True)
+    if has_local_filters and follows_global:
+        return "local_plus_global"
+    if has_local_filters and not follows_global:
+        return "fixed_condition"
+    if not follows_global:
+        return "independent"
+    return "global"
+
+
+def _view_scope_payload(view: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "filter_scope": _filter_scope(view),
+        "effective_filters": _effective_filters_for_view(view),
+        "snapshot_filters": view.get("snapshot_filters", []),
+    }
+
+
+def _default_sort_by(chart_type: str, x: str, y: str) -> str:
+    if chart_type == "line" or x in TIME_FIELDS:
+        return x
+    return y
+
+
+def _default_sort_order(chart_type: str, x: str, sort_by: str | None) -> str:
+    if chart_type == "line" or sort_by == x or sort_by in TIME_FIELDS:
+        return "asc"
+    return "desc"
+
+
+def _default_order_by(chart_type: str, x: str, measure: str) -> str:
+    if chart_type == "line" or x in TIME_FIELDS:
+        return x
+    return f"{measure} DESC"
+
+
+def _bad_direction_for_metric(metric: str | None) -> str:
+    if metric == "review_score":
+        return "asc"
+    if metric in {"delivery_days", LOW_SCORE_RATIO}:
+        return "desc"
+    if metric in {COUNT_MEASURE, "revenue"}:
+        return "asc"
+    return "desc"
+
+
+def _good_direction_for_metric(metric: str | None) -> str:
+    return "asc" if _bad_direction_for_metric(metric) == "desc" else "desc"
+
+
+def _order_sql(order_col: str, sort_order: str | None) -> str:
+    direction = "ASC" if sort_order == "asc" else "DESC"
+    return f"{order_col} {direction}"
+
+
+def _measure_expr(measure: str, table: str, threshold: int) -> tuple[str, str]:
+    if measure == LOW_SCORE_RATIO:
+        return _low_score_ratio_expr(table, threshold), LOW_SCORE_RATIO
+    if measure == "revenue":
+        col = "item_revenue" if table == "fact_item" else "order_revenue"
+        return f"ROUND(SUM({col}), 2)", "revenue"
+    if measure == "delivery_days":
+        return "ROUND(AVG(delivery_days), 1)", "delivery_days"
+    if measure == "review_score":
+        return "ROUND(AVG(review_score), 2)", "review_score"
+    if measure == COUNT_MEASURE:
+        count_expr = "COUNT(DISTINCT order_id)" if table == "fact_item" else "COUNT(*)"
+        return count_expr, COUNT_MEASURE
+    if measure in {"order_dow", "order_hour"}:
+        return f"ROUND(AVG({measure}), 2)", measure
+    return "COUNT(*)", COUNT_MEASURE
+
+
+def _attach_rank(data: list[dict[str, Any]]) -> None:
+    for idx, row in enumerate(data, start=1):
+        row["rank"] = idx
+
+
+def _low_score_ratio_expr(table: str, threshold: int) -> str:
+    numerator, denominator = _low_score_count_exprs(table, threshold)
+    return f"ROUND(({numerator})::DOUBLE / NULLIF({denominator}, 0), 4)"
+
+
+def _low_score_count_exprs(table: str, threshold: int) -> tuple[str, str]:
+    if table == "fact_item":
+        numerator = f"COUNT(DISTINCT CASE WHEN review_score <= {threshold} THEN order_id END)"
+        denominator = "COUNT(DISTINCT order_id)"
+    else:
+        numerator = f"SUM(CASE WHEN review_score <= {threshold} THEN 1 ELSE 0 END)"
+        denominator = "COUNT(*)"
+    return numerator, denominator
+
+
+def _low_score_ratio_data(
+    group_field: str,
+    filters: list[dict[str, Any]],
+    order_by: str | None,
+    extra_group_fields: list[str] | None,
+    table: str,
+    threshold: int | None = None,
+) -> list[dict[str, Any]]:
+    con = get_connection()
+    where = build_where(filters, table=table)
+    extra = extra_group_fields or []
+    group_cols = [group_field, *extra]
+    select_cols = ", ".join(group_cols)
+    threshold = threshold or low_score_threshold
+    if table == "fact_item":
+        low_expr = f"COUNT(DISTINCT CASE WHEN review_score <= {threshold} THEN order_id END)"
+        total_expr = "COUNT(DISTINCT order_id)"
+    else:
+        low_expr = f"SUM(CASE WHEN review_score <= {threshold} THEN 1 ELSE 0 END)"
+        total_expr = "COUNT(*)"
+    ratio_expr = f"ROUND(({low_expr})::DOUBLE / NULLIF({total_expr}, 0), 4)"
+    sql = f"""
+        SELECT
+            {select_cols},
+            {low_expr} AS low_score_count,
+            {total_expr} AS order_count,
+            {ratio_expr} AS {LOW_SCORE_RATIO}
+        FROM {table}
+        WHERE {where}
+        GROUP BY {select_cols}
+        ORDER BY {order_by or group_field}
+    """
+    cols = [*group_cols, "low_score_count", "order_count", LOW_SCORE_RATIO]
+    rows = con.execute(sql).fetchall()
+    return [dict(zip(cols, row)) for row in rows]
 
 
 # ------------------------------------------------------------------

@@ -140,11 +140,21 @@ def _qwen_tool_schemas() -> list[dict[str, Any]]:
     qwen_tools: list[dict[str, Any]] = []
     for tool in TOOL_SCHEMAS:
         function = tool.get("function") if "function" in tool else tool
+        description = function.get("description", "")
+        if function.get("name") == "append_visual":
+            description = (
+                f"{description} IMPORTANT: for Top N / 前N个 / 保留N项 requests, "
+                "the function arguments must include limit=N. Do not encode Top N "
+                "only in the chart title. Non-scatter charts are automatically "
+                "aggregated by the backend from x/y. Use chart_type=pie for pie/"
+                "占比/构成/share requests instead of silently falling back to bar."
+            )
         if "function" in tool:
             qwen_tools.append({
                 "type": "function",
                 "function": {
                     **function,
+                    "description": description,
                     "parameters": _qwen_json_schema(function.get("parameters", {})),
                 },
             })
@@ -153,7 +163,7 @@ def _qwen_tool_schemas() -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": tool.get("name"),
-                "description": tool.get("description", ""),
+                "description": description,
                 "parameters": _qwen_json_schema(
                     tool.get("parameters", {"type": "object", "properties": {}})
                 ),
@@ -433,12 +443,36 @@ class QwenRealtimeSession:
         await self._send_qwen(payload)
 
     def _build_instructions(self) -> str:
+        qwen_tool_rules = (
+            "\n\nQWEN TOOL CALL RULES (high priority):\n"
+            "- For append_visual, Top N / 前N个 / 保留N项 must be a real limit "
+            "argument, not only text in title.\n"
+            "- append_visual already performs backend aggregation for bar, line, "
+            "histogram, and pie charts. Use x/y fields; do not claim aggregation is "
+            "unsupported.\n"
+            "- For pie/饼图/占比/构成 requests, call append_visual with "
+            "chart_type=pie. For delivery-speed pie charts, use "
+            "x=delivery_speed_bucket and y=order_count unless the user asks for "
+            "revenue.\n"
+            "- For explicit sorting, pass sort_by and sort_order. Examples: "
+            "按配送时间从短到长 -> sort_by=delivery_days, sort_order=asc; "
+            "评分最差Top N -> sort_by=review_score, sort_order=asc; "
+            "低分占比最差Top N -> sort_by=low_score_ratio, sort_order=desc.\n"
+            "- If the user changes the definition of low score globally, call "
+            "set_low_score_threshold instead of saying low_score_ratio is fixed.\n"
+            "- Preserve filter scope: 跟随全局 -> inherit_global_filters=true; "
+            "固定条件/独立比较/不要跟全局变 -> chart-local filters with "
+            "inherit_global_filters=false; 固定当前结果 -> freeze=true.\n"
+            "- After append_visual tool output, verify limit/data_points/statistics "
+            "before saying the chart satisfies the user request.\n"
+        )
         if not self._dashboard_context:
-            return build_system_prompt()
+            return f"{build_system_prompt()}{qwen_tool_rules}"
         return (
             f"{build_system_prompt()}\n\n"
             "CURRENT DASHBOARD CONTEXT (authoritative, refreshes after each tool call):\n"
             f"{self._dashboard_context}"
+            f"{qwen_tool_rules}"
         )
 
     def _build_session_config(self) -> dict[str, Any]:
@@ -923,7 +957,7 @@ class QwenRealtimeSession:
                 **result,
             })
 
-            if tool_name in ("filter_data", "remove_filter", "append_visual", "delete_visual"):
+            if tool_name in ("filter_data", "remove_filter", "append_visual", "delete_visual", "set_low_score_threshold"):
                 if self._dashboard_logger:
                     self._dashboard_logger.info(
                         "VIEWS_UPDATE tool=%s args=%s",
@@ -1009,6 +1043,9 @@ class QwenRealtimeSession:
                 key: payload.get(key)
                 for key in (
                     "view_id", "chart_type", "x", "y", "color", "title",
+                    "limit", "sort_by", "sort_order", "low_score_threshold",
+                    "filters", "inherit_global_filters", "freeze",
+                    "filter_scope", "effective_filters", "snapshot_filters",
                     "statistics", "filtered_rows",
                 )
                 if key in payload
@@ -1023,6 +1060,13 @@ class QwenRealtimeSession:
             return {
                 "action": payload.get("action"),
                 "active_filters": payload.get("active_filters", []),
+                "filtered_rows": payload.get("filtered_rows"),
+            }
+
+        if tool == "set_low_score_threshold":
+            return {
+                "low_score_threshold": payload.get("low_score_threshold"),
+                "definition": payload.get("definition"),
                 "filtered_rows": payload.get("filtered_rows"),
             }
 

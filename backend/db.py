@@ -95,6 +95,24 @@ def initialize_db() -> None:
                         o.order_delivered_customer_date::TIMESTAMP)
                 ELSE NULL
             END                                                       AS delivery_days,
+            CASE
+                WHEN o.order_delivered_customer_date IS NULL
+                     OR o.order_purchase_timestamp IS NULL
+                    THEN 'unknown'
+                WHEN DATE_DIFF('day',
+                        o.order_purchase_timestamp::TIMESTAMP,
+                        o.order_delivered_customer_date::TIMESTAMP) <= 3
+                    THEN '0-3 days'
+                WHEN DATE_DIFF('day',
+                        o.order_purchase_timestamp::TIMESTAMP,
+                        o.order_delivered_customer_date::TIMESTAMP) <= 7
+                    THEN '4-7 days'
+                WHEN DATE_DIFF('day',
+                        o.order_purchase_timestamp::TIMESTAMP,
+                        o.order_delivered_customer_date::TIMESTAMP) <= 14
+                    THEN '8-14 days'
+                ELSE '15+ days'
+            END                                                       AS delivery_speed_bucket,
             pt.payment_value                                          AS order_revenue
         FROM orders o
         LEFT JOIN reviews_dedup   r  ON o.order_id    = r.order_id
@@ -129,6 +147,7 @@ def initialize_db() -> None:
             f.review_score,
             f.customer_state,
             f.delivery_days,
+            f.delivery_speed_bucket,
             f.order_revenue
         FROM items i
         JOIN  fact_order   f  ON i.order_id   = f.order_id
@@ -148,7 +167,7 @@ def initialize_db() -> None:
 FIELDS = [
     "order_month", "order_week", "order_date", "order_dow", "order_hour",
     "review_score", "customer_state",
-    "product_category", "delivery_days", "revenue",
+    "product_category", "delivery_days", "delivery_speed_bucket", "revenue",
 ]
 
 OPERATORS = {"eq", "neq", "in", "gte", "lte", "between"}
@@ -166,6 +185,7 @@ _FIELD_COL: dict[str, dict[str, str]] = {
         "review_score":   "review_score",
         "customer_state": "customer_state",
         "delivery_days":  "delivery_days",
+        "delivery_speed_bucket": "delivery_speed_bucket",
         "revenue":        "order_revenue",
     },
     "fact_item": {
@@ -177,6 +197,7 @@ _FIELD_COL: dict[str, dict[str, str]] = {
         "review_score":     "review_score",
         "customer_state":   "customer_state",
         "delivery_days":    "delivery_days",
+        "delivery_speed_bucket": "delivery_speed_bucket",
         "revenue":          "order_revenue",
         "product_category": "product_category",
     },
