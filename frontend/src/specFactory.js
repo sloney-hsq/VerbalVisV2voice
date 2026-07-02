@@ -6,7 +6,19 @@
 const CHART_WIDTH = 360;
 const CHART_HEIGHT = 240;
 const TIME_FIELDS = new Set(["order_month", "order_week", "order_date", "order_dow", "order_hour"]);
-const RATIO_FIELDS = new Set(["low_score_ratio"]);
+const RATIO_FIELDS = new Set([
+  "low_score_ratio",
+  "late_ratio",
+  "on_time_ratio",
+  "high_score_ratio",
+  "avg_freight_ratio",
+]);
+const RATIO_COUNT_FIELDS = {
+  low_score_ratio: { field: "low_score_count", title: "低分订单" },
+  late_ratio: { field: "late_count", title: "延迟订单" },
+  on_time_ratio: { field: "on_time_count", title: "准时订单" },
+  high_score_ratio: { field: "high_score_count", title: "高分订单" },
+};
 
 export function createSpec(view) {
   const { id, chart_type, title, x_field, y_field, color } = view;
@@ -109,10 +121,10 @@ function dynamicSpec(chart_type, x, y, color, title, view = {}) {
   switch (chart_type) {
     case "scatter":
       spec.mark = { type: "circle", tooltip: true, opacity: 0.6 };
-      spec.encoding.x = { field: x, type: "quantitative", title: x };
-      spec.encoding.y = { field: y, type: "quantitative", title: y };
+      spec.encoding.x = { field: x, type: "quantitative", title: fieldTitle(x) };
+      spec.encoding.y = { field: y, type: "quantitative", title: fieldTitle(y) };
       if (color) {
-        spec.encoding.color = { field: color, type: "nominal" };
+        spec.encoding.color = { field: color, type: "nominal", title: fieldTitle(color) };
       }
       break;
 
@@ -133,7 +145,7 @@ function dynamicSpec(chart_type, x, y, color, title, view = {}) {
         spec.encoding.y = quantitativeEncoding(y);
       }
       if (color) {
-        spec.encoding.color = { field: color, type: "nominal" };
+        spec.encoding.color = { field: color, type: "nominal", title: fieldTitle(color) };
       }
       addRatioTooltip(spec, x, y);
       break;
@@ -143,7 +155,7 @@ function dynamicSpec(chart_type, x, y, color, title, view = {}) {
       spec.encoding.x = xEncoding(x, fieldTitle(x), { sort: "ascending" });
       spec.encoding.y = quantitativeEncoding(y);
       if (color) {
-        spec.encoding.color = { field: color, type: "nominal" };
+        spec.encoding.color = { field: color, type: "nominal", title: fieldTitle(color) };
       }
       addRatioTooltip(spec, x, y);
       break;
@@ -231,19 +243,46 @@ function timeXEncoding(field, title, extra = {}) {
 
 function fieldTitle(field) {
   const titles = {
-    order_month: "Month",
-    order_week: "Week",
-    order_date: "Date",
-    order_dow: "Day of Week",
-    order_hour: "Hour",
-    review_score: "Review Score",
-    customer_state: "State",
-    product_category: "Category",
-    delivery_days: "Delivery Days",
-    delivery_speed_bucket: "Delivery Speed",
-    revenue: "Revenue (R$)",
-    order_count: "Orders",
-    low_score_ratio: "Low-score Ratio",
+    order_month: "月份",
+    order_week: "周",
+    order_date: "日期",
+    order_dow: "星期",
+    order_hour: "小时",
+    review_score: "评分",
+    review_bucket: "评分分组",
+    default_is_low_score: "默认低分",
+    is_high_score: "高评分",
+    customer_state: "州",
+    product_category: "品类",
+    delivery_days: "配送天数",
+    estimated_delivery_days: "预计配送天数",
+    delivery_delay_days: "延迟天数",
+    delivery_speed_bucket: "配送速度",
+    is_late: "是否延迟",
+    delivery_status_bucket: "配送状态",
+    delay_bucket: "延迟程度",
+    revenue: "营收",
+    order_item_revenue: "商品收入",
+    revenue_bucket: "营收分组",
+    item_count: "商品件数",
+    product_count: "商品种数",
+    category_count: "品类数",
+    seller_count: "卖家数",
+    freight_total: "运费",
+    avg_item_price: "平均商品价格",
+    freight_ratio: "运费占比",
+    freight_bucket: "运费分组",
+    order_size_bucket: "订单规模",
+    primary_payment_type: "支付方式",
+    payment_method_count: "支付方式数",
+    max_payment_installments: "最大分期数",
+    primary_payment_installments: "主要支付分期数",
+    order_count: "订单量",
+    low_score_ratio: "低分占比",
+    late_ratio: "延迟率",
+    on_time_ratio: "准时率",
+    high_score_ratio: "高评分占比",
+    avg_freight_ratio: "平均运费占比",
   };
   return titles[field] || field;
 }
@@ -254,11 +293,16 @@ function isRatioField(field) {
 
 function addRatioTooltip(spec, x, y) {
   if (!isRatioField(y)) return;
+  const countField = RATIO_COUNT_FIELDS[y];
   spec.encoding.tooltip = [
     { field: x, title: fieldTitle(x) },
     { field: y, type: "quantitative", title: fieldTitle(y), format: ".1%" },
-    { field: "low_score_count", type: "quantitative", title: "Low-score Orders" },
-    { field: "order_count", type: "quantitative", title: "Orders" },
+    ...(countField
+      ? [
+          { field: countField.field, type: "quantitative", title: countField.title },
+          { field: "order_count", type: "quantitative", title: "订单量" },
+        ]
+      : []),
   ];
 }
 

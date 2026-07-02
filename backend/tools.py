@@ -49,6 +49,28 @@ NUMERIC_AVG_FIELDS = {
     "max_payment_installments",
     "primary_payment_installments",
 }
+ALLOWED_CHART_TYPES = {"scatter", "bar", "line", "histogram", "pie"}
+ALLOWED_COLOR_FIELDS = {
+    "customer_state",
+    "product_category",
+    "review_score",
+    "review_bucket",
+    "delivery_status_bucket",
+    "order_size_bucket",
+    "primary_payment_type",
+}
+RATIO_COUNT_ALIASES = {
+    LOW_SCORE_RATIO: "low_score_count",
+    LATE_RATIO: "late_count",
+    ON_TIME_RATIO: "on_time_count",
+    HIGH_SCORE_RATIO: "high_score_count",
+}
+RATIO_STAT_ALIASES = {
+    LOW_SCORE_RATIO: "low_score_orders",
+    LATE_RATIO: "late_orders",
+    ON_TIME_RATIO: "on_time_orders",
+    HIGH_SCORE_RATIO: "high_score_orders",
+}
 MAX_VIEW_LIMIT = 100
 LOW_SCORE_THRESHOLD_DEFAULT = 2
 
@@ -229,7 +251,8 @@ TOOL_SCHEMAS = [
             "Create a new chart and append it to the dashboard grid. "
                         "The backend automatically aggregates non-scatter charts from x/y: "
                         "order_count means grouped order count, revenue means grouped sum, "
-                        "delivery_days means grouped average, and low_score_ratio is derived. "
+                        "delivery_days means grouped average; low_score_ratio, late_ratio, "
+                        "on_time_ratio, high_score_ratio, and avg_freight_ratio are derived. "
             "For Top N requests, pass limit as a real argument. For worst/bottom "
             "Top N or explicit sorting requests, pass sort_by and sort_order."
         ),
@@ -250,7 +273,8 @@ TOOL_SCHEMAS = [
                     "enum": APPEND_Y_FIELDS,
                     "description": (
                         "Y-axis field, order_count for count aggregations, or "
-                        "low_score_ratio for low-score orders divided by all orders."
+                        "a derived ratio such as low_score_ratio, late_ratio, "
+                        "on_time_ratio, high_score_ratio, or avg_freight_ratio."
                     ),
                 },
                 "color": {
@@ -276,7 +300,9 @@ TOOL_SCHEMAS = [
                     "description": (
                         "Optional metric/field used to sort aggregated rows before limit. "
                         "Use delivery_days for '按配送时间排序', review_score for score ranking, "
-                        "low_score_ratio for low-score-rate ranking, order_count for count ranking."
+                        "low_score_ratio for low-score-rate ranking, late_ratio for delay-rate "
+                        "ranking, avg_freight_ratio for freight-share ranking, and order_count "
+                        "for count ranking."
                     ),
                 },
                 "sort_order": {
@@ -285,7 +311,8 @@ TOOL_SCHEMAS = [
                     "description": (
                         "Sort direction before applying limit. asc means low-to-high/short-to-long; "
                         "desc means high-to-low/long-to-short. For worst Top N choose the bad direction "
-                        "for the metric, e.g. review_score asc, delivery_days desc, low_score_ratio desc."
+                        "for the metric, e.g. review_score asc, delivery_days desc, late_ratio desc, "
+                        "low_score_ratio desc."
                     ),
                 },
                 "low_score_threshold": {
@@ -593,18 +620,6 @@ def _exec_highlight_visual(args: dict) -> dict:
 
 # --- append_visual ---
 
-ALLOWED_CHART_TYPES = {"scatter", "bar", "line", "histogram", "pie"}
-ALLOWED_COLOR_FIELDS = {
-    "customer_state",
-    "product_category",
-    "review_score",
-    "review_bucket",
-    "delivery_status_bucket",
-    "order_size_bucket",
-    "primary_payment_type",
-}
-
-
 def _exec_append_visual(args: dict) -> dict:
     global workspace_counter
 
@@ -853,8 +868,6 @@ def _infer_agg(chart_type: str, x: str, y: str, table: str, threshold: int | Non
     if chart_type == "histogram":
         return "COUNT(*)", "count", x, x
     # bar / line / pie
-    if y == LOW_SCORE_RATIO:
-        return _low_score_ratio_expr(table, threshold or low_score_threshold), LOW_SCORE_RATIO, x, _default_order_by(chart_type, x, LOW_SCORE_RATIO)
     expr, alias = _measure_expr(y, table, threshold or low_score_threshold)
     return expr, alias, x, _default_order_by(chart_type, x, alias)
 
@@ -880,10 +893,11 @@ def _aggregate_visual_data(
     group_cols = [group_field, *extra]
     select_cols = ", ".join(group_cols)
     select_parts = [select_cols]
-    if y == LOW_SCORE_RATIO:
-        low_expr, total_expr = _low_score_count_exprs(table, threshold)
+    if y in COUNTED_RATIO_MEASURES:
+        numerator_expr, total_expr = _counted_ratio_count_exprs(y, table, threshold)
+        numerator_alias = _ratio_count_alias(y)
         select_parts.extend([
-            f"{low_expr} AS low_score_count",
+            f"{numerator_expr} AS {numerator_alias}",
             f"{total_expr} AS order_count",
             f"{agg_expr} AS {agg_alias}",
         ])
@@ -999,12 +1013,14 @@ def _compute_view_stats(view: dict) -> dict:
     y = view.get("agg_alias") or view["y_field"]
 
     stats: dict[str, Any] = {"row_count": len(data)}
-    if y == LOW_SCORE_RATIO:
+    if y in COUNTED_RATIO_MEASURES:
         total_orders = sum(d.get("order_count", 0) or 0 for d in data)
-        low_score_orders = sum(d.get("low_score_count", 0) or 0 for d in data)
+        count_alias = _ratio_count_alias(y)
+        stat_alias = _ratio_stat_alias(y)
+        matching_orders = sum(d.get(count_alias, 0) or 0 for d in data)
         stats["total_orders"] = total_orders
-        stats["low_score_orders"] = low_score_orders
-        stats["overall_low_score_ratio"] = round(low_score_orders / total_orders, 4) if total_orders else 0
+        stats[stat_alias] = matching_orders
+        stats[f"overall_{y}"] = round(matching_orders / total_orders, 4) if total_orders else 0
 
     try:
         if vid == "view-trend" or view["chart_type"] == "line":
@@ -1014,7 +1030,7 @@ def _compute_view_stats(view: dict) -> dict:
                 avg_val = sum(v[1] for v in values) / len(values)
                 stats["peak_label"] = str(peak[0])
                 stats["peak_value"] = peak[1]
-                stats["avg_value"] = round(avg_val, 4 if y == LOW_SCORE_RATIO else 1)
+                stats["avg_value"] = round(avg_val, 4 if y in DERIVED_MEASURES else 1)
                 if view["x_field"] == "order_month":
                     stats["peak_month"] = str(peak[0])
                     stats["avg_monthly"] = round(avg_val, 1)
@@ -1305,10 +1321,25 @@ def _parse_chinese_int(text: str) -> int | None:
 
 
 def _infer_sort_by_from_text(text: str) -> str | None:
+    lowered = text.lower()
     if any(phrase in text for phrase in ("配送时间", "配送天数", "送货时间", "物流时间")):
         return "delivery_days"
+    if any(phrase in text for phrase in ("延迟率", "延迟占比", "超时率", "迟到率")) or any(
+        phrase in lowered for phrase in ("late ratio", "late rate")
+    ):
+        return LATE_RATIO
+    if any(phrase in text for phrase in ("准时率", "准时占比", "按时率")) or any(
+        phrase in lowered for phrase in ("on-time ratio", "on time ratio", "on-time rate")
+    ):
+        return ON_TIME_RATIO
     if any(phrase in text for phrase in ("低分占比", "低评分占比", "差评占比", "低分比例", "低评分比例")):
         return LOW_SCORE_RATIO
+    if any(phrase in text for phrase in ("高评分占比", "高分占比", "好评占比", "高分比例")) or "high score ratio" in lowered:
+        return HIGH_SCORE_RATIO
+    if any(phrase in text for phrase in ("运费占比", "运费比例")) or any(
+        phrase in lowered for phrase in ("freight ratio", "freight share")
+    ):
+        return AVG_FREIGHT_RATIO
     if any(phrase in text for phrase in ("评分", "评价", "星级")):
         return "review_score"
     if any(phrase in text for phrase in ("订单量", "订单数", "数量", "count")):
@@ -1498,8 +1529,10 @@ def _default_order_by(chart_type: str, x: str, measure: str) -> str:
 def _bad_direction_for_metric(metric: str | None) -> str:
     if metric == "review_score":
         return "asc"
-    if metric in {"delivery_days", LOW_SCORE_RATIO}:
+    if metric in {"delivery_days", LOW_SCORE_RATIO, LATE_RATIO, AVG_FREIGHT_RATIO}:
         return "desc"
+    if metric in {ON_TIME_RATIO, HIGH_SCORE_RATIO}:
+        return "asc"
     if metric in {COUNT_MEASURE, "revenue"}:
         return "asc"
     return "desc"
@@ -1515,19 +1548,29 @@ def _order_sql(order_col: str, sort_order: str | None) -> str:
 
 
 def _measure_expr(measure: str, table: str, threshold: int) -> tuple[str, str]:
-    if measure == LOW_SCORE_RATIO:
-        return _low_score_ratio_expr(table, threshold), LOW_SCORE_RATIO
+    if measure in COUNTED_RATIO_MEASURES:
+        return _counted_ratio_expr(measure, table, threshold), measure
+    if measure == AVG_FREIGHT_RATIO:
+        return "ROUND(AVG(freight_ratio), 4)", AVG_FREIGHT_RATIO
     if measure == "revenue":
         col = "item_revenue" if table == "fact_item" else "order_revenue"
         return f"ROUND(SUM({col}), 2)", "revenue"
-    if measure == "delivery_days":
-        return "ROUND(AVG(delivery_days), 1)", "delivery_days"
-    if measure == "review_score":
-        return "ROUND(AVG(review_score), 2)", "review_score"
+    if measure == "order_item_revenue":
+        col = "item_revenue" if table == "fact_item" else "order_item_revenue"
+        return f"ROUND(SUM({col}), 2)", "order_item_revenue"
+    if measure == "freight_total":
+        col = "freight_value" if table == "fact_item" else "freight_total"
+        return f"ROUND(SUM({col}), 2)", "freight_total"
+    if measure in {"delivery_days", "estimated_delivery_days", "delivery_delay_days"}:
+        return f"ROUND(AVG({measure}), 1)", measure
+    if measure == "freight_ratio":
+        return "ROUND(AVG(freight_ratio), 4)", "freight_ratio"
+    if measure in {"review_score", "avg_item_price"}:
+        return f"ROUND(AVG({measure}), 2)", measure
     if measure == COUNT_MEASURE:
         count_expr = "COUNT(DISTINCT order_id)" if table == "fact_item" else "COUNT(*)"
         return count_expr, COUNT_MEASURE
-    if measure in {"order_dow", "order_hour"}:
+    if measure in NUMERIC_AVG_FIELDS or measure in {"order_dow", "order_hour"}:
         return f"ROUND(AVG({measure}), 2)", measure
     return "COUNT(*)", COUNT_MEASURE
 
@@ -1538,18 +1581,47 @@ def _attach_rank(data: list[dict[str, Any]]) -> None:
 
 
 def _low_score_ratio_expr(table: str, threshold: int) -> str:
-    numerator, denominator = _low_score_count_exprs(table, threshold)
-    return f"ROUND(({numerator})::DOUBLE / NULLIF({denominator}, 0), 4)"
+    return _counted_ratio_expr(LOW_SCORE_RATIO, table, threshold)
 
 
 def _low_score_count_exprs(table: str, threshold: int) -> tuple[str, str]:
+    return _counted_ratio_count_exprs(LOW_SCORE_RATIO, table, threshold)
+
+
+def _counted_ratio_expr(measure: str, table: str, threshold: int) -> str:
+    numerator, denominator = _counted_ratio_count_exprs(measure, table, threshold)
+    return f"ROUND(({numerator})::DOUBLE / NULLIF({denominator}, 0), 4)"
+
+
+def _counted_ratio_count_exprs(measure: str, table: str, threshold: int) -> tuple[str, str]:
+    condition = _counted_ratio_condition(measure, threshold)
     if table == "fact_item":
-        numerator = f"COUNT(DISTINCT CASE WHEN review_score <= {threshold} THEN order_id END)"
+        numerator = f"COUNT(DISTINCT CASE WHEN {condition} THEN order_id END)"
         denominator = "COUNT(DISTINCT order_id)"
     else:
-        numerator = f"SUM(CASE WHEN review_score <= {threshold} THEN 1 ELSE 0 END)"
+        numerator = f"SUM(CASE WHEN {condition} THEN 1 ELSE 0 END)"
         denominator = "COUNT(*)"
     return numerator, denominator
+
+
+def _counted_ratio_condition(measure: str, threshold: int) -> str:
+    if measure == LOW_SCORE_RATIO:
+        return f"review_score <= {threshold}"
+    if measure == LATE_RATIO:
+        return "is_late = TRUE"
+    if measure == ON_TIME_RATIO:
+        return "delivery_status_bucket = 'on_time'"
+    if measure == HIGH_SCORE_RATIO:
+        return "is_high_score = TRUE"
+    raise ValueError(f"Unknown ratio measure: {measure}")
+
+
+def _ratio_count_alias(measure: str) -> str:
+    return RATIO_COUNT_ALIASES[measure]
+
+
+def _ratio_stat_alias(measure: str) -> str:
+    return RATIO_STAT_ALIASES[measure]
 
 
 def _low_score_ratio_data(
