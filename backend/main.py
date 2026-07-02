@@ -6,14 +6,18 @@ from __future__ import annotations
 
 import logging
 import uuid
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from db import initialize_db
 from realtime_qwen import QwenRealtimeSession
 
 QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime"
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,3 +75,16 @@ async def _run_qwen_session(websocket: WebSocket) -> None:
         log.info("Client disconnected: %s", session_id)
     except Exception as exc:
         log.exception("Qwen session error: %s", exc)
+
+
+if FRONTEND_DIST.exists():
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+    @app.get("/{path:path}")
+    async def serve_frontend(path: str) -> FileResponse:
+        requested = FRONTEND_DIST / path
+        if requested.is_file():
+            return FileResponse(requested)
+        return FileResponse(FRONTEND_DIST / "index.html")

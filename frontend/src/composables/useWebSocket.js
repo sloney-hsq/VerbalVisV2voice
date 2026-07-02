@@ -14,7 +14,7 @@ export function useWebSocket(audioPlayer) {
   let manualClose = false;
   let lastUrl = null;
 
-  function connect(url = `ws://${location.host}/ws?model=qwen3.5-omni-plus-realtime`) {
+  function connect(url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?model=qwen3.5-omni-plus-realtime`) {
     if (
       socket.value &&
       (socket.value.readyState === WebSocket.OPEN || socket.value.readyState === WebSocket.CONNECTING)
