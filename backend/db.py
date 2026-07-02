@@ -52,11 +52,57 @@ def initialize_db() -> None:
         path = DATA_DIR / filename
         con.execute(f"CREATE TABLE {alias} AS SELECT * FROM read_csv_auto('{path}', header=true)")
 
-    # Payment totals per order (collapse installments)
+    # Order-item summary: one row per order with stable order-level product,
+    # seller, revenue, and freight semantics.
     con.execute("""
-        CREATE TABLE payment_totals AS
-        SELECT order_id, SUM(payment_value) AS payment_value
+        CREATE TABLE item_summary AS
+        SELECT
+            i.order_id,
+            COUNT(*)::INTEGER                                      AS item_count,
+            COUNT(DISTINCT i.product_id)::INTEGER                  AS product_count,
+            COUNT(DISTINCT COALESCE(t.product_category_name_english,
+                                    p.product_category_name,
+                                    'unknown'))::INTEGER           AS category_count,
+            COUNT(DISTINCT i.seller_id)::INTEGER                   AS seller_count,
+            ROUND(SUM(i.price + i.freight_value), 2)               AS order_item_revenue,
+            ROUND(SUM(i.freight_value), 2)                         AS freight_total,
+            ROUND(AVG(i.price), 2)                                 AS avg_item_price,
+            ROUND(SUM(i.freight_value)::DOUBLE
+                / NULLIF(SUM(i.price + i.freight_value), 0), 4)    AS freight_ratio
+        FROM items i
+        LEFT JOIN products p       ON i.product_id = p.product_id
+        LEFT JOIN translations t   ON p.product_category_name = t.product_category_name
+        GROUP BY i.order_id
+    """)
+
+    # Payment summary: keep both total payment value and a stable primary
+    # payment method, chosen by largest payment share in the order.
+    con.execute("""
+        CREATE TABLE payment_ranked AS
+        SELECT
+            order_id,
+            payment_type,
+            payment_installments::INTEGER AS payment_installments,
+            payment_value,
+            ROW_NUMBER() OVER (
+                PARTITION BY order_id
+                ORDER BY payment_value DESC, payment_sequential ASC
+            ) AS payment_rank
         FROM payments
+    """)
+    con.execute("""
+        CREATE TABLE payment_summary AS
+        SELECT
+            order_id,
+            ROUND(SUM(payment_value), 2)                  AS payment_value,
+            COUNT(DISTINCT payment_type)::INTEGER         AS payment_method_count,
+            MAX(payment_installments)::INTEGER            AS max_payment_installments,
+            MAX(CASE WHEN payment_rank = 1
+                     THEN payment_type END)               AS primary_payment_type,
+            MAX(CASE WHEN payment_rank = 1
+                     THEN payment_installments END)::INTEGER
+                                                             AS primary_payment_installments
+        FROM payment_ranked
         GROUP BY order_id
     """)
 
@@ -77,6 +123,7 @@ def initialize_db() -> None:
     # ------------------------------------------------------------------
     con.execute("""
         CREATE TABLE fact_order AS
+        WITH order_base AS (
         SELECT
             o.order_id,
             c.customer_unique_id,
@@ -96,29 +143,105 @@ def initialize_db() -> None:
                 ELSE NULL
             END                                                       AS delivery_days,
             CASE
-                WHEN o.order_delivered_customer_date IS NULL
-                     OR o.order_purchase_timestamp IS NULL
-                    THEN 'unknown'
-                WHEN DATE_DIFF('day',
+                WHEN o.order_estimated_delivery_date IS NOT NULL
+                     AND o.order_purchase_timestamp IS NOT NULL
+                THEN DATE_DIFF('day',
                         o.order_purchase_timestamp::TIMESTAMP,
-                        o.order_delivered_customer_date::TIMESTAMP) <= 3
-                    THEN '0-3 days'
-                WHEN DATE_DIFF('day',
-                        o.order_purchase_timestamp::TIMESTAMP,
-                        o.order_delivered_customer_date::TIMESTAMP) <= 7
-                    THEN '4-7 days'
-                WHEN DATE_DIFF('day',
-                        o.order_purchase_timestamp::TIMESTAMP,
-                        o.order_delivered_customer_date::TIMESTAMP) <= 14
-                    THEN '8-14 days'
-                ELSE '15+ days'
-            END                                                       AS delivery_speed_bucket,
-            pt.payment_value                                          AS order_revenue
+                        o.order_estimated_delivery_date::TIMESTAMP)
+                ELSE NULL
+            END                                                       AS estimated_delivery_days,
+            CASE
+                WHEN o.order_delivered_customer_date IS NOT NULL
+                     AND o.order_estimated_delivery_date IS NOT NULL
+                THEN DATE_DIFF('day',
+                        o.order_estimated_delivery_date::TIMESTAMP,
+                        o.order_delivered_customer_date::TIMESTAMP)
+                ELSE NULL
+            END                                                       AS delivery_delay_days,
+            ps.payment_value                                          AS order_revenue,
+            COALESCE(items.item_count, 0)::INTEGER                    AS item_count,
+            COALESCE(items.product_count, 0)::INTEGER                 AS product_count,
+            COALESCE(items.category_count, 0)::INTEGER                AS category_count,
+            COALESCE(items.seller_count, 0)::INTEGER                  AS seller_count,
+            COALESCE(items.order_item_revenue, 0)                     AS order_item_revenue,
+            COALESCE(items.freight_total, 0)                          AS freight_total,
+            items.avg_item_price                                      AS avg_item_price,
+            items.freight_ratio                                       AS freight_ratio,
+            COALESCE(ps.primary_payment_type, 'unknown')              AS primary_payment_type,
+            COALESCE(ps.payment_method_count, 0)::INTEGER             AS payment_method_count,
+            ps.max_payment_installments                               AS max_payment_installments,
+            ps.primary_payment_installments                           AS primary_payment_installments
         FROM orders o
         LEFT JOIN reviews_dedup   r  ON o.order_id    = r.order_id
         LEFT JOIN customers       c  ON o.customer_id = c.customer_id
-        LEFT JOIN payment_totals pt  ON o.order_id    = pt.order_id
+        LEFT JOIN payment_summary ps ON o.order_id    = ps.order_id
+        LEFT JOIN item_summary items ON o.order_id    = items.order_id
         WHERE o.order_status = 'delivered'
+        )
+        SELECT
+            *,
+            CASE
+                WHEN delivery_days IS NULL THEN 'unknown'
+                WHEN delivery_days <= 3 THEN '0-3 days'
+                WHEN delivery_days <= 7 THEN '4-7 days'
+                WHEN delivery_days <= 14 THEN '8-14 days'
+                ELSE '15+ days'
+            END AS delivery_speed_bucket,
+            CASE
+                WHEN delivery_delay_days IS NULL THEN NULL
+                ELSE delivery_delay_days > 0
+            END AS is_late,
+            CASE
+                WHEN delivery_delay_days IS NULL THEN 'unknown'
+                WHEN delivery_delay_days > 0 THEN 'late'
+                WHEN delivery_delay_days < 0 THEN 'early'
+                ELSE 'on_time'
+            END AS delivery_status_bucket,
+            CASE
+                WHEN delivery_delay_days IS NULL THEN 'unknown'
+                WHEN delivery_delay_days < 0 THEN 'early'
+                WHEN delivery_delay_days = 0 THEN 'on_time'
+                WHEN delivery_delay_days <= 3 THEN '1-3 days late'
+                WHEN delivery_delay_days <= 7 THEN '4-7 days late'
+                ELSE '8+ days late'
+            END AS delay_bucket,
+            CASE
+                WHEN review_score IS NULL THEN 'unknown'
+                WHEN review_score <= 2 THEN 'low'
+                WHEN review_score = 3 THEN 'mid'
+                ELSE 'high'
+            END AS review_bucket,
+            CASE
+                WHEN review_score IS NULL THEN NULL
+                ELSE review_score <= 2
+            END AS default_is_low_score,
+            CASE
+                WHEN review_score IS NULL THEN NULL
+                ELSE review_score >= 4
+            END AS is_high_score,
+            CASE
+                WHEN order_revenue IS NULL THEN 'unknown'
+                WHEN order_revenue <= 50 THEN '0-50'
+                WHEN order_revenue <= 100 THEN '50-100'
+                WHEN order_revenue <= 250 THEN '100-250'
+                WHEN order_revenue <= 500 THEN '250-500'
+                ELSE '500+'
+            END AS revenue_bucket,
+            CASE
+                WHEN freight_total IS NULL THEN 'unknown'
+                WHEN freight_total <= 10 THEN '0-10'
+                WHEN freight_total <= 25 THEN '10-25'
+                WHEN freight_total <= 50 THEN '25-50'
+                ELSE '50+'
+            END AS freight_bucket,
+            CASE
+                WHEN item_count IS NULL OR item_count = 0 THEN 'unknown'
+                WHEN item_count = 1 THEN '1 item'
+                WHEN item_count = 2 THEN '2 items'
+                WHEN item_count <= 5 THEN '3-5 items'
+                ELSE '6+ items'
+            END AS order_size_bucket
+        FROM order_base
     """)
 
     # ------------------------------------------------------------------
@@ -145,10 +268,33 @@ def initialize_db() -> None:
             f.order_dow,
             f.order_hour,
             f.review_score,
+            f.review_bucket,
+            f.default_is_low_score,
+            f.is_high_score,
             f.customer_state,
             f.delivery_days,
+            f.estimated_delivery_days,
+            f.delivery_delay_days,
             f.delivery_speed_bucket,
-            f.order_revenue
+            f.is_late,
+            f.delivery_status_bucket,
+            f.delay_bucket,
+            f.order_revenue,
+            f.item_count,
+            f.product_count,
+            f.category_count,
+            f.seller_count,
+            f.order_item_revenue,
+            f.freight_total,
+            f.avg_item_price,
+            f.freight_ratio,
+            f.primary_payment_type,
+            f.payment_method_count,
+            f.max_payment_installments,
+            f.primary_payment_installments,
+            f.revenue_bucket,
+            f.freight_bucket,
+            f.order_size_bucket
         FROM items i
         JOIN  fact_order   f  ON i.order_id   = f.order_id
         LEFT JOIN products p  ON i.product_id = p.product_id
@@ -166,8 +312,16 @@ def initialize_db() -> None:
 
 FIELDS = [
     "order_month", "order_week", "order_date", "order_dow", "order_hour",
-    "review_score", "customer_state",
-    "product_category", "delivery_days", "delivery_speed_bucket", "revenue",
+    "review_score", "review_bucket", "default_is_low_score", "is_high_score",
+    "customer_state", "product_category",
+    "delivery_days", "estimated_delivery_days", "delivery_delay_days",
+    "delivery_speed_bucket", "is_late", "delivery_status_bucket", "delay_bucket",
+    "revenue", "order_item_revenue", "revenue_bucket",
+    "item_count", "product_count", "category_count", "seller_count",
+    "freight_total", "avg_item_price", "freight_ratio", "freight_bucket",
+    "order_size_bucket",
+    "primary_payment_type", "payment_method_count", "max_payment_installments",
+    "primary_payment_installments",
 ]
 
 OPERATORS = {"eq", "neq", "in", "gte", "lte", "between"}
@@ -183,10 +337,33 @@ _FIELD_COL: dict[str, dict[str, str]] = {
         "order_dow":      "order_dow",
         "order_hour":     "order_hour",
         "review_score":   "review_score",
+        "review_bucket":  "review_bucket",
+        "default_is_low_score": "default_is_low_score",
+        "is_high_score":  "is_high_score",
         "customer_state": "customer_state",
         "delivery_days":  "delivery_days",
+        "estimated_delivery_days": "estimated_delivery_days",
+        "delivery_delay_days": "delivery_delay_days",
         "delivery_speed_bucket": "delivery_speed_bucket",
+        "is_late":        "is_late",
+        "delivery_status_bucket": "delivery_status_bucket",
+        "delay_bucket":   "delay_bucket",
         "revenue":        "order_revenue",
+        "order_item_revenue": "order_item_revenue",
+        "revenue_bucket": "revenue_bucket",
+        "item_count":     "item_count",
+        "product_count":  "product_count",
+        "category_count": "category_count",
+        "seller_count":   "seller_count",
+        "freight_total":  "freight_total",
+        "avg_item_price": "avg_item_price",
+        "freight_ratio":  "freight_ratio",
+        "freight_bucket": "freight_bucket",
+        "order_size_bucket": "order_size_bucket",
+        "primary_payment_type": "primary_payment_type",
+        "payment_method_count": "payment_method_count",
+        "max_payment_installments": "max_payment_installments",
+        "primary_payment_installments": "primary_payment_installments",
     },
     "fact_item": {
         "order_month":      "order_month",
@@ -195,10 +372,33 @@ _FIELD_COL: dict[str, dict[str, str]] = {
         "order_dow":        "order_dow",
         "order_hour":       "order_hour",
         "review_score":     "review_score",
+        "review_bucket":    "review_bucket",
+        "default_is_low_score": "default_is_low_score",
+        "is_high_score":    "is_high_score",
         "customer_state":   "customer_state",
         "delivery_days":    "delivery_days",
+        "estimated_delivery_days": "estimated_delivery_days",
+        "delivery_delay_days": "delivery_delay_days",
         "delivery_speed_bucket": "delivery_speed_bucket",
+        "is_late":          "is_late",
+        "delivery_status_bucket": "delivery_status_bucket",
+        "delay_bucket":     "delay_bucket",
         "revenue":          "order_revenue",
+        "order_item_revenue": "order_item_revenue",
+        "revenue_bucket":   "revenue_bucket",
+        "item_count":       "item_count",
+        "product_count":    "product_count",
+        "category_count":   "category_count",
+        "seller_count":     "seller_count",
+        "freight_total":    "freight_total",
+        "avg_item_price":   "avg_item_price",
+        "freight_ratio":    "freight_ratio",
+        "freight_bucket":   "freight_bucket",
+        "order_size_bucket": "order_size_bucket",
+        "primary_payment_type": "primary_payment_type",
+        "payment_method_count": "payment_method_count",
+        "max_payment_installments": "max_payment_installments",
+        "primary_payment_installments": "primary_payment_installments",
         "product_category": "product_category",
     },
 }

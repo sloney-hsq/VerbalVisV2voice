@@ -27,10 +27,28 @@ log = logging.getLogger(__name__)
 
 COUNT_MEASURE = "order_count"
 LOW_SCORE_RATIO = "low_score_ratio"
-DERIVED_MEASURES = [LOW_SCORE_RATIO]
+LATE_RATIO = "late_ratio"
+ON_TIME_RATIO = "on_time_ratio"
+HIGH_SCORE_RATIO = "high_score_ratio"
+AVG_FREIGHT_RATIO = "avg_freight_ratio"
+COUNTED_RATIO_MEASURES = {LOW_SCORE_RATIO, LATE_RATIO, ON_TIME_RATIO, HIGH_SCORE_RATIO}
+DERIVED_MEASURES = [LOW_SCORE_RATIO, LATE_RATIO, ON_TIME_RATIO, HIGH_SCORE_RATIO, AVG_FREIGHT_RATIO]
 APPEND_Y_FIELDS = FIELDS + [COUNT_MEASURE, *DERIVED_MEASURES]
 SORT_FIELDS = APPEND_Y_FIELDS
 TIME_FIELDS = {"order_month", "order_week", "order_date", "order_dow", "order_hour"}
+NUMERIC_AVG_FIELDS = {
+    "estimated_delivery_days",
+    "delivery_delay_days",
+    "item_count",
+    "product_count",
+    "category_count",
+    "seller_count",
+    "avg_item_price",
+    "freight_ratio",
+    "payment_method_count",
+    "max_payment_installments",
+    "primary_payment_installments",
+}
 MAX_VIEW_LIMIT = 100
 LOW_SCORE_THRESHOLD_DEFAULT = 2
 
@@ -237,7 +255,7 @@ TOOL_SCHEMAS = [
                 },
                 "color": {
                     "type": ["string", "null"],
-                    "enum": ["customer_state", "product_category", "review_score", None],
+                    "enum": sorted(ALLOWED_COLOR_FIELDS) + [None],
                     "description": "Optional color encoding field.",
                 },
                 "title": {
@@ -576,7 +594,15 @@ def _exec_highlight_visual(args: dict) -> dict:
 # --- append_visual ---
 
 ALLOWED_CHART_TYPES = {"scatter", "bar", "line", "histogram", "pie"}
-ALLOWED_COLOR_FIELDS = {"customer_state", "product_category", "review_score"}
+ALLOWED_COLOR_FIELDS = {
+    "customer_state",
+    "product_category",
+    "review_score",
+    "review_bucket",
+    "delivery_status_bucket",
+    "order_size_bucket",
+    "primary_payment_type",
+}
 
 
 def _exec_append_visual(args: dict) -> dict:
