@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 from fastapi import WebSocket, WebSocketDisconnect
 
 from prompts import build_system_prompt
+from session_summary import SessionSummaryTracker
 from tools import (
     TOOL_SCHEMAS,
     context_text,
@@ -235,6 +236,7 @@ class QwenRealtimeSession:
         self._assistant_transcript_buffer = ""
         self._last_user_transcript = ""
         self._dashboard_context = ""
+        self._summary_tracker = SessionSummaryTracker(self.session_id, "qwen")
 
         self._log_dir: Path | None = None
         self._event_logger: logging.Logger | None = None
@@ -270,6 +272,7 @@ class QwenRealtimeSession:
         self._bargein_logger = _make("bargein")
         self._connection_logger = _make("connection")
         self._conversation_logger = _make("conversation")
+        self._summary_tracker.set_log_dir(log_dir)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -671,6 +674,9 @@ class QwenRealtimeSession:
                         "role": "user",
                         "text": clean_transcript,
                     })
+                    await self._send_session_summary(
+                        self._summary_tracker.record_user_transcript(clean_transcript)
+                    )
                 elif self._event_logger:
                     self._event_logger.info("EMPTY_TRANSCRIPT_IGNORED")
 
@@ -693,6 +699,12 @@ class QwenRealtimeSession:
                     "name": _tool_name,
                     "arguments": _tool_args,
                 })
+                self._summary_tracker.record_tool_call(
+                    name=_tool_name,
+                    arguments=_tool_args,
+                    response_id=response_id,
+                    call_id=event.get("call_id"),
+                )
 
                 if response_id:
                     self._responses_with_tool_calls.add(response_id)
@@ -710,13 +722,21 @@ class QwenRealtimeSession:
             elif etype == "response.done":
                 self._finish_response_metrics(response_id, event.get("response", {}))
                 has_tool_call = bool(response_id and response_id in self._responses_with_tool_calls)
-                if self._assistant_transcript_buffer.strip() and not has_tool_call:
-                    self._log_conversation("AI", self._assistant_transcript_buffer.strip())
+                assistant_text = self._assistant_transcript_buffer.strip()
+                if assistant_text:
+                    await self._send_session_summary(
+                        self._summary_tracker.record_assistant_transcript(
+                            assistant_text,
+                            suppressed=has_tool_call,
+                        )
+                    )
+                if assistant_text and not has_tool_call:
+                    self._log_conversation("AI", assistant_text)
                 elif has_tool_call and self._event_logger:
                     self._event_logger.info(
                         "SUPPRESSED_PRE_TOOL_TRANSCRIPT response_id=%s text=%s",
                         response_id,
-                        self._assistant_transcript_buffer.strip()[:500],
+                        assistant_text[:500],
                     )
                 self._assistant_transcript_buffer = ""
                 if response_id:
@@ -977,6 +997,17 @@ class QwenRealtimeSession:
                     )
                 await self._send_client({"type": "views_update", "views": views})
 
+            await self._send_session_summary(
+                self._summary_tracker.record_tool_result(
+                    name=tool_name,
+                    arguments=arguments,
+                    result=result,
+                    response_id=response_id,
+                    call_id=call_id,
+                    duration_ms=tool_duration_ms,
+                )
+            )
+
             await self._send_qwen({
                 "type": "conversation.item.create",
                 "item": {
@@ -1215,6 +1246,19 @@ class QwenRealtimeSession:
                     "role": role,
                     "text": text,
                 }, ensure_ascii=False) + "\n")
+
+    async def _send_session_summary(self, summary: dict[str, Any] | None) -> None:
+        if not summary:
+            return
+        if self._event_logger:
+            self._event_logger.info(
+                "SESSION_SUMMARY %s",
+                json.dumps(summary, ensure_ascii=False)[:2000],
+            )
+        await self._send_client({
+            "type": "session_summary",
+            "summary": summary,
+        })
 
     # ------------------------------------------------------------------
     # Transport helpers

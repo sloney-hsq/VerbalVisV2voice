@@ -71,6 +71,10 @@ export function useWebSocket(audioPlayer) {
         store.updateViews(msg.views);
         break;
 
+      case "session_summary":
+        store.addSessionSummary(msg);
+        break;
+
       case "audio":
         store.isAssistantSpeaking = true;
         if (audioPlayer) {

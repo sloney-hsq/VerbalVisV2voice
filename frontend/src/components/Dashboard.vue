@@ -74,6 +74,35 @@
       <ChartSlot v-for="view in store.views" :key="view.id" :view="view" />
     </section>
 
+    <section v-if="summaryRows.length" class="dashboard__summaries" aria-label="阶段纪要">
+      <div class="summary-header">
+        <h3>阶段纪要</h3>
+        <button class="summary-clear" type="button" @click="clearSummaries">
+          清空
+        </button>
+      </div>
+      <div class="summary-list">
+        <article v-for="summary in summaryRows" :key="summary.id" class="summary-card">
+          <div class="summary-card__top">
+            <span class="summary-card__phase">{{ summaryPhaseLabel(summary) }}</span>
+            <span class="summary-card__time">{{ formatTranscriptTime(summary.ts) }}</span>
+          </div>
+          <p class="summary-card__title">{{ summaryTitle(summary) }}</p>
+          <ul v-if="summaryBullets(summary).length" class="summary-card__bullets">
+            <li v-for="(bullet, index) in summaryBullets(summary)" :key="index">
+              {{ bullet }}
+            </li>
+          </ul>
+          <div v-if="summaryCorrections(summary).length" class="summary-card__corrections">
+            <span>误听/校正</span>
+            <span v-for="(item, index) in summaryCorrections(summary)" :key="index">
+              {{ item }}
+            </span>
+          </div>
+        </article>
+      </div>
+    </section>
+
     <section v-if="transcriptRows.length" class="dashboard__transcript" aria-label="Session transcript">
       <div class="transcript-header">
         <h3>Session Transcript</h3>
@@ -203,6 +232,13 @@ const transcriptRows = computed(() => {
 
   return rows;
 });
+
+const summaryRows = computed(() => (
+  store.sessionSummaries.map((item, index) => ({
+    ...item,
+    id: item.id || `${item.ts || index}-${index}`,
+  })).slice().reverse()
+));
 
 watch(
   () => [store.transcripts.length, audio.isRecording.value, isStartingListening.value],
@@ -348,6 +384,49 @@ function formatTranscriptTime(ts) {
   }).format(new Date(ts || Date.now()));
 }
 
+function summaryTitle(summary) {
+  return summary.title || summary.current_focus || summary.text || "阶段纪要";
+}
+
+function summaryPhaseLabel(summary) {
+  const phase = summary.phase_index ?? summary.phase ?? summary.phase_id;
+  return phase === undefined || phase === null || phase === "" ? "阶段" : `阶段 ${phase}`;
+}
+
+function summaryBullets(summary) {
+  return normalizeSummaryList(
+    summary.bullets ?? summary.actions ?? summary.key_points ?? summary.notes
+  ).slice(0, 4);
+}
+
+function summaryCorrections(summary) {
+  return [
+    ...normalizeSummaryList(summary.possible_mishearings),
+    ...normalizeSummaryList(summary.corrections),
+    ...normalizeSummaryList(summary.corrected_phrases),
+    ...normalizeSummaryList(summary.mishearings),
+  ].slice(0, 4);
+}
+
+function normalizeSummaryList(values) {
+  if (Array.isArray(values)) return values.map(formatSummaryItem).filter(Boolean);
+  const item = formatSummaryItem(values);
+  return item ? [item] : [];
+}
+
+function formatSummaryItem(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "object") {
+    const heard = value.heard || value.original || value.misheard || value.from;
+    const corrected = value.corrected || value.correction || value.to;
+    if (heard && corrected) return `${heard} -> ${corrected}`;
+    if (value.text) return String(value.text).trim();
+    if (value.note) return String(value.note).trim();
+  }
+  return String(value).trim();
+}
+
 function filterLabel(filter) {
   return `${fieldLabel(filter.field)} ${operatorLabel(filter.operator)} ${formatValue(filter.value)}`;
 }
@@ -394,6 +473,7 @@ function fieldLabel(field) {
     on_time_ratio: "准时率",
     high_score_ratio: "高评分占比",
     avg_freight_ratio: "平均运费占比",
+    state_revenue: "州销售额",
   };
   return labels[field] || field;
 }
@@ -417,6 +497,10 @@ function formatValue(value) {
 
 function clearTranscript() {
   store.clearTranscripts();
+}
+
+function clearSummaries() {
+  store.clearSessionSummaries();
 }
 
 function buildRealtimeWsUrl() {
@@ -768,6 +852,135 @@ function buildRealtimeWsUrl() {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
   gap: 16px;
+}
+
+.dashboard__summaries {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid #d7e1ee;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #e1e8f2;
+  background: #f8fbff;
+}
+
+.summary-header h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.summary-clear {
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.summary-clear:hover {
+  color: #0f2f66;
+}
+
+.summary-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 0;
+}
+
+.summary-card {
+  min-width: 0;
+  padding: 10px 14px 12px;
+  border-right: 1px solid #edf2f7;
+  border-bottom: 1px solid #edf2f7;
+  color: #1f2937;
+}
+
+.summary-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.summary-card__phase {
+  min-width: 0;
+  overflow: hidden;
+  color: #1d4ed8;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-card__time {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-card__title {
+  margin: 0 0 7px;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.summary-card__bullets {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.summary-card__bullets li {
+  overflow-wrap: anywhere;
+}
+
+.summary-card__corrections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.summary-card__corrections span {
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid #d7e1ee;
+  border-radius: 999px;
+  background: #f8fafc;
+  overflow-wrap: anywhere;
+}
+
+.summary-card__corrections span:first-child {
+  border-color: #f2c7a0;
+  background: #fff7ed;
+  color: #9a4b12;
+  font-weight: 750;
 }
 
 .dashboard__transcript {

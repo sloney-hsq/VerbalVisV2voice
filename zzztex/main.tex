@@ -533,40 +533,53 @@ concise and interruptible responses.
 
 The formative findings informed four design requirements.
 
-\paragraph{DR1: Ground interpretation in active analytical commitments.}
+\paragraph{DR1: Ground interpretation in the current analytical and visual state.}
 
-The system should interpret a new utterance relative to the current analytical
-goal, working hypothesis, filters, visualizations, and dialogue context. This
-context is necessary to determine whether the utterance continues, qualifies,
-or supersedes the active investigation.
+The system should interpret each new utterance relative to the ongoing
+conversation and the current state of the analysis, including the active
+question, relevant working explanations, filters, highlights, and
+visualizations. This grounding is necessary to determine whether the utterance
+continues the current analysis, qualifies part of it, or redirects it toward a
+different analytical direction.
 
-\paragraph{DR2: Support compound revisions through composable actions.}
+\paragraph{DR2: Support compound revisions through composable analytical
+actions.}
 
-Because one utterance may revise multiple analytical objects, the system should
-support composable, schema-grounded action sequences rather than map every
-utterance to one operation or one exclusive revision type.
+A single utterance may change more than one aspect of the analysis. For
+example, a user may simultaneously redirect the analytical goal and restrict
+the relevant data scope. The system should therefore support composable,
+schema-grounded action sequences rather than map each utterance to a single
+operation or an exclusive revision category.
 
-\paragraph{DR3: Distinguish analytical revision from repair and method change.}
+\paragraph{DR3: Avoid treating every interruption or conversational repair as
+analytical revision.}
 
-Recognition corrections, clarifications, evidence requests, initial
-hypotheses, and changes in chart or metric should not automatically invalidate
-the current analytical direction. The system should preserve valid context
-when the user is repairing expression rather than revising analysis.
+Speech overlap may indicate an analytical revision, but it may also reflect an
+acknowledgement, an ASR correction, a clarification request, or an attempt to
+shorten an explanation. Similarly, a request to change a chart or metric does
+not necessarily change the underlying analytical direction. The system should
+interpret the utterance in context and preserve valid analytical state when the
+user is repairing communication or modifying the method rather than replacing
+the ongoing investigation.
 
-\paragraph{DR4: Coordinate supersession across speech, execution, and visual
-state.}
+\paragraph{DR4: Coordinate redirection across speech, analytical execution,
+and visual state.}
 
-When a new request supersedes an active response, cancellation should extend
-beyond audio playback. Response-dependent tool calls, query execution, and
-pending dashboard updates should be invalidated so that obsolete results
-cannot later modify the visible state. Replanning should begin from the latest
-committed dashboard state while preserving still-relevant filters,
-visualizations, findings, and dialogue context.
+When a new request redirects an active analysis, stopping audio alone is
+insufficient. Pending or running response-dependent actions should be cancelled
+where possible, and results associated with an obsolete response should be
+prevented from modifying the dashboard. Subsequent planning should begin from
+the latest committed dashboard state while preserving filters,
+visualizations, findings, and dialogue context that remain relevant to the
+revised request.
 
-These requirements directly informed VerbalVis: compact dashboard-state
-grounding supports DR1; composable visualization tools support DR2; separate
-handling of repair and analytical redirection supports DR3; and response-bound
-execution epochs with stale-result rejection support DR4.
+These requirements directly informed the design of VerbalVis. Compact
+conversation and dashboard-state grounding supports DR1; schema-grounded,
+composable visualization tools support DR2; contextual interpretation of
+overlapping speech supports DR3; and response-bound execution epochs,
+stale-result rejection, and replanning from the latest committed dashboard
+state support DR4.
+
 
 \subsection{Scope of Evidence}
 \label{sec:formative-scope}

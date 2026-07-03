@@ -49,7 +49,7 @@ NUMERIC_AVG_FIELDS = {
     "max_payment_installments",
     "primary_payment_installments",
 }
-ALLOWED_CHART_TYPES = {"scatter", "bar", "line", "histogram", "pie"}
+ALLOWED_CHART_TYPES = {"scatter", "bar", "line", "histogram", "pie", "table"}
 ALLOWED_COLOR_FIELDS = {
     "customer_state",
     "product_category",
@@ -79,7 +79,7 @@ LOW_SCORE_THRESHOLD_DEFAULT = 2
 # ------------------------------------------------------------------
 
 active_filters: list[dict[str, Any]] = []
-workspace_counter: int = 0          # workspace-1, workspace-2, …
+workspace_counter: int = 0          # workspace1, workspace2, …
 views: list[dict[str, Any]] = []    # all views (base + workspace)
 highlighted_view: str | None = None
 low_score_threshold: int = LOW_SCORE_THRESHOLD_DEFAULT
@@ -263,7 +263,7 @@ TOOL_SCHEMAS = [
             "properties": {
                 "chart_type": {
                     "type": "string",
-                    "enum": ["scatter", "bar", "line", "histogram", "pie"],
+                    "enum": ["scatter", "bar", "line", "histogram", "pie", "table"],
                 },
                 "x": {
                     "type": "string",
@@ -319,7 +319,7 @@ TOOL_SCHEMAS = [
                 },
                 "series_limit": {
                     "type": ["integer", "null"],
-                    "description": "For multi-series line/bar charts: keep Top N series values before grouping by x.",
+                    "description": "For multi-series line/bar charts and state/category tables: keep Top N series values.",
                 },
                 "series_sort_by": {
                     "type": ["string", "null"],
@@ -400,7 +400,7 @@ TOOL_SCHEMAS = [
             "properties": {
                 "view_id": {
                     "type": "string",
-                    "description": "ID of the view to delete (e.g. 'workspace-1', 'view-trend').",
+                    "description": "ID of the view to delete (e.g. 'workspace1', 'view-trend').",
                 },
             },
             "required": ["view_id"],
@@ -447,8 +447,14 @@ def normalize_tool_arguments(
         normalized["_user_transcript"] = user_transcript
     if name in {"filter_data", "append_visual"} and "value" in normalized:
         normalized["value"] = _coerce_jsonish(normalized["value"])
+    append_text = ""
+    wants_state_category_table = False
+    if name == "append_visual":
+        append_text = " ".join(str(v or "") for v in (normalized.get("title"), user_transcript))
+        wants_state_category_table = _wants_state_category_table(append_text)
     if (
         name == "append_visual"
+        and not wants_state_category_table
         and normalized.get("limit") in (None, "")
         and normalized.get("series_limit") in (None, "")
     ):
@@ -459,7 +465,24 @@ def normalize_tool_arguments(
         if inferred_limit is not None:
             normalized["limit"] = inferred_limit
     if name == "append_visual":
-        text = " ".join(str(v or "") for v in (normalized.get("title"), user_transcript))
+        text = append_text
+        if wants_state_category_table:
+            normalized["chart_type"] = "table"
+            normalized["x"] = "customer_state"
+            normalized["y"] = "revenue"
+            normalized["color"] = "product_category"
+            if normalized.get("limit") in (None, ""):
+                normalized["limit"] = _infer_state_limit_from_text(text) or 10
+            if normalized.get("series_limit") in (None, ""):
+                normalized["series_limit"] = _infer_category_rank_limit_from_text(text) or 3
+            if normalized.get("sort_by") in (None, ""):
+                normalized["sort_by"] = "revenue"
+            if normalized.get("sort_order") in (None, ""):
+                normalized["sort_order"] = "desc"
+            if normalized.get("series_sort_by") in (None, ""):
+                normalized["series_sort_by"] = "revenue"
+            if normalized.get("series_sort_order") in (None, ""):
+                normalized["series_sort_order"] = "desc"
         if _wants_pie_chart(text) and normalized.get("chart_type") in (None, "", "bar"):
             normalized["chart_type"] = "pie"
         if _wants_delivery_speed_bucket(text) and normalized.get("x") in (None, "", "delivery_days"):
@@ -657,7 +680,8 @@ def _exec_append_visual(args: dict) -> dict:
     if sort_order in ("", None):
         sort_order = None
     series_limit_arg = args.get("series_limit")
-    if series_limit_arg in (None, ""):
+    explicit_series_limit = series_limit_arg not in (None, "")
+    if not explicit_series_limit:
         series_limit_arg = None
     series_limit = _coerce_limit(series_limit_arg)
     series_sort_by = args.get("series_sort_by")
@@ -665,7 +689,11 @@ def _exec_append_visual(args: dict) -> dict:
         series_sort_by = None
     series_sort_order = args.get("series_sort_order") or "desc"
     limit_arg = args.get("limit")
-    if limit_arg in (None, "") and series_limit is None:
+    explicit_limit = limit_arg not in (None, "")
+    is_state_category_table_candidate = (
+        chart_type == "table" and x == "customer_state" and y == "revenue"
+    )
+    if not explicit_limit and series_limit is None and not is_state_category_table_candidate:
         limit_arg = _infer_limit_from_text(title)
     limit = _coerce_limit(limit_arg)
     low_score_threshold_arg = args.get("low_score_threshold")
@@ -678,6 +706,17 @@ def _exec_append_visual(args: dict) -> dict:
     )
     if filter_error:
         return filter_error
+
+    if is_state_category_table_candidate:
+        color = color or "product_category"
+        if not explicit_series_limit:
+            series_limit = 3
+        series_sort_by = series_sort_by or "revenue"
+        series_sort_order = series_sort_order or "desc"
+        if not explicit_limit:
+            limit = _infer_state_limit_from_text(title, user_text) or 10
+        sort_by = sort_by or "revenue"
+        sort_order = sort_order or "desc"
 
     # Validate (the JSON schema enums constrain a well-behaved model, but the
     # Realtime API does not guarantee enum adherence at runtime — without
@@ -756,6 +795,17 @@ def _exec_append_visual(args: dict) -> dict:
             "success": False,
             "error": f"Unknown field for color: '{color}'. Available: {', '.join(sorted(ALLOWED_COLOR_FIELDS))}",
         }
+    if chart_type == "table" and not (
+        x == "customer_state" and y == "revenue" and color == "product_category"
+    ):
+        return {
+            "tool": "append_visual",
+            "success": False,
+            "error": (
+                "Table visuals currently support state/category revenue tables only: "
+                "use x=customer_state, y=revenue, color=product_category."
+            ),
+        }
     if limit_arg is not None and limit is None:
         return {
             "tool": "append_visual",
@@ -764,7 +814,7 @@ def _exec_append_visual(args: dict) -> dict:
         }
 
     workspace_counter += 1
-    view_id = f"workspace-{workspace_counter}"
+    view_id = f"workspace{workspace_counter}"
 
     # Route to fact_item whenever product_category is involved (x / y / color);
     # otherwise stay on fact_order. Keeps revenue at item grain when grouping
@@ -817,6 +867,8 @@ def _exec_append_visual(args: dict) -> dict:
         "data": [],
         "statistics": {},
     }
+    if _is_state_category_table(view_def):
+        view_def["table_columns"] = _state_category_table_columns(series_limit or 3)
 
     effective_filters = _effective_filters_for_view(view_def)
     if freeze:
@@ -825,6 +877,8 @@ def _exec_append_visual(args: dict) -> dict:
     # Query data
     if chart_type == "scatter":
         view_def["data"] = _scatter_data(x, y, color, source_table, filters=effective_filters)
+    elif _is_state_category_table(view_def):
+        view_def["data"] = _state_category_table_data(view_def, filters=effective_filters)
     else:
         data = _aggregate_visual_data(
             view_def,
@@ -862,6 +916,7 @@ def _exec_append_visual(args: dict) -> dict:
             "filter_scope": _filter_scope(view_def),
             "effective_filters": effective_filters,
             "snapshot_filters": view_def.get("snapshot_filters", []),
+            "table_columns": view_def.get("table_columns"),
             "data": view_def["data"],
             "statistics": view_def["statistics"],
             "filtered_rows": total_rows(effective_filters),
@@ -927,6 +982,132 @@ def _infer_agg(chart_type: str, x: str, y: str, table: str, threshold: int | Non
     # bar / line / pie
     expr, alias = _measure_expr(y, table, threshold or low_score_threshold)
     return expr, alias, x, _default_order_by(chart_type, x, alias)
+
+
+def _is_state_category_table(view: dict[str, Any]) -> bool:
+    return (
+        view.get("chart_type") == "table"
+        and view.get("x_field") == "customer_state"
+        and view.get("y_field") == "revenue"
+        and view.get("color") == "product_category"
+    )
+
+
+def _state_category_table_columns(series_limit: int) -> list[dict[str, str]]:
+    columns = [
+        {"key": "customer_state", "label": "州"},
+        {"key": "state_revenue", "label": "州销售额"},
+    ]
+    for idx in range(1, series_limit + 1):
+        columns.append({"key": f"top_{idx}", "label": f"第{idx}名品类"})
+    return columns
+
+
+def _state_category_table_data(
+    view: dict[str, Any],
+    filters: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Top categories per state, formatted for compact table visuals."""
+    con = get_connection()
+    table = view.get("source_table", "fact_item")
+    where = build_where(filters, table=table)
+    state_limit = _coerce_limit(view.get("limit")) or 10
+    category_limit = _coerce_limit(view.get("series_limit")) or 3
+    sort_direction = "ASC" if view.get("sort_order") == "asc" else "DESC"
+    series_direction = "ASC" if view.get("series_sort_order") == "asc" else "DESC"
+
+    sql = f"""
+        WITH base AS (
+            SELECT customer_state, product_category, item_revenue
+            FROM {table}
+            WHERE {where}
+              AND customer_state IS NOT NULL
+              AND product_category IS NOT NULL
+        ),
+        state_totals AS (
+            SELECT
+                customer_state,
+                ROUND(SUM(item_revenue), 2) AS state_revenue
+            FROM base
+            GROUP BY customer_state
+        ),
+        ranked_states AS (
+            SELECT
+                customer_state,
+                state_revenue,
+                ROW_NUMBER() OVER (
+                    ORDER BY state_revenue {sort_direction}, customer_state ASC
+                ) AS state_rank
+            FROM state_totals
+            ORDER BY state_revenue {sort_direction}, customer_state ASC
+            LIMIT {state_limit}
+        ),
+        category_totals AS (
+            SELECT
+                customer_state,
+                product_category,
+                ROUND(SUM(item_revenue), 2) AS category_revenue
+            FROM base
+            GROUP BY customer_state, product_category
+        ),
+        ranked_categories AS (
+            SELECT
+                ct.customer_state,
+                ct.product_category,
+                ct.category_revenue,
+                rs.state_revenue,
+                rs.state_rank,
+                ROW_NUMBER() OVER (
+                    PARTITION BY ct.customer_state
+                    ORDER BY ct.category_revenue {series_direction}, ct.product_category ASC
+                ) AS category_rank
+            FROM category_totals ct
+            JOIN ranked_states rs USING (customer_state)
+        )
+        SELECT
+            customer_state,
+            product_category,
+            category_revenue,
+            state_revenue,
+            state_rank,
+            category_rank
+        FROM ranked_categories
+        WHERE category_rank <= {category_limit}
+        ORDER BY state_rank ASC, category_rank ASC
+    """
+    result = con.execute(sql)
+    col_names = [d[0] for d in result.description]
+    detail_rows = [dict(zip(col_names, row)) for row in result.fetchall()]
+
+    by_state: dict[str, dict[str, Any]] = {}
+    for item in detail_rows:
+        state = item["customer_state"]
+        state_revenue_raw = float(item.get("state_revenue") or 0)
+        category_revenue_raw = float(item.get("category_revenue") or 0)
+        category_rank = int(item.get("category_rank") or 0)
+        share_int = int(round((category_revenue_raw / state_revenue_raw) * 100)) if state_revenue_raw else 0
+        state_revenue_int = int(round(state_revenue_raw))
+        category_revenue_int = int(round(category_revenue_raw))
+        row = by_state.setdefault(
+            state,
+            {
+                "customer_state": state,
+                "state_revenue": state_revenue_int,
+                "state_rank": int(item.get("state_rank") or 0),
+            },
+        )
+        row[f"top_{category_rank}"] = (
+            f"{item['product_category']} ({category_revenue_int}, {share_int}%)"
+        )
+        row[f"top_{category_rank}_category"] = item["product_category"]
+        row[f"top_{category_rank}_revenue"] = category_revenue_int
+        row[f"top_{category_rank}_share"] = share_int
+
+    rows = sorted(by_state.values(), key=lambda row: row.get("state_rank", 0))
+    for row in rows:
+        for idx in range(1, category_limit + 1):
+            row.setdefault(f"top_{idx}", "")
+    return rows
 
 
 def _aggregate_visual_data(
@@ -1116,6 +1297,8 @@ def _refresh_all_views() -> None:
                 table,
                 filters=effective_filters,
             )
+        elif _is_state_category_table(view):
+            view["data"] = _state_category_table_data(view, filters=effective_filters)
         else:
             limit = view.get("limit")
             color = view.get("color")
@@ -1144,6 +1327,20 @@ def _compute_view_stats(view: dict) -> dict:
     y = view.get("agg_alias") or view["y_field"]
 
     stats: dict[str, Any] = {"row_count": len(data)}
+    if view.get("chart_type") == "table":
+        state_revenues = [
+            d.get("state_revenue", 0) or 0
+            for d in data
+            if d.get("customer_state") is not None
+        ]
+        stats["state_count"] = len(data)
+        stats["category_columns"] = max(int(view.get("series_limit") or 0), 0)
+        if data and state_revenues:
+            top = max(data, key=lambda d: d.get("state_revenue", 0) or 0)
+            stats["top_state"] = top.get("customer_state")
+            stats["top_state_revenue"] = top.get("state_revenue")
+        return stats
+
     if y in COUNTED_RATIO_MEASURES:
         total_orders = sum(d.get("order_count", 0) or 0 for d in data)
         count_alias = _ratio_count_alias(y)
@@ -1227,7 +1424,7 @@ def rebuild_context() -> dict[str, Any]:
     """Build compact context dict for the Realtime model."""
     ctx_views = []
     for v in views:
-        ctx_views.append({
+        view_context = {
             "id": v["id"],
             "chart_type": v["chart_type"],
             "title": v["title"],
@@ -1240,13 +1437,17 @@ def rebuild_context() -> dict[str, Any]:
             "series_limit": v.get("series_limit"),
             "series_sort_by": v.get("series_sort_by"),
             "series_sort_order": v.get("series_sort_order"),
+            "table_columns": v.get("table_columns"),
             "low_score_threshold": v.get("low_score_threshold", low_score_threshold),
             "filters": v.get("filters", []),
             "inherit_global_filters": v.get("inherit_global_filters", True),
             "freeze": v.get("freeze", False),
             **_view_scope_payload(v),
             "statistics": v["statistics"],
-        })
+        }
+        if v.get("chart_type") == "table":
+            view_context["data"] = v.get("data", [])
+        ctx_views.append(view_context)
 
     return {
         "active_filters": active_filters.copy(),
@@ -1297,6 +1498,14 @@ def context_text() -> str:
         if v.get("freeze"):
             meta.append("frozen")
         meta.append(f"scope={_filter_scope(v)}")
+        if v.get("chart_type") == "table":
+            if v.get("table_columns"):
+                meta.append(
+                    "table_columns="
+                    + json.dumps(v["table_columns"], ensure_ascii=False, default=str)
+                )
+            if v.get("data"):
+                meta.append("data=" + json.dumps(v["data"], ensure_ascii=False, default=str))
         meta_str = f" | {'; '.join(meta)}" if meta else ""
         lines.append(f"- {v['id']} | {v['title']} | {v['chart_type']}{meta_str} | {stat_str or 'no_stats'}")
 
@@ -1305,7 +1514,13 @@ def context_text() -> str:
 
 def get_all_view_data() -> list[dict]:
     """Return view id + data for all views (sent to frontend)."""
-    return [{"id": v["id"], "data": v["data"]} for v in views]
+    result = []
+    for v in views:
+        payload = {"id": v["id"], "data": v["data"]}
+        if v.get("chart_type") == "table":
+            payload["table_columns"] = v.get("table_columns")
+        result.append(payload)
+    return result
 
 
 def get_views_for_frontend() -> list[dict]:
@@ -1326,6 +1541,7 @@ def get_views_for_frontend() -> list[dict]:
             "series_limit": v.get("series_limit"),
             "series_sort_by": v.get("series_sort_by"),
             "series_sort_order": v.get("series_sort_order"),
+            "table_columns": v.get("table_columns"),
             "low_score_threshold": v.get("low_score_threshold", low_score_threshold),
             "filters": v.get("filters", []),
             "inherit_global_filters": v.get("inherit_global_filters", True),
@@ -1406,6 +1622,58 @@ def _infer_limit_from_text(*texts: Any) -> int | None:
         r"top\s*([一二两三四五六七八九十百零〇]{1,5})",
         r"(?:前|保留|只保留|显示|展示)\s*(\d{1,3})\s*(?:个|项|名|类|类别|品类)?",
         r"(?:前|保留|只保留|显示|展示)\s*([一二两三四五六七八九十百零〇]{1,5})\s*(?:个|项|名|类|类别|品类)?",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw = match.group(1)
+        value = int(raw) if raw.isdigit() else _parse_chinese_int(raw)
+        if value is not None and 1 <= value <= MAX_VIEW_LIMIT:
+            return value
+    return None
+
+
+def _infer_state_limit_from_text(*texts: Any) -> int | None:
+    text = " ".join(str(t or "") for t in texts)
+    if not text:
+        return None
+    range_patterns = [
+        r"([一二两三四五六七八九十百零〇\d]{1,5})\s*(?:到|至|-|~)\s*([一二两三四五六七八九十百零〇\d]{1,5})\s*个?州",
+        r"州.*?([一二两三四五六七八九十百零〇\d]{1,5})\s*(?:到|至|-|~)\s*([一二两三四五六七八九十百零〇\d]{1,5})",
+    ]
+    for pattern in range_patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        hi_raw = match.group(2)
+        hi = int(hi_raw) if hi_raw.isdigit() else _parse_chinese_int(hi_raw)
+        if hi is not None and 1 <= hi <= MAX_VIEW_LIMIT:
+            return hi
+
+    patterns = [
+        r"(?:显示|展示|列出|前|top)\s*([一二两三四五六七八九十百零〇\d]{1,5})\s*个?州",
+        r"([一二两三四五六七八九十百零〇\d]{1,5})\s*个?州",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw = match.group(1)
+        value = int(raw) if raw.isdigit() else _parse_chinese_int(raw)
+        if value is not None and 1 <= value <= MAX_VIEW_LIMIT:
+            return value
+    return None
+
+
+def _infer_category_rank_limit_from_text(*texts: Any) -> int | None:
+    text = " ".join(str(t or "") for t in texts)
+    if not text:
+        return None
+    patterns = [
+        r"前\s*([一二两三四五六七八九十百零〇\d]{1,5})\s*(?:名|个|项)?\s*(?:商品)?(?:类别|品类|种类)",
+        r"(?:类别|品类|种类).*?前\s*([一二两三四五六七八九十百零〇\d]{1,5})",
+        r"top\s*([一二两三四五六七八九十百零〇\d]{1,5}).*?(?:category|categories|品类|类别)",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -1562,6 +1830,23 @@ def _wants_delivery_speed_bucket(*texts: Any) -> bool:
             "delivery band",
         )
     )
+
+
+def _wants_state_category_table(*texts: Any) -> bool:
+    text = " ".join(str(t or "") for t in texts).lower()
+    wants_table = any(
+        phrase in text
+        for phrase in ("table", "list", "detail", "表格", "列表", "明细", "标格")
+    )
+    wants_state = any(
+        phrase in text
+        for phrase in ("state", "states", "州", "地区")
+    )
+    wants_category = any(
+        phrase in text
+        for phrase in ("category", "categories", "品类", "类别", "商品类别", "商品种类")
+    )
+    return wants_table and wants_state and wants_category
 
 
 def _normalize_filter(args: dict[str, Any], *, tool_name: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:

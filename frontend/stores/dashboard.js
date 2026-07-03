@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { ref, computed } from "vue";
 
 const MAX_SESSION_SUMMARIES = 10;
 
@@ -108,7 +108,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   function addSessionSummary(message = {}) {
-    const source = extractSessionSummary(message);
+    const source = message?.summary && typeof message.summary === "object"
+      ? message.summary
+      : message;
 
     if (!source || typeof source !== "object") return;
 
@@ -125,9 +127,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
       ts,
     };
     delete item.type;
-    delete item.summary;
-    delete item.payload;
-    delete item.data;
 
     sessionSummaries.value = [...sessionSummaries.value, item].slice(-MAX_SESSION_SUMMARIES);
   }
@@ -143,22 +142,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
       if (Number.isFinite(parsed)) return parsed;
     }
     return Date.now();
-  }
-
-  function extractSessionSummary(message) {
-    if (!message || typeof message !== "object") return null;
-
-    for (const key of ["summary", "payload", "data"]) {
-      const value = message[key];
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        return { ...message, ...value };
-      }
-      if (typeof value === "string" && value.trim()) {
-        return { ...message, text: value.trim() };
-      }
-    }
-
-    return { ...message };
   }
 
   return {

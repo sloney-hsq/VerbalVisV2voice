@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from fastapi import WebSocket
 
 from prompts import build_system_prompt
+from session_summary import SessionSummaryTracker
 from tools import (
     TOOL_SCHEMAS,
     context_text,
@@ -129,6 +130,8 @@ class RealtimeSession:
         self._current_assistant_audio_content_index = 0
         self._current_assistant_audio_generated_ms = 0
         self._pending_audio_ms = 0
+        self._assistant_transcript_buffer = ""
+        self._summary_tracker = SessionSummaryTracker(self.session_id, "openai")
 
         # Per-session loggers (initialised in start()).
         self._log_dir: Path | None = None
@@ -161,6 +164,7 @@ class RealtimeSession:
         self._tool_logger = _make("tool_calls")
         self._dashboard_logger = _make("dashboard")
         self._bargein_logger = _make("bargein")
+        self._summary_tracker.set_log_dir(log_dir)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -513,6 +517,7 @@ class RealtimeSession:
             elif etype == "response.created":
                 resp = event.get("response", {})
                 self.current_response_id = resp.get("id")
+                self._assistant_transcript_buffer = ""
                 self._start_response_metrics(self.current_response_id)
 
             # GA renamed response.audio.delta → response.output_audio.delta.
@@ -528,6 +533,7 @@ class RealtimeSession:
                 })
 
             elif etype in ("response.audio_transcript.delta", "response.output_audio_transcript.delta"):
+                self._assistant_transcript_buffer += event.get("delta", "")
                 await self._send_client({
                     "type": "transcript",
                     "role": "assistant",
@@ -542,11 +548,15 @@ class RealtimeSession:
                 await self._send_client({"type": "speech_stopped"})
 
             elif etype == "conversation.item.input_audio_transcription.completed":
+                transcript = event.get("transcript", "").strip()
                 await self._send_client({
                     "type": "transcript",
                     "role": "user",
                     "text": event.get("transcript", ""),
                 })
+                await self._send_session_summary(
+                    self._summary_tracker.record_user_transcript(transcript)
+                )
 
             elif etype in ("response.function_call_arguments.done", "response.output_item.done"):
                 # Only function_call_arguments.done is a real tool call. Keep
@@ -567,6 +577,12 @@ class RealtimeSession:
                     "name": _tool_name,
                     "arguments": _tool_args,
                 })
+                self._summary_tracker.record_tool_call(
+                    name=_tool_name,
+                    arguments=_tool_args,
+                    response_id=response_id,
+                    call_id=event.get("call_id"),
+                )
 
                 if response_id:
                     self._pending_tool_calls[response_id] = (
@@ -582,6 +598,12 @@ class RealtimeSession:
 
             elif etype == "response.done":
                 self._finish_response_metrics(response_id, event.get("response", {}))
+                await self._send_session_summary(
+                    self._summary_tracker.record_assistant_transcript(
+                        self._assistant_transcript_buffer.strip()
+                    )
+                )
+                self._assistant_transcript_buffer = ""
                 self.current_response_id = None
                 self._current_assistant_audio_item_id = None
                 self._current_assistant_audio_content_index = 0
@@ -698,6 +720,7 @@ class RealtimeSession:
         self._current_assistant_audio_item_id = None
         self._current_assistant_audio_content_index = 0
         self._current_assistant_audio_generated_ms = 0
+        self._assistant_transcript_buffer = ""
 
     async def _handle_speech_started(self) -> None:
         if MANUAL_COMMIT_MODE:
@@ -826,6 +849,17 @@ class RealtimeSession:
                     "type": "views_update",
                     "views": views,
                 })
+
+            await self._send_session_summary(
+                self._summary_tracker.record_tool_result(
+                    name=tool_name,
+                    arguments=arguments,
+                    result=result,
+                    response_id=response_id,
+                    call_id=call_id,
+                    duration_ms=tool_duration_ms,
+                )
+            )
 
             await self._send_openai({
                 "type": "conversation.item.create",
@@ -1032,6 +1066,19 @@ class RealtimeSession:
 
     def _timeline_snapshot(self) -> list[dict[str, Any]]:
         return self._timeline[-80:]
+
+    async def _send_session_summary(self, summary: dict[str, Any] | None) -> None:
+        if not summary:
+            return
+        if self._event_logger:
+            self._event_logger.info(
+                "SESSION_SUMMARY %s",
+                json.dumps(summary, ensure_ascii=False)[:2000],
+            )
+        await self._send_client({
+            "type": "session_summary",
+            "summary": summary,
+        })
 
     # ------------------------------------------------------------------
     # Transport helpers

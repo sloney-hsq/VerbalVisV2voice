@@ -35,7 +35,7 @@ Base views:
 - view-category: Category Revenue Top 15.
 
 Map "first/second/third/fourth view" and "图一/图二/图三/图四" to these ids.
-Workspace charts created by append_visual return ids like workspace-1.
+Workspace visuals created by append_visual return ids like workspace1.
 
 Use only these field names:
 - order_month: "YYYY-MM"; default for broad time trends.
@@ -174,7 +174,7 @@ set_low_score_threshold:
 append_visual:
 - Create a chart only if no existing view or workspace chart answers the
   request. Otherwise highlight the existing view.
-- chart_type: scatter, bar, line, histogram, pie.
+- chart_type: scatter, bar, line, histogram, pie, table.
 - x must be a valid field. y must be a valid field or order_count for
   aggregate count bar/line charts. Use low_score_ratio when the user asks for
   a low-rating share, rate, ratio, percentage, or "低分占比"; use late_ratio
@@ -189,6 +189,13 @@ append_visual:
   y=order_count. For review composition charts, use x=review_bucket.
 - For payment-method composition charts, use x=primary_payment_type. For
   order-size composition charts, use x=order_size_bucket.
+- Use chart_type=table when the user asks for a table, list, matrix, detail
+  view, or "表格/列表/明细". For the concrete request "5-10 states / 五到十个州,
+  top 3 product categories / 前三名商品类别", use chart_type=table,
+  x=customer_state, y=revenue, color=product_category, limit between 5 and 10,
+  series_limit=3, sort_by=revenue, sort_order=desc, series_sort_by=revenue,
+  and series_sort_order=desc. Show each category with integer revenue and
+  integer share of that state's revenue.
 - For bar/line/histogram, the backend automatically aggregates by x. Do not
   manually describe aggregation as a workaround; call append_visual with the
   requested x/y and let the tool aggregate.
@@ -198,11 +205,18 @@ append_visual:
   order_size_bucket, and primary_payment_type. For bar/line, color becomes an
   extra grouping field.
 - For multi-series trend comparisons, use append_visual with chart_type=line,
-  x as the time field, y as the metric, and color as the series dimension.
+  x as the time field, y as the metric, and color as the series dimension
+  that becomes separate colored lines.
 - For "收入前十品类按月评分趋势", use x=order_month, y=review_score,
   color=product_category, series_limit=10, series_sort_by=revenue, and
-  series_sort_order=desc. Do not use limit for Top N series; limit cuts rows,
-  not series.
+  series_sort_order=desc. series_limit is the Top N series count; do not use
+  limit for Top N series because limit cuts rows, not colored lines.
+- For multi-series line charts, always choose a bounded series set if the
+  series dimension is high-cardinality: product_category should usually use
+  series_limit with series_sort_by/order, while customer_state may use
+  series_limit when the user asks for Top N state series. Reserve limit for
+  row-level Top N. Do not use pie/table/bar when the user clearly asks for
+  "多系列折线图", "多条线", or "按...分颜色的趋势".
 - Use limit for row-level Top N, "前N个", "只保留N个", or when a category bar
   chart would otherwise show too many categories.
 - If the user asks for row-level Top N / 前N个 / 保留N项, the append_visual call
@@ -221,7 +235,7 @@ append_visual:
   on_time_ratio asc, high_score_ratio asc, revenue asc, or order_count asc.
 - If the user asks to sort one chart by the order of another workspace chart,
   recreate the chart with sort_by equal to that other chart's y metric and the
-  requested sort_order. For example, "workspace-5按workspace-3配送时间从短到长"
+  requested sort_order. For example, "workspace5按workspace3配送时间从短到长"
   means x=product_category, y=order_count, sort_by=delivery_days,
   sort_order=asc.
 - After append_visual returns, check statistics.row_count or data_points. If it
@@ -262,7 +276,20 @@ fragmentary, background speech, or not addressed to you, ask one brief
 clarification question or wait for a clearer request.
 
 Do not infer missing field names, dates, states, categories, or numeric values
-from unclear audio.\
+from unclear audio.
+
+Common Mandarin ASR confusions in this app:
+- "试图" is usually "视图" when followed by 一/二/三/四 or a dashboard action.
+- "同音字/误解/听错" means the user is correcting recognition; prefer the newest
+  corrected phrase and do not repeat the earlier mistaken action.
+- "州/洲/周" must be resolved by context: Brazilian states use customer_state;
+  weekly time trends use order_week.
+- "折现/折线/多条线/multi-series" in visual requests means a line chart, often
+  multi-series when a color dimension is mentioned.
+- "表格/标格/列表/list/明细" means chart_type=table.
+- "低于三分/小于三分" means review_score <= 2; "三分及以下/包含三分" means <= 3.
+- "前十/钱十/Top十/前N" must become a real limit or series_limit argument,
+  depending on whether the request limits rows or series.\
 """
 
 ENTITY_CAPTURE_RULES = """\
