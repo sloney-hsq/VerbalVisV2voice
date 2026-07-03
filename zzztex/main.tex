@@ -304,6 +304,289 @@ unfolding response is superseded.
 
 
 
+\section{Formative Inquiry and Design Requirements}
+\label{sec:formative}
+
+We conducted a formative inquiry with four participants (F01--F04) to
+understand how analysts revise an ongoing investigation during conversational
+visual analysis and what system behavior such revisions require. The inquiry
+was design-oriented rather than confirmatory: it aimed to refine operational
+definitions, identify compound and boundary cases, and inform the design of
+VerbalVis, rather than establish an exhaustive taxonomy of analytical
+behavior.
+
+\subsection{Theory-Informed Revision Constructs}
+\label{sec:formative-constructs}
+
+Exploratory analysis is iterative: observations can redirect questions,
+reshape provisional explanations, and change which data are considered
+relevant~\cite{russell1993cost,pirolli2005sensemaking,
+battle2019characterizing}. Research on sensemaking and scientific reasoning
+further shows that analysts construct and revise explanatory frames as they
+encounter new evidence~\cite{klein2007dataframe,pontis2016influence,
+klahr1988dual}. Information-seeking and visualization-task research similarly
+distinguishes changes in analytical purpose from changes in the data target
+and means of analysis~\cite{bates1989berrypicking,vakkari2001changes,
+brehmer2013multilevel}.
+
+Based on these traditions, we specified three theory-informed sensitizing
+concepts before analyzing the formative sessions:
+
+\begin{description}
+\item[\textbf{Analytical Goal Shift.}]
+The analyst materially redirects the primary analytical question or
+desired knowledge outcome.
+
+
+\item[\textbf{Working-Hypothesis Revision.}]
+The analyst rejects, replaces, or qualifies an active provisional
+explanation, interpretation, or decision-relevant proposition.
+
+\item[\textbf{Analytical Scope Refinement.}]
+The analyst changes constraints over the relevant population, time period,
+geography, variables, categories, granularity, or data subset while
+generally preserving the higher-level analytical objective.
+
+\end{description}
+
+These constructs describe different objects of analytical change rather than
+mutually exclusive event classes. A single utterance may therefore receive
+multiple labels. They are also non-exhaustive: hypothesis formation, method
+changes, representation changes, evidence requests, and conversational repair
+were retained as separate boundary codes.
+
+\subsection{Procedure and Analysis}
+\label{sec:formative-procedure}
+
+Participants used an early VerbalVis prototype to explore the Olist Brazilian
+e-commerce dataset through speech. The initial dashboard presented five
+coordinated views: monthly order volume, category-level sales, state-level
+order distribution, review-score distribution, and delivery-time statistics.
+The exploration was open-ended; participants were free to pursue questions,
+comparisons, explanations, and data subsets that they considered relevant.
+They were not introduced to the three revision constructs and were not
+required to interrupt the assistant or follow a prescribed analytical path.
+
+We recorded timestamped user and assistant utterances together with available
+interaction and dashboard events. After the exploration, participants
+completed a post-use questionnaire concerning when and why they changed
+direction, what state should be preserved or abandoned, their perceived
+control, and the dashboard operations they considered important.
+
+Our analysis followed a hybrid deductive--inductive process. We first used an
+LLM-assisted pass to retrieve candidate episodes from the logs. Each candidate
+included the exact utterance, its preceding analytical commitment, proposed
+labels, timing, and a rationale. We then manually reviewed every candidate
+against the surrounding dialogue and dashboard context.
+
+An episode was retained as an \emph{analytical revision} only when an active
+analytical commitment was identifiable before the utterance and the utterance
+materially changed, qualified, or superseded it. Initial formation of a
+question or explanation was distinguished from revision of an existing one.
+Likewise, a change in chart, metric, or calculation procedure was not treated
+as a goal, hypothesis, or scope revision unless the corresponding analytical
+commitment also changed.
+
+The final coding retained 27 analytical revision episodes. Using a multi-label
+scheme, 12 episodes involved an Analytical Goal Shift, five involved a
+Working-Hypothesis Revision, and 18 involved an Analytical Scope Refinement.
+Eight episodes involved more than one construct. Because the categories were
+not mutually exclusive, their counts do not sum to the number of episodes.
+
+Interaction timing was coded separately from revision semantics. This allowed
+us to distinguish \emph{what} changed in the investigation from \emph{when}
+the change was expressed relative to system speech, analytical execution, and
+dashboard updates.
+
+\begin{table*}[t]
+\centering
+\caption{Representative episodes for the three analytical revision
+constructs. Utterances are translated from Chinese.}
+\label{tab:formative-episodes}
+\small
+\begin{tabular}{
+p{0.17\textwidth}
+p{0.22\textwidth}
+p{0.28\textwidth}
+p{0.26\textwidth}}
+\toprule
+\textbf{Construct} &
+\textbf{Prior commitment} &
+\textbf{User utterance} &
+\textbf{Interpretation} \
+\midrule
+
+\textbf{Analytical Goal Shift} &
+Explore monthly order trends. &
+``Analyze customer experience---the low-rated orders, including their time,
+category, and delivery conditions.'' &
+The desired outcome changes from describing order volume to investigating
+low-rating customer experience and its potential contributing factors. \
+
+\textbf{Working-Hypothesis Revision} &
+Prioritize Bahia because it has the longest delivery time among high-volume
+states. &
+``BA only has the longest delivery time. Does this take sales volume into
+account?'' &
+The user qualifies the active proposition by questioning whether delivery
+time alone is sufficient and introduces sales volume as an additional
+decision criterion. \
+
+\textbf{Analytical Scope Refinement} &
+Investigate customer experience using the full set of orders. &
+``Now filter the global review scores to one and two.'' &
+The higher-level objective remains unchanged, while the relevant population is
+restricted to low-rating orders for subsequent analysis. \
+
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Formative Findings}
+\label{sec:formative-findings}
+
+\subsubsection{Participants revised different analytical commitments}
+
+All four participants reported changing analytical direction during the
+exploration, and three reported doing so at least twice. All four reported
+changes to the data scope, three reported changes to their interpretations or
+conjectures, and two reported changes to the primary analytical question.
+These responses were consistent with the manually coded logs.
+
+Goal shifts changed the knowledge outcome being pursued. Participants moved,
+for example, from monthly order trends to low-rating customer experience, from
+delivery performance to payment behavior, and from general comparison to the
+active search for anomalous products.
+
+Scope refinements preserved the broader objective while changing the data
+target. They included geographic grouping, rating thresholds, time intervals,
+product-category substitution, and changes from monthly to weekly
+granularity. Scope changes included narrowing, broadening, substitution, and
+regrouping; we therefore use \emph{Scope Refinement} rather than the narrower
+term \emph{Scope Narrowing}.
+
+Working-hypothesis revisions occurred when participants questioned or
+qualified an active explanation or decision criterion. They were distinguished
+from hypothesis formation, in which an explanation was introduced for the
+first time, and from method revision, in which the analyst changed a metric or
+calculation without necessarily changing an explanatory proposition.
+
+\subsubsection{Revision constructs overlapped within individual utterances}
+
+Eight episodes changed more than one analytical object. For example, one
+participant requested:
+
+\begin{quote}
+``Apply the same analysis to the third- through fifth-ranked states; I want to
+find products with relatively low ratings.''
+\end{quote}
+
+This request simultaneously restricted the geographic scope and redirected the
+analytical purpose from general comparison to anomaly seeking. We therefore
+coded it as both Analytical Scope Refinement and Analytical Goal Shift.
+
+Such episodes indicate that goal, hypothesis, and scope are related but
+distinguishable dimensions of analytical commitment. They should not be
+implemented as mutually exclusive runtime intent classes. Instead, the system
+must determine which prior commitments remain valid and compose the actions
+required by the latest request.
+
+\subsubsection{Analytical revision was distinct from repair and method change}
+
+Speech overlap did not necessarily indicate analytical revision. Participants
+also spoke during system output to correct recognition errors, ask immediate
+follow-up questions, stop an overlong explanation, or provide conversational
+acknowledgements. For example, ``I mean by state---state'' restored a likely
+misrecognized request rather than expressing a new analytical direction.
+
+Changes in chart form or metric were similarly context-dependent. Combining
+delivery days and order volume into a ratio changed the analytical
+operationalization, but did not necessarily revise an explanation or data
+scope. These boundary cases required interpretation of the preceding
+commitment rather than classification from the latest utterance alone.
+
+\subsubsection{Participants expected selective cancellation and preservation}
+
+Three participants indicated that the assistant should stop its current speech
+when a new direction was expressed. Participants also expected useful
+committed state to be preserved: three selected still-relevant visualizations,
+two selected previously confirmed findings, and two selected prior
+conversational context.
+
+By contrast, three participants indicated that unfinished explanations and
+unfinished analyses from the old direction should be abandoned, two selected
+pending visual updates, and all four selected details unrelated to the revised
+question. These responses suggest that redirection requires selective
+supersession rather than either preserving or resetting the entire analytical
+state.
+
+Participants' main concerns included speech-recognition errors,
+misinterpretation of analytical intent, overly long responses, and an obsolete
+direction continuing to affect the dashboard. All four agreed that they could
+change direction when needed and understood which request the dashboard
+represented. Three reported an overall sense of control, while one was
+neutral. Opinions about response length were divided, reinforcing the need for
+concise and interruptible responses.
+
+\subsection{Design Requirements}
+\label{sec:design-requirements}
+
+The formative findings informed four design requirements.
+
+\paragraph{DR1: Ground interpretation in active analytical commitments.}
+
+The system should interpret a new utterance relative to the current analytical
+goal, working hypothesis, filters, visualizations, and dialogue context. This
+context is necessary to determine whether the utterance continues, qualifies,
+or supersedes the active investigation.
+
+\paragraph{DR2: Support compound revisions through composable actions.}
+
+Because one utterance may revise multiple analytical objects, the system should
+support composable, schema-grounded action sequences rather than map every
+utterance to one operation or one exclusive revision type.
+
+\paragraph{DR3: Distinguish analytical revision from repair and method change.}
+
+Recognition corrections, clarifications, evidence requests, initial
+hypotheses, and changes in chart or metric should not automatically invalidate
+the current analytical direction. The system should preserve valid context
+when the user is repairing expression rather than revising analysis.
+
+\paragraph{DR4: Coordinate supersession across speech, execution, and visual
+state.}
+
+When a new request supersedes an active response, cancellation should extend
+beyond audio playback. Response-dependent tool calls, query execution, and
+pending dashboard updates should be invalidated so that obsolete results
+cannot later modify the visible state. Replanning should begin from the latest
+committed dashboard state while preserving still-relevant filters,
+visualizations, findings, and dialogue context.
+
+These requirements directly informed VerbalVis: compact dashboard-state
+grounding supports DR1; composable visualization tools support DR2; separate
+handling of repair and analytical redirection supports DR3; and response-bound
+execution epochs with stale-result rejection support DR4.
+
+\subsection{Scope of Evidence}
+\label{sec:formative-scope}
+
+This formative inquiry provides design-oriented evidence rather than
+validation of a universal taxonomy. Four participants cannot establish
+theoretical saturation, estimate population-level prevalence, or demonstrate
+that the three constructs cover every form of analytical change.
+
+We therefore treat Analytical Goal Shift, Working-Hypothesis Revision, and
+Analytical Scope Refinement as theory-informed, non-exhaustive, and
+potentially overlapping analytical lenses. The 27 verified episodes
+characterize the present formative corpus and inform the design of VerbalVis.
+The subsequent user study evaluates the resulting full-duplex interaction and
+orchestration mechanisms rather than testing the three constructs as a
+universal classification.
+
+
+
+
 
 
 % =====================================================================

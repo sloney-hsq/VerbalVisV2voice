@@ -144,8 +144,9 @@ def _qwen_tool_schemas() -> list[dict[str, Any]]:
         if function.get("name") == "append_visual":
             description = (
                 f"{description} IMPORTANT: for Top N / 前N个 / 保留N项 requests, "
-                "the function arguments must include limit=N. Do not encode Top N "
-                "only in the chart title. Non-scatter charts are automatically "
+                "row-level Top N uses limit=N. Multi-series line Top N uses "
+                "series_limit=N with series_sort_by and series_sort_order instead of "
+                "limit. Do not encode Top N only in the chart title. Non-scatter charts are automatically "
                 "aggregated by the backend from x/y. Use chart_type=pie for pie/"
                 "占比/构成/share requests instead of silently falling back to bar."
             )
@@ -445,8 +446,12 @@ class QwenRealtimeSession:
     def _build_instructions(self) -> str:
         qwen_tool_rules = (
             "\n\nQWEN TOOL CALL RULES (high priority):\n"
-            "- For append_visual, Top N / 前N个 / 保留N项 must be a real limit "
+            "- For append_visual row-level Top N requests, use a real limit "
             "argument, not only text in title.\n"
+            "- Multi-series line charts: use color as the series dimension. "
+            "For 收入前十品类按月评分趋势, pass color=product_category, "
+            "series_limit=10, series_sort_by=revenue, series_sort_order=desc. "
+            "Do not use limit for Top N series; limit only limits rows.\n"
             "- append_visual already performs backend aggregation for bar, line, "
             "histogram, and pie charts. Use x/y fields; do not claim aggregation is "
             "unsupported.\n"
@@ -1051,6 +1056,7 @@ class QwenRealtimeSession:
                 for key in (
                     "view_id", "chart_type", "x", "y", "color", "title",
                     "limit", "sort_by", "sort_order", "low_score_threshold",
+                    "series_limit", "series_sort_by", "series_sort_order",
                     "filters", "inherit_global_filters", "freeze",
                     "filter_scope", "effective_filters", "snapshot_filters",
                     "statistics", "filtered_rows",

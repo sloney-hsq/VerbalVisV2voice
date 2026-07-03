@@ -156,8 +156,9 @@ function dynamicSpec(chart_type, x, y, color, title, view = {}) {
       spec.encoding.y = quantitativeEncoding(y);
       if (color) {
         spec.encoding.color = { field: color, type: "nominal", title: fieldTitle(color) };
+        spec.encoding.detail = { field: color };
       }
-      addRatioTooltip(spec, x, y);
+      spec.encoding.tooltip = tooltipFields(x, y, color);
       break;
 
     case "histogram":
@@ -304,6 +305,27 @@ function addRatioTooltip(spec, x, y) {
         ]
       : []),
   ];
+}
+
+function tooltipFields(x, y, color) {
+  const fields = [
+    { field: x, title: fieldTitle(x) },
+    ...(color ? [{ field: color, type: "nominal", title: fieldTitle(color) }] : []),
+    {
+      field: y,
+      type: "quantitative",
+      title: fieldTitle(y),
+      format: isRatioField(y) ? ".1%" : undefined,
+    },
+  ];
+  const countField = RATIO_COUNT_FIELDS[y];
+  if (countField) {
+    fields.push(
+      { field: countField.field, type: "quantitative", title: countField.title },
+      { field: "order_count", type: "quantitative", title: "璁㈠崟閲?" },
+    );
+  }
+  return fields.map(stripUndefined);
 }
 
 function stripUndefined(obj) {

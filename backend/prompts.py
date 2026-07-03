@@ -197,11 +197,17 @@ append_visual:
   product_category, review_score, review_bucket, delivery_status_bucket,
   order_size_bucket, and primary_payment_type. For bar/line, color becomes an
   extra grouping field.
-- Use limit for "Top N", "前N个", "只保留N个", or when a category bar chart
-  would otherwise show too many categories.
-- If the user asks for Top N / 前N个 / 保留N项, the append_visual call must
-  include limit=N. Never satisfy this request by putting "Top N" only in the
-  title.
+- For multi-series trend comparisons, use append_visual with chart_type=line,
+  x as the time field, y as the metric, and color as the series dimension.
+- For "收入前十品类按月评分趋势", use x=order_month, y=review_score,
+  color=product_category, series_limit=10, series_sort_by=revenue, and
+  series_sort_order=desc. Do not use limit for Top N series; limit cuts rows,
+  not series.
+- Use limit for row-level Top N, "前N个", "只保留N个", or when a category bar
+  chart would otherwise show too many categories.
+- If the user asks for row-level Top N / 前N个 / 保留N项, the append_visual call
+  must include limit=N. Never satisfy this request by putting "Top N" only in
+  the title.
 - Use sort_by and sort_order when the user asks for a specific ranking:
   order_count desc = most orders; order_count asc = fewest orders;
   delivery_days desc = longest/slowest delivery; delivery_days asc =

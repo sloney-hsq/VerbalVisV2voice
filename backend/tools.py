@@ -253,8 +253,10 @@ TOOL_SCHEMAS = [
                         "order_count means grouped order count, revenue means grouped sum, "
                         "delivery_days means grouped average; low_score_ratio, late_ratio, "
                         "on_time_ratio, high_score_ratio, and avg_freight_ratio are derived. "
-            "For Top N requests, pass limit as a real argument. For worst/bottom "
-            "Top N or explicit sorting requests, pass sort_by and sort_order."
+            "For row-level Top N requests, pass limit as a real argument. "
+            "For Top N series in multi-series line charts, pass series_limit, "
+            "series_sort_by, and series_sort_order. For worst/bottom Top N or "
+            "explicit sorting requests, pass sort_by and sort_order."
         ),
         {
             "type": "object",
@@ -314,6 +316,19 @@ TOOL_SCHEMAS = [
                         "for the metric, e.g. review_score asc, delivery_days desc, late_ratio desc, "
                         "low_score_ratio desc."
                     ),
+                },
+                "series_limit": {
+                    "type": ["integer", "null"],
+                    "description": "For multi-series line/bar charts: keep Top N series values before grouping by x.",
+                },
+                "series_sort_by": {
+                    "type": ["string", "null"],
+                    "enum": SORT_FIELDS + [None],
+                    "description": "Metric used to rank series values, e.g. revenue for top revenue categories.",
+                },
+                "series_sort_order": {
+                    "type": ["string", "null"],
+                    "enum": ["asc", "desc", None],
                 },
                 "low_score_threshold": {
                     "type": ["integer", "null"],
@@ -432,7 +447,11 @@ def normalize_tool_arguments(
         normalized["_user_transcript"] = user_transcript
     if name in {"filter_data", "append_visual"} and "value" in normalized:
         normalized["value"] = _coerce_jsonish(normalized["value"])
-    if name == "append_visual" and normalized.get("limit") in (None, ""):
+    if (
+        name == "append_visual"
+        and normalized.get("limit") in (None, "")
+        and normalized.get("series_limit") in (None, "")
+    ):
         inferred_limit = _infer_limit_from_text(
             normalized.get("title", ""),
             user_transcript,
@@ -637,8 +656,16 @@ def _exec_append_visual(args: dict) -> dict:
     sort_order = args.get("sort_order")
     if sort_order in ("", None):
         sort_order = None
+    series_limit_arg = args.get("series_limit")
+    if series_limit_arg in (None, ""):
+        series_limit_arg = None
+    series_limit = _coerce_limit(series_limit_arg)
+    series_sort_by = args.get("series_sort_by")
+    if series_sort_by in ("", None):
+        series_sort_by = None
+    series_sort_order = args.get("series_sort_order") or "desc"
     limit_arg = args.get("limit")
-    if limit_arg in (None, ""):
+    if limit_arg in (None, "") and series_limit is None:
         limit_arg = _infer_limit_from_text(title)
     limit = _coerce_limit(limit_arg)
     low_score_threshold_arg = args.get("low_score_threshold")
@@ -687,6 +714,24 @@ def _exec_append_visual(args: dict) -> dict:
             "success": False,
             "error": "sort_order must be 'asc' or 'desc'.",
         }
+    if series_limit_arg is not None and series_limit is None:
+        return {
+            "tool": "append_visual",
+            "success": False,
+            "error": f"series_limit must be an integer between 1 and {MAX_VIEW_LIMIT}.",
+        }
+    if series_sort_by is not None and series_sort_by not in SORT_FIELDS:
+        return {
+            "tool": "append_visual",
+            "success": False,
+            "error": f"Unknown field for series_sort_by: '{series_sort_by}'. Available: {', '.join(SORT_FIELDS)}",
+        }
+    if series_sort_order not in {"asc", "desc"}:
+        return {
+            "tool": "append_visual",
+            "success": False,
+            "error": "series_sort_order must be 'asc' or 'desc'.",
+        }
     if low_score_threshold_arg is not None and low_score_threshold_for_view is None:
         return {
             "tool": "append_visual",
@@ -724,7 +769,7 @@ def _exec_append_visual(args: dict) -> dict:
     # Route to fact_item whenever product_category is involved (x / y / color);
     # otherwise stay on fact_order. Keeps revenue at item grain when grouping
     # by category, and avoids cross-grain joins when not needed.
-    source_table = _decide_table(x, y, color, sort_by)
+    source_table = _decide_table(x, y, color, sort_by, series_sort_by)
     low_score_threshold_for_view = low_score_threshold_for_view or low_score_threshold
 
     # Determine aggregation
@@ -760,6 +805,9 @@ def _exec_append_visual(args: dict) -> dict:
         "limit": limit,
         "sort_by": sort_by,
         "sort_order": sort_order,
+        "series_limit": series_limit,
+        "series_sort_by": series_sort_by,
+        "series_sort_order": series_sort_order,
         "low_score_threshold": low_score_threshold_for_view,
         "filters": local_filters,
         "inherit_global_filters": inherit_global_filters,
@@ -783,7 +831,7 @@ def _exec_append_visual(args: dict) -> dict:
             filters=effective_filters,
             extra_group_fields=extra_group_fields,
         )
-        if limit:
+        if limit and not _uses_series_limit(view_def):
             data = data[:limit]
         _attach_rank(data)
         view_def["data"] = data
@@ -804,6 +852,9 @@ def _exec_append_visual(args: dict) -> dict:
             "limit": limit,
             "sort_by": sort_by,
             "sort_order": sort_order,
+            "series_limit": series_limit,
+            "series_sort_by": series_sort_by,
+            "series_sort_order": series_sort_order,
             "low_score_threshold": low_score_threshold_for_view,
             "filters": local_filters,
             "inherit_global_filters": inherit_global_filters,
@@ -850,13 +901,19 @@ def _exec_delete_visual(args: dict) -> dict:
     }
 
 
-def _decide_table(x: str, y: str, color: str | None, sort_by: str | None = None) -> str:
+def _decide_table(
+    x: str,
+    y: str,
+    color: str | None,
+    sort_by: str | None = None,
+    series_sort_by: str | None = None,
+) -> str:
     """Choose source table for an append_visual call.
 
     Any reference to product_category forces fact_item (item grain). Otherwise
     fact_order is enough — all order-level filter fields exist on it.
     """
-    if "product_category" in (x, y, color, sort_by):
+    if "product_category" in (x, y, color, sort_by, series_sort_by):
         return "fact_item"
     return "fact_order"
 
@@ -877,6 +934,9 @@ def _aggregate_visual_data(
     filters: list[dict[str, Any]],
     extra_group_fields: list[str] | None,
 ) -> list[dict[str, Any]]:
+    if _uses_series_limit(view):
+        return _series_limited_aggregate_data(view, filters, extra_group_fields)
+
     con = get_connection()
     table = view.get("source_table", "fact_order")
     group_field = view["group_field"]
@@ -923,6 +983,77 @@ def _aggregate_visual_data(
         WHERE {where}
         GROUP BY {select_cols}
         ORDER BY {order_sql}
+    """
+    result = con.execute(sql)
+    col_names = [d[0] for d in result.description]
+    return [dict(zip(col_names, row)) for row in result.fetchall()]
+
+
+def _uses_series_limit(view: dict[str, Any]) -> bool:
+    return (
+        view.get("chart_type") == "line"
+        and bool(view.get("color"))
+        and bool(view.get("series_limit"))
+    )
+
+
+def _series_limited_aggregate_data(
+    view: dict[str, Any],
+    filters: list[dict[str, Any]],
+    extra_group_fields: list[str] | None,
+) -> list[dict[str, Any]]:
+    con = get_connection()
+    table = view.get("source_table", "fact_order")
+    group_field = view["group_field"]
+    color = view["color"]
+    y = view["y_field"]
+    agg_alias = view["agg_alias"]
+    agg_expr = view["agg_expr"]
+    threshold = view.get("low_score_threshold", low_score_threshold)
+    series_limit = int(view["series_limit"])
+    series_sort_by = view.get("series_sort_by") or y
+    series_sort_order = view.get("series_sort_order") or "desc"
+    series_direction = "ASC" if series_sort_order == "asc" else "DESC"
+
+    where = build_where(filters, table=table)
+    extra = extra_group_fields or [color]
+    group_cols = [group_field, *extra]
+    select_cols = ", ".join(group_cols)
+    select_parts = [select_cols]
+    if y in COUNTED_RATIO_MEASURES:
+        numerator_expr, total_expr = _counted_ratio_count_exprs(y, table, threshold)
+        numerator_alias = _ratio_count_alias(y)
+        select_parts.extend([
+            f"{numerator_expr} AS {numerator_alias}",
+            f"{total_expr} AS order_count",
+            f"{agg_expr} AS {agg_alias}",
+        ])
+    else:
+        select_parts.append(f"{agg_expr} AS {agg_alias}")
+    select_parts.append("ranked_series.series_sort_value AS series_sort_value")
+
+    series_sort_expr, _ = _measure_expr(series_sort_by, table, threshold)
+    sql = f"""
+        WITH base AS (
+            SELECT *
+            FROM {table}
+            WHERE {where}
+        ),
+        ranked_series AS (
+            SELECT
+                {color},
+                {series_sort_expr} AS series_sort_value
+            FROM base
+            WHERE {color} IS NOT NULL
+            GROUP BY {color}
+            ORDER BY series_sort_value {series_direction}
+            LIMIT {series_limit}
+        )
+        SELECT {", ".join(select_parts)}
+        FROM base
+        JOIN ranked_series USING ({color})
+        GROUP BY {select_cols}, ranked_series.series_sort_value
+        ORDER BY {group_field} ASC, ranked_series.series_sort_value {series_direction}, {color} ASC
     """
     result = con.execute(sql)
     col_names = [d[0] for d in result.description]
@@ -996,7 +1127,7 @@ def _refresh_all_views() -> None:
                 filters=effective_filters,
                 extra_group_fields=extra_group_fields,
             )
-            if limit:
+            if limit and not _uses_series_limit(view):
                 data = data[:limit]
             _attach_rank(data)
             view["data"] = data
@@ -1102,9 +1233,13 @@ def rebuild_context() -> dict[str, Any]:
             "title": v["title"],
             "x_field": v["x_field"],
             "y_field": v["y_field"],
+            "color": v.get("color"),
             "limit": v.get("limit"),
             "sort_by": v.get("sort_by"),
             "sort_order": v.get("sort_order"),
+            "series_limit": v.get("series_limit"),
+            "series_sort_by": v.get("series_sort_by"),
+            "series_sort_order": v.get("series_sort_order"),
             "low_score_threshold": v.get("low_score_threshold", low_score_threshold),
             "filters": v.get("filters", []),
             "inherit_global_filters": v.get("inherit_global_filters", True),
@@ -1148,6 +1283,11 @@ def context_text() -> str:
             meta.append(f"limit={v['limit']}")
         if v.get("sort_by"):
             meta.append(f"sort={v.get('sort_by')} {v.get('sort_order') or ''}".strip())
+        if v.get("series_limit"):
+            series_sort = v.get("series_sort_by") or v.get("y_field")
+            meta.append(
+                f"series_limit={v['series_limit']} by {series_sort} {v.get('series_sort_order') or 'desc'}"
+            )
         if v.get("low_score_threshold") and v.get("y_field") == LOW_SCORE_RATIO:
             meta.append(f"low_score<= {v['low_score_threshold']}")
         if v.get("filters"):
@@ -1183,6 +1323,9 @@ def get_views_for_frontend() -> list[dict]:
             "limit": v.get("limit"),
             "sort_by": v.get("sort_by"),
             "sort_order": v.get("sort_order"),
+            "series_limit": v.get("series_limit"),
+            "series_sort_by": v.get("series_sort_by"),
+            "series_sort_order": v.get("series_sort_order"),
             "low_score_threshold": v.get("low_score_threshold", low_score_threshold),
             "filters": v.get("filters", []),
             "inherit_global_filters": v.get("inherit_global_filters", True),

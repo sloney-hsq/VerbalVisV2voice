@@ -900,6 +900,12 @@ class RealtimeSession:
                     "y",
                     "color",
                     "title",
+                    "limit",
+                    "sort_by",
+                    "sort_order",
+                    "series_limit",
+                    "series_sort_by",
+                    "series_sort_order",
                     "statistics",
                     "filtered_rows",
                 )
