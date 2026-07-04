@@ -81,24 +81,11 @@
           清空
         </button>
       </div>
-      <div class="summary-list">
-        <article v-for="summary in summaryRows" :key="summary.id" class="summary-card">
-          <div class="summary-card__top">
-            <span class="summary-card__phase">{{ summaryPhaseLabel(summary) }}</span>
-            <span class="summary-card__time">{{ formatTranscriptTime(summary.ts) }}</span>
-          </div>
-          <p class="summary-card__title">{{ summaryTitle(summary) }}</p>
-          <ul v-if="summaryBullets(summary).length" class="summary-card__bullets">
-            <li v-for="(bullet, index) in summaryBullets(summary)" :key="index">
-              {{ bullet }}
-            </li>
-          </ul>
-          <div v-if="summaryCorrections(summary).length" class="summary-card__corrections">
-            <span>误听/校正</span>
-            <span v-for="(item, index) in summaryCorrections(summary)" :key="index">
-              {{ item }}
-            </span>
-          </div>
+      <div class="summary-stream">
+        <article v-for="summary in summaryRows" :key="summary.id" class="summary-item">
+          <span class="summary-item__phase">{{ summaryPhaseText(summary) }}</span>
+          <span class="summary-item__time">{{ formatTranscriptTime(summary.ts) }}</span>
+          <span class="summary-item__text">{{ summaryLine(summary) }}</span>
         </article>
       </div>
     </section>
@@ -123,27 +110,11 @@
           v-for="row in transcriptRows"
           :key="row.id"
           class="transcript-row"
-          :class="[`transcript-row--${row.role}`, { 'transcript-row--live': row.live }]"
+          :class="`transcript-row--${row.role}`"
         >
-          <span class="transcript-avatar" aria-hidden="true">
-            <svg v-if="row.role === 'assistant'" viewBox="0 0 24 24">
-              <path d="M9 4h6v3h2a3 3 0 0 1 3 3v5a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-5a3 3 0 0 1 3-3h2V4Z" />
-              <path d="M9 13h.01M15 13h.01M10 17h4" />
-            </svg>
-            <svg v-else viewBox="0 0 24 24">
-              <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
-              <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
-            </svg>
-          </span>
           <span class="transcript-speaker">{{ speakerLabel(row) }}</span>
           <span class="transcript-text">{{ row.text }}</span>
-          <span class="transcript-side">
-            <span v-if="row.live" class="transcript-live">live transcribing...</span>
-            <span v-if="store.sessionMode === 'barge_in' && row.live" class="transcript-mode">
-              (barge-in)
-            </span>
-            <span class="transcript-time">{{ formatTranscriptTime(row.ts) }}</span>
-          </span>
+          <span class="transcript-time">{{ formatTranscriptTime(row.ts) }}</span>
         </div>
       </div>
     </section>
@@ -173,7 +144,12 @@ const audio = useAudio({
   inputSampleRate: realtimeInputSampleRate,
   outputSampleRate: realtimeOutputSampleRate,
 });
-const ws = useWebSocket({ enqueue: audio.enqueue, flush: audio.flush, stop: audio.stop });
+const ws = useWebSocket({
+  enqueue: audio.enqueue,
+  flush: audio.flush,
+  stop: audio.stop,
+  stopAssistantAudio: audio.stopAssistantAudio,
+});
 
 let sessionPromise = null;
 const isStartingListening = ref(false);
@@ -214,30 +190,17 @@ const voiceStatusLabel = computed(() => {
 });
 
 const transcriptRows = computed(() => {
-  const rows = store.transcripts.map((item, index) => ({
+  return store.transcripts.map((item, index) => ({
     ...item,
     id: `${item.ts || index}-${index}`,
-    live: false,
   }));
-
-  if (audio.isRecording.value || isStartingListening.value) {
-    rows.push({
-      id: "live-input",
-      role: "user",
-      text: audio.isRecording.value ? "Listening for your command." : "Starting microphone.",
-      ts: Date.now(),
-      live: true,
-    });
-  }
-
-  return rows;
 });
 
 const summaryRows = computed(() => (
   store.sessionSummaries.map((item, index) => ({
     ...item,
     id: item.id || `${item.ts || index}-${index}`,
-  })).slice().reverse()
+  }))
 ));
 
 watch(
@@ -317,6 +280,18 @@ async function startListeningMic() {
   try {
     await audio.startRecording({
       gateSilence: false,
+      onSpeechStart: () => {
+        if (audio.stopAssistantAudio) {
+          audio.stopAssistantAudio({ blockNewAudio: true });
+        } else {
+          audio.stop();
+        }
+        store.isAssistantSpeaking = false;
+        ws.notifyLocalSpeechStarted();
+      },
+      onSpeechEnd: () => {
+        audio.allowAssistantAudio?.();
+      },
       onChunk: (base64pcm) => {
         if (store.isAssistantSpeaking && store.sessionMode === "turn_based") {
           return;
@@ -382,6 +357,18 @@ function formatTranscriptTime(ts) {
     second: "2-digit",
     hour12: false,
   }).format(new Date(ts || Date.now()));
+}
+
+function summaryLine(summary) {
+  const phase = summary.phase_index ?? summary.phase ?? summary.phase_id;
+  const prefix = phase === undefined || phase === null || phase === "" ? "Phase" : `Phase ${phase}`;
+  const text = summary.title || summary.current_focus || summary.text || "阶段纪要";
+  return `${prefix}: ${text}`;
+}
+
+function summaryPhaseText(summary) {
+  const phase = summary.phase_index ?? summary.phase ?? summary.phase_id;
+  return phase === undefined || phase === null || phase === "" ? "阶段" : `阶段 ${phase}`;
 }
 
 function summaryTitle(summary) {
@@ -896,93 +883,6 @@ function buildRealtimeWsUrl() {
   color: #0f2f66;
 }
 
-.summary-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  gap: 0;
-}
-
-.summary-card {
-  min-width: 0;
-  padding: 10px 14px 12px;
-  border-right: 1px solid #edf2f7;
-  border-bottom: 1px solid #edf2f7;
-  color: #1f2937;
-}
-
-.summary-card__top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 6px;
-  color: #64748b;
-  font-size: 12px;
-}
-
-.summary-card__phase {
-  min-width: 0;
-  overflow: hidden;
-  color: #1d4ed8;
-  font-weight: 750;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.summary-card__time {
-  flex: 0 0 auto;
-  font-variant-numeric: tabular-nums;
-}
-
-.summary-card__title {
-  margin: 0 0 7px;
-  color: #0f172a;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
-.summary-card__bullets {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding-left: 18px;
-  color: #334155;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.summary-card__bullets li {
-  overflow-wrap: anywhere;
-}
-
-.summary-card__corrections {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 8px;
-  color: #475569;
-  font-size: 11px;
-  line-height: 1.2;
-}
-
-.summary-card__corrections span {
-  max-width: 100%;
-  padding: 3px 6px;
-  border: 1px solid #d7e1ee;
-  border-radius: 999px;
-  background: #f8fafc;
-  overflow-wrap: anywhere;
-}
-
-.summary-card__corrections span:first-child {
-  border-color: #f2c7a0;
-  background: #fff7ed;
-  color: #9a4b12;
-  font-weight: 750;
-}
-
 .dashboard__transcript {
   margin-top: 18px;
   overflow: hidden;
@@ -1106,46 +1006,6 @@ function buildRealtimeWsUrl() {
   background: #fbfdff;
 }
 
-.transcript-row--live {
-  background: #eff6ff;
-}
-
-.transcript-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: #2563eb;
-  color: #ffffff;
-  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.22);
-}
-
-.transcript-row--assistant .transcript-avatar {
-  background: #0f2f66;
-}
-
-.transcript-row--live .transcript-avatar {
-  background: #3b82f6;
-}
-
-.transcript-avatar svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2;
-}
-
-.transcript-avatar svg path:first-child {
-  fill: currentColor;
-  stroke: none;
-  opacity: 0.16;
-}
-
 .transcript-speaker {
   color: #1d4ed8;
   font-weight: 750;
@@ -1160,27 +1020,6 @@ function buildRealtimeWsUrl() {
   color: #1f2937;
   line-height: 1.35;
   overflow-wrap: anywhere;
-}
-
-.transcript-side {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  min-width: 0;
-  color: #64748b;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.transcript-live,
-.transcript-mode {
-  color: #2563eb;
-  font-weight: 750;
-}
-
-.transcript-live {
-  font-style: italic;
 }
 
 .transcript-time {
@@ -1204,14 +1043,177 @@ function buildRealtimeWsUrl() {
     align-self: center;
   }
 
-  .transcript-text,
-  .transcript-side {
-    grid-column: 2;
+}
+
+.dashboard {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  width: min(100vw, 3840px);
+  max-width: 3840px;
+  height: min(100dvh, 2160px);
+  max-height: 2160px;
+  overflow: hidden;
+}
+
+.dashboard__grid {
+  min-height: 0;
+  overflow: auto;
+  align-content: start;
+  padding-bottom: 4px;
+}
+
+.dashboard__summaries {
+  margin-top: 8px;
+  min-height: 0;
+  box-shadow: none;
+}
+
+.summary-header {
+  min-height: 28px;
+  padding: 5px 10px;
+}
+
+.summary-header h3,
+.summary-clear {
+  font-size: 12px;
+}
+
+.summary-header h3 {
+  font-size: 0;
+}
+
+.summary-header h3::after {
+  content: "阶段纪要";
+  font-size: 12px;
+}
+
+.summary-clear {
+  font-size: 0;
+}
+
+.summary-clear::after {
+  content: "清空";
+  font-size: 12px;
+}
+
+.summary-stream {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 8px 6px;
+  white-space: nowrap;
+}
+
+.summary-item {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  max-width: min(720px, 78vw);
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid #dbe4f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #1f2937;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.summary-item__phase {
+  flex: 0 0 auto;
+  color: #1d4ed8;
+  font-weight: 750;
+}
+
+.summary-item__time {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-item__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashboard__transcript {
+  margin-top: 8px;
+  max-height: 144px;
+  box-shadow: none;
+}
+
+.transcript-header {
+  min-height: 30px;
+  padding: 5px 10px;
+}
+
+.transcript-header h3,
+.transcript-actions,
+.transcript-clear {
+  font-size: 12px;
+}
+
+.transcript-toggle {
+  display: none;
+}
+
+.transcript-list {
+  max-height: 108px;
+  overflow: auto;
+}
+
+.transcript-row {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) 76px;
+  gap: 8px;
+  min-height: 26px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.transcript-speaker,
+.transcript-text,
+.transcript-time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transcript-text {
+  line-height: 1.2;
+  overflow-wrap: normal;
+}
+
+.transcript-time {
+  justify-self: end;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 700px) {
+  .dashboard {
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   }
 
-  .transcript-side {
-    justify-content: flex-start;
-    flex-wrap: wrap;
+  .summary-item {
+    max-width: 86vw;
+  }
+
+  .transcript-header {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .transcript-row {
+    grid-template-columns: 52px minmax(0, 1fr) 66px;
   }
 }
 </style>

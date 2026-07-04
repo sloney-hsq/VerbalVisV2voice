@@ -1,0 +1,605 @@
+% \documentclass[journal]{vgtc}                     % final (journal style)
+%\documentclass[journal,hideappendix]{vgtc}        % final (journal style) without appendices
+%\documentclass[review,journal]{vgtc}              % review (journal style)
+\documentclass[review,journal,hideappendix]{vgtc} % review (journal style)
+%\documentclass[widereview]{vgtc}                  % wide-spaced review
+%\documentclass[preprint,journal]{vgtc}            % preprint (journal style)
+
+
+%% Uncomment one of the lines above depending on where your paper is
+%% in the conference process. ``review'' and ``widereview'' are for review
+%% submission, ``preprint'' is for pre-publication in an open access repository,
+%% and the final version doesn't use a specific qualifier.
+
+%% If you are submitting a paper to a conference for review with a double
+%% blind reviewing process, please use one of the ``review'' options and replace the value ``0'' below with your
+%% OnlineID. Otherwise, you may safely leave it at ``0''.
+\onlineid{1267}
+
+%% In preprint mode you may define your own headline. If not, the default IEEE copyright message will appear in preprint mode.
+%\preprinttext{To appear in IEEE Transactions on Visualization and Computer Graphics.}
+
+%% In preprint mode, this adds a link to the version of the paper on IEEEXplore
+%% Uncomment this line when you produce a preprint version of the article 
+%% after the article receives a DOI for the paper from IEEE
+%\ieeedoi{xx.xxxx/TVCG.201x.xxxxxxx}
+
+%% declare the category of your paper, only shown in review mode
+\vgtccategory{Research}
+
+%% Paper title.
+\title{InterChartQA: Benchmarking Multimodal Large Language Models\\ for Interaction-Driven Chart Analysis}
+
+%% Author ORCID IDs should be specified using \authororcid like below inside
+%% of the \author command. ORCID IDs can be registered at https://orcid.org/.
+%% Include only the 16-digit dashed ID.
+%% Abstract section.
+\abstract{
+Interaction is integral to data exploration with interactive visualizations, as critical information such as precise values, detailed labels, and filtered subsets is often accessible only through interactive operations rather than from the chart image alone. Yet existing benchmarks evaluate multimodal large language models(MLLMs) exclusively on static chart images, leaving their ability to ground, execute, and reason over interactions entirely unexamined. To bridge this gap, we introduce InterChartQA, an execution-based benchmark and evaluation framework for interactive chart analysis. InterChartQA is grounded in a systematic design space that crosses 12 chart types, 5 interaction actions, and 5 visualization tasks. We develop a template-driven construction pipeline that programmatically generates fully functional interactive charts as HTML webpages, paired with data-grounded question--answer(QA) pairs whose answers depend on interactions and the resulting view changes. We further propose a multi-turn evaluation framework with two distinct interaction pathways: structured tool calling and direct interaction via coordinate-based mouse simulation, probing different levels of interaction capability. A dataset of 5,856 QA pairs is instantiated to benchmark two representative MLLMs. Preliminary results indicate notable performance differences across interaction pathways and action types, revealing that precise spatial grounding and multi-step interaction reasoning remain open challenges. InterChartQA provides a first controlled testbed for evaluating interactive chart analysis, laying groundwork for developing agents capable of autonomous visual data exploration.
+}
+
+%% Keywords that describe your work. Will show as 'Index Terms' in journal
+%% please capitalize first letter and insert punctuation after last keyword
+\keywords{Chart understanding, Benchmark, Large language model, Interactive charts.}
+
+%% A teaser figure can be included as follows
+\teaser{
+  \centering
+  \includegraphics[width=\linewidth, alt={Representative example from \dataset{}}]{figs/Teaser_v6.png}
+  \caption{A representative example from \dataset{} illustrating the two interaction pathways on the same question. (A) Four chart screenshots captured at key interaction stages, reflecting how the chart view changes as the model issues interaction actions. (B) Under the structured tool-calling pathway, the model selects a metric, toggles a data subset, and hovers over a target point using abstract interaction tools. (C) Under the direct interaction pathway, the model achieves the same state transitions through coordinate-based click events, requiring explicit visual grounding of each target. (D) The benchmark question and its reference answer. (E) The model's final reasoning trace and submitted answer at the last interaction turn. Both pathways arrive at the correct answer, yet differ in interaction methods and spatial grounding demands.}
+  % \caption{Representative example from \dataset{}. Given an initial chart screenshot and a question, the model interacts with the chart and submits a final answer under two pathways. (a) shows four screenshots from different stages of the interaction process. (b) shows the interaction actions actually produced by the model under the corresponding chart states. The upper action row corresponds to the structured tool-calling pathway, where the model performs explicit interaction actions to gather the required evidence. The lower action row corresponds to the direct interaction pathway, where the model operates through coordinate-based interaction and visual reasoning. (D) shows the question and the reference answer. (E) shows the model's submitted answer and reasoning traces.}
+  % Note that the teaser may not be wider than the abstract block.
+  \label{fig:teaser}
+}
+
+%% Uncomment below to disable the manuscript note
+%\renewcommand{\manuscriptnotetxt}{}
+
+%% Copyright space is enabled by default as required by guidelines.
+%% It is disabled by the 'review' option or via the following command:
+%\nocopyrightspace
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%% LOAD PACKAGES %%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Tell graphicx where to find files for figures when calling \includegraphics.
+%% Note that due to the \DeclareGraphicsExtensions{} call it is no longer necessary
+%% to provide the the path and extension of a graphics file:
+%% \includegraphics{diamondrule} is completely sufficient.
+\graphicspath{{figs/}{./}} % where to search for the images
+
+%% We encourage the use of mathptmx for consistent usage of times font
+%% throughout the proceedings. However, if you encounter conflicts
+%% with other math-related packages, you may want to disable it.
+\usepackage{mathptmx}                  % use matching math font
+
+% --------------------------------------------------------------
+\usepackage{amsmath} % 新加的包，不确定能不能用
+\usepackage{amssymb}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{tabularx}
+\usepackage{color}
+\usepackage{inconsolata}
+
+\newcommand{\dataset}{InterChartQA}
+\newcommand{\placeholder}[1]{\textcolor{red}{\textbf{[Placeholder: #1]}}}
+% --------------------------------------------------------------
+
+\begin{document}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%% START OF THE PAPER %%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% The ``\maketitle'' command must be the first command after the
+%% ``\begin{document}'' command. It prepares and prints the title block.
+%% the only exception to this rule is the \firstsection command
+
+\firstsection{Introduction}
+
+\maketitle
+
+Interaction is central to chart-based data exploration. In interactive charts, analysis often depends not only on what is visible in the initial view, but also on how the view can be changed to show the relevant information. By filtering subsets, adjusting the visible range, or revealing local details on demand, interaction helps analysts focus on the most relevant parts of a chart instead of resolving everything from a dense overview at once. A tooltip may reveal an exact value, a brush may isolate a subset, and a zoom operation may make local structure easier to inspect. Chart analysis therefore involves not only reading visualized data, but also using interaction to structure the analysis and reason over the resulting view changes.
+
+As multimodal large language models(MLLMs) are increasingly deployed as agents for data analysis, a natural question arises: can these models go beyond reading static chart images and operate within interactive visualizations to carry out analytical tasks? Recent MLLMs have made rapid progress on chart understanding. Meanwhile, chart understanding has also become an increasingly important benchmark target for multimodal models, since it provides a useful testbed for evaluating visualization understanding and reasoning from multiple angles~\cite{khanEvaluatingLLMsVisualization2025}. Benchmarks such as ChartQA and ChartQAPro~\cite{masryChartQABenchmarkQuestion2022,masryChartQAProMoreDiverse2025}, ChartBench~\cite{xuChartBenchBenchmarkComplex2024}, and CharXiv~\cite{wangCharXivChartingGaps2024} focus on different parts of this space and have substantially advanced chart evaluation. However, these benchmarks still evaluate models under static inputs. This primarily tests whether a model can infer useful information from a single static input, rather than its ability to select useful interactions and continue reasoning over the resulting view updates. This leaves a clear gap from practical chart analysis, where interaction is often part of the analytical process itself.
+
+Benchmarking interaction-driven chart analysis requires a fundamentally different construction strategy. Unlike static chart question-answering, the evaluation target is not a single image but an executable chart whose content changes after interaction. Interactive charts in the wild lack unified formats and consistent interaction logic, making collected web resources alone insufficient for controlled evaluation. 
+% Existing execution-based benchmarks target general web or desktop environments rather than chart analysis.
+Existing execution-based benchmarks such as WebArena and OSWorld target general web or desktop environments rather than chart analysis~\cite{zhouWebArenaRealisticWeb2023,xieOSWorldBenchmarkingMultimodal2024}.
+These constraints motivate a template-driven pipeline that generates executable charts and data-grounded questions with explicit control over chart types, interaction actions, and visualization tasks.
+
+To address this gap, we introduce \textbf{\dataset{}}, an executable interactive-chart benchmark built through a template-driven construction pipeline and an execution-based evaluation framework. \dataset{} is organized around a systematic design space over chart types, interaction actions, and visualization tasks. 
+% \placeholder{[TODO: One more sentences required.]} 
+Rather than enumerating all technically feasible interactions, this design space selects meaningful chart type--interaction--task combinations that correspond to plausible chart analysis goals within a single-chart setting.
+Figure~\ref{fig:overall_overview} provides an overview of this workflow. On the construction side, guided by this design space, the pipeline instantiates executable chart webpages together with data-grounded QA pairs whose answers are accessible only through executing the required interactions on the rendered chart. These questions cover both directly answerable cases and cases that require reasoning over view changes after interaction. On the evaluation side, the framework exposes two complementary pathways that probe different levels of interaction capability. The structured tool-calling pathway provides an abstract interaction interface, isolating the model's ability to select appropriate actions and reason over their outcomes without requiring spatial localization. The coordinate-based mouse simulation pathway further demands that the model visually locate interaction targets on the rendered chart and execute precise operations. Together, the two pathways form an abstraction gradient from action reasoning to fine-grained visual grounding. 
+
+Overall, the goal of this work is not to introduce another static chart QA dataset, but to establish a controlled benchmark for interaction-driven chart analysis. Our contributions are as follows:
+\begin{itemize}[leftmargin=*]
+    \item We propose a framework for interactive chart analysis evaluation, consisting of a template-driven construction pipeline guided by a systematic design space and an execution-based evaluation framework with two complementary agent pathways.
+    \item We instantiate InterChartQA, an executable benchmark dataset of 5856 question–answer(QA) pairs, where each example is a fully functional interactive chart webpage paired with data-grounded questions whose answers require interaction to obtain.
+    \item We evaluate two representative MLLMs across both pathways and analyze their strengths and limitations, surfacing key challenges in interaction-driven chart analysis.
+\end{itemize}
+
+% Recent multimodal large language models have made rapid progress on chart understanding.  Meanwhile, chart understanding has also become an increasingly important benchmark target for multimodal models, since it provides a useful testbed for evaluating visualization understanding and reasoning from multiple angles~\cite{khanEvaluatingLLMsVisualization2025}. Benchmarks such as ChartQA and ChartQAPro~\cite{masryChartQABenchmarkQuestion2022,masryChartQAProMoreDiverse2025}, ChartBench~\cite{xuChartBenchBenchmarkComplex2024}, and CharXiv~\cite{wangCharXivChartingGaps2024} focus on different parts of this space and have substantially advanced chart evaluation. However, these benchmarks still evaluate models under static inputs. This primarily tests whether a model can infer useful information from a one-shot visual input, rather than its ability to select useful interactions and continue reasoning over the resulting view updates. This leaves a clear gap from practical visual analysis, where interaction is often part of the analytical process itself.
+
+% Benchmarking interaction-driven chart analysis requires a different benchmark construction strategy. Unlike static chart QA, the target of evaluation is not a single image, but an executable chart whose visible content may change after interaction. This is not only a harder task, but also a fundamentally different benchmark construction problem.
+% Interactive charts are much harder to obtain as benchmark-ready web resources. They do not follow a unified format and rely on diverse implementation frameworks. Furthermore, their interaction logic is often implementation-specific and inconsistent across charts. Therefore, relying solely on existing webpages or screenshots is insufficient for controlled evaluation.
+% A useful interactive benchmark must support executable interactions, observable state updates, and answer verification grounded in the underlying data. Existing execution-based benchmarks such as WebArena, VisualWebArena, and OSWorld demonstrate the value of evaluating models in interactive environments, but they are not designed for chart analysis~\cite{zhouWebArenaRealisticWeb2023,kohVisualWebArenaEvaluating2024,xieOSWorldBenchmarkingMultimodal2024}. 
+% DashboardQA moves closer to our setting by evaluating models on interactive dashboards~\cite{karthaDashboardQABenchmarkingMultimodal2025}, but it remains dashboard-centric and tied to specific platform content. These differences make collected resources alone insufficient and motivate a template-driven pipeline that can generate executable charts and grounded questions with explicit control over chart types, interaction actions, and visualization goals.
+
+% To address this gap, we introduce \textbf{\dataset{}}, an executable interactive-chart benchmark built through a template-driven construction pipeline and an execution-based evaluation framework.
+% \dataset{} is organized around a chart-grounded design space over chart types, interaction actions, and visualization goals, tailored to single-chart interactive analysis rather than enumerating chart interactions.
+% Figure~\ref{fig:overall_overview} provides an overview of this workflow.
+% On the construction side, guided by this design space, the pipeline instantiates executable chart webpages together with data-grounded question--answer pairs. These questions cover both directly answerable cases and cases that require reasoning over view changes after interaction.
+% On the evaluation side, the framework exposes two complementary pathways: a structured tool-calling pathway that highlights action choice under an abstract interaction interface, and a direct interaction pathway with coordinate-based mouse simulation that places stronger demands on fine-grained grounding.
+% Together, these components let us examine whether a model can recognize when interaction is needed, select suitable actions, and reason over the updated chart view after interaction.
+
+% Overall, the goal of this work is not to introduce another static chart QA dataset, but to establish a controlled benchmark for interaction-driven chart analysis. Our contributions are listed as follows:
+% \begin{itemize}
+%   \item We design a template-driven interactive chart construction pipeline grounded in prior visualization taxonomies.
+%   \item We design an execution-based evaluation framework and build \dataset{} Dataset, an executable interactive-chart benchmark in which each example is an interactive chart webpage paired with data-grounded questions.
+%   \item We evaluate a range of multimodal large language models and analyze their strengths and limitations on interaction-driven chart analysis.
+% \end{itemize}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{figs/Overview_v1.png}
+  \caption{Overview of the \dataset{} workflow. The framework consists of four connected stages. \textbf{(a) Design space} defines the benchmark scope in terms of chart types, interaction actions, and visualization tasks. \textbf{(b) Construction pipeline} constructs executable interactive chart cases and grounded QA pairs from structured packages and instantiated data. \textbf{(c) \dataset{} dataset} organizes these outputs as released benchmark cases, each pairing an interactive chart with its corresponding QA annotations. \textbf{(d) Evaluation protocol} assesses MLLMs through execution-based, multi-turn interaction with the chart environment.}
+  \label{fig:overall_overview}
+\end{figure}
+
+
+% 第2节：相关工作
+\section{Related Work}
+
+
+\subsection{Interaction in Visualization}
+
+Visualization research has long described interaction in terms of user intent, analytic goals, and view dynamics rather than isolated interface events. Amar et al.~characterize low-level analytic activities~\cite{amarLowLevelComponentsAnalytic2005}. Yi et al.~organize interaction by user intent~\cite{yiDeeperUnderstandingRole2007}. Heer and Shneiderman discuss interaction as a dynamic process for visual analysis~\cite{heerInteractiveDynamicsVisual2012}. Brehmer and Munzner further distinguish task ends from means in a multilevel typology~\cite{brehmerMultilevelTypologyAbstract2013}. These frameworks provide the main conceptual background for describing interaction in visualization.
+Recent systems continue this discussion from the perspective of interaction design and authoring. Athanor studies how natural language can be used to author action-modification-based interactions on static visualizations~\cite{liuAthanorAuthoringAction2026}. This line is adjacent to our setting, but focuses on interaction authoring rather than benchmark construction or benchmarked chart analysis.
+
+
+% 2.1 多模态图表理解
+\subsection{Multimodal Chart Understanding Models}
+
+Chart-specific multimodal models have developed from structured intermediate representations toward broader instruction-following systems for chart reasoning. DePlot translates charts into linearized tables for downstream reasoning~\cite{liuDePlotOneshotVisual2023}. MatCha and UniChart place more emphasis on chart structure through chart derendering and chart-specific pretraining~\cite{liuMatChaEnhancingVisual2023,masryUniChartUniversalVisionlanguage2023}. These models established a strong foundation for chart-specific perception and reasoning.
+Subsequent work moved further toward instruction tuning and more realistic chart inputs. ChartInstruct and ChartAssistant extend chart understanding to broader instruction-following settings~\cite{masryChartInstructInstruction2024,mengChartAssistantUniversalChart2024}. ChartGemma further targets chart reasoning in the wild~\cite{masryChartGemmaVisual2024}. Together, these models broaden the scope of chart understanding beyond narrowly defined chart QA tasks.
+Recent work has also explored stronger reasoning mechanisms and broader chart coverage. VProChart combines visual perception alignment with programmatic solution reasoning~\cite{huangVProChartAnsweringChart2025}. ChartX and ChartVLM study more complicated chart reasoning with a larger benchmark-model pair~\cite{xiaChartXChartVLMVersatile2025}. Other work investigates how chart reasoning ability can be transferred from LLMs to MLLMs through distillation~\cite{heDistillVisualChart2025}. These studies further expand the methodological space of chart understanding models.
+
+
+\subsection{Chart Benchmarks and Construction}
+Early chart benchmarks rely on synthetic or programmatic pipelines. FigureQA and DVQA use controlled chart generation with fixed question formats~\cite{kahouFigureQAAnnotatedFigure2018a,kafleDVQAUnderstandingData2018}, and PlotQA extends this to scientific plots~\cite{methaniPlotQAReasoningScientific2020}. Later work broadens annotation styles under the same static-input setting: ChartQA introduces human-written questions~\cite{masryChartQABenchmarkQuestion2022}, OpenCQA moves toward open-ended answers~\cite{kantharajOpenCQAOpenended2022}, Chart-to-Text and VisText extend output to chart summarization~\cite{kantharajCharttoTextLargescale2022,tangVisTextBenchmark2023}, and RealCQA studies logic-oriented QA on scientific charts~\cite{ahmedRealCQAScientificChart2023}.
+
+Recent benchmarks emphasize realistic data sources and more challenging settings. ChartBench and CharXiv use realistic chart collections with harder questions~\cite{xuChartBenchBenchmarkComplex2024,wangCharXivChartingGaps2024}. InfoChartQA targets infographic charts~\cite{xieInfoChartQABenchmarkMultimodal2025a}. ChartCheck and ChartInsights examine fact verification and low-level understanding~\cite{akhtarChartCheckExplainable2024,wuChartInsightsEvaluating2024}. EncQA organizes evaluation around visual encodings and analytic tasks~\cite{mukherjeeEncQABenchmarkingVisionlanguage2025}. At larger scale, Omni-Chart-600K broadens chart taxonomies~\cite{wangOmnichart600KComprehensiveDataset2025}, EvoChart combines benchmarking with self-training-based data expansion~\cite{huangEvoChartBenchmarkSelftraining2025}, ChartQAPro and ChartMind expand chart sources and question forms~\cite{masryChartQAProMoreDiverse2025,weiChartMindComprehensiveBenchmark2025}, and WikiMixQA and MultiChartQA extend reasoning to mixed table--chart and multi-chart settings~\cite{foroutanWikiMixQAMultimodalBenchmark2025a,zhuMultiChartQABenchmarkingVisionlanguage2025}. All of these benchmarks evaluate models on static inputs.
+
+A parallel line of work develops execution-based evaluation environments. WebArena~\cite{zhouWebArenaRealisticWeb2023}, VisualWebArena~\cite{kohVisualWebArenaEvaluating2024}, and OSWorld~\cite{xieOSWorldBenchmarkingMultimodal2024} demonstrate the value of testing models through live interaction, but target general web or desktop environments rather than chart analysis. DashboardQA is the closest to our setting, evaluating QA over interactive dashboards~\cite{karthaDashboardQABenchmarkingMultimodal2025}, but it is built on collected platform content and targets multi-view dashboard comprehension without systematic control over individual chart types, interaction actions, or visualization tasks. InterChartQA takes a complementary approach by using a template-driven pipeline to generate single-chart benchmark cases with explicit control over these dimensions, enabling fine-grained diagnosis of where and why models fail in interactive chart analysis.
+
+
+% 第3节：设计空间
+\section{Design Space}
+
+
+% To construct a controlled benchmark for interactive chart analysis, we first define the scope of interactions that the benchmark is intended to represent. Rather than attempting to cover the broader space of interactions in visual analytics, we focus on a chart-grounded operational space in which interactions can be executed, their effects can be observed from chart state updates, and their outcomes can be verified automatically~\cite{heerInteractiveDynamicsVisual2012,yiDeeperUnderstandingRole2007}. This scope follows the goal of  \dataset{}: to assess whether multimodal large language models can ground chart elements, execute interaction steps, and reason over the resulting state changes.
+To construct a controlled benchmark for interactive chart analysis, we first define the scope of interactions that the benchmark covers. Conceptually, we focus on single-chart interactions driven by analytical intent: operations performed on one chart to support a specific visualization goal. We do not address cross-view coordination or broader interface navigation. Within this scope, we further require that each interaction be executable, that its effect on chart state be observable, and that the resulting outcome be automatically verifiable. These requirements ensure that every benchmark case can be constructed, executed, and scored without manual intervention.
+
+% This design space builds on prior visualization theory, particularly Yi et al.’s intent-oriented view of interaction and Brehmer and Munzner’s distinction between task ends and means~\cite{yiDeeperUnderstandingRole2007, brehmerMultilevelTypologyAbstract2013}. Rather than reproducing these typologies in full, we adapt and simplify them to define the chart types, interaction actions, and visualization goals used in  \dataset{}. The resulting design space is restricted to chart-grounded, single-chart interactions, while cross-view coordination and broader interface navigation are excluded in the current version.
+This design space builds on prior visualization theory, particularly Yi et al.'s intent-oriented view of interaction and Brehmer and Munzner's distinction between task ends and means~\cite{yiDeeperUnderstandingRole2007, brehmerMultilevelTypologyAbstract2013}. We adapt and simplify these typologies to define the chart types, interaction actions, and visualization tasks used in \dataset{}.
+
+Building on this scope, we organize the benchmark around three complementary dimensions: chart types, which define the chart structures under evaluation; interaction actions, which define the available operations; and visualization tasks, which define the purposes those operations serve. Together, these dimensions specify what can be done on a chart and why that interaction matters in the benchmark. Figure~\ref{fig:design_space} provides an overview of this design space.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth, alt={Charts type and interaction design space in \dataset{}.}]{figs/Design_Space_v3.png}
+  \caption{
+    Design space of \dataset{}. The benchmark is defined along three complementary aspects: chart types, interaction actions, and visualization tasks, covering the charts considered, the interactions supported, and the analytical intents involved.
+  }
+  \label{fig:design_space}
+\end{figure}
+
+
+\subsection{Chart Types}
+
+% Chart type defines the structural basis of interaction in  \dataset{}: it determines how data is visually encoded, what elements can be manipulated, and which interaction outcomes remain observable. To cover a broad yet controlled target space, we select 12 chart types that are common and representative in practice. These chart types are further organized into two families: general-purpose charts and specialized charts. This distinction is introduced to describe differences in interaction affordance and structural flexibility, not to suggest a hierarchy of importance or difficulty.
+Chart type defines the structural basis of interaction in \dataset{}. It determines how data is visually encoded, what elements can be manipulated, and which interaction outcomes are observable. To cover a broad yet controlled target space, we select 12 chart types that are common and representative in practice. For presentation purposes, we organize these chart types into two groups based on the range of interactions they typically support.
+
+\textbf{General-purpose charts} include bar charts, line charts, scatter plots, box plots, parallel coordinates, and stacked area charts. These charts usually expose relatively rich local interactions on marks or axes, such as hovering, brushing, or zooming, and therefore support a wider range of layout variations and interaction instantiations.
+
+\textbf{Specialized charts} include heatmaps, Sankey diagrams, calendar charts, treemaps, pie charts, and funnel charts. These charts usually involve more structured layouts and more constrained interaction targets, and therefore support a narrower range of layout variations and interaction instantiations.
+
+\subsection{Interaction Actions}
+
+% We organize the supported interactions in  \dataset{} into five action categories: Hover, Click, Zoom, Brush, and Drag. These action categories form a benchmark-specific interaction abstraction derived from the interaction space covered by our chart set. In  \dataset{}, these action categories serve both as a benchmark abstraction and as the basis for the structured tool-calling interface. In the structured tool-calling pathway, they are exposed as callable tools; in the direct interaction pathway, the same benchmark tasks are carried out through direct interaction rather than explicit action tools.
+We organize the supported interactions in \dataset{} into five action categories: Hover, Click, Zoom, Brush, and Drag.
+% \placeholder{Need about 2 sentences for the rationale of how the interaction types are selected.}
+We define these categories by reviewing the interactions actually supported across our selected chart types in the chart library. They are therefore grounded in the chart set used in the benchmark, rather than directly adopted from a prior interaction taxonomy.
+These action categories serve both as a benchmark-level abstraction and as the basis for the structured tool-calling interface. In the structured tool-calling pathway, they are exposed as callable tools; in the direct interaction pathway, the same benchmark tasks are carried out through coordinate-based interaction.
+
+The five actions play distinct but flexible roles in the benchmark:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Hover} is mainly used to reveal hidden details, most commonly through tooltips.
+    \item \textbf{Click} is used to select or highlight marks, activate chart-associated controls, or trigger other local state changes.
+    \item \textbf{Zoom} adjusts the visible scale or viewing range of a chart.
+    \item \textbf{Brush} selects a continuous region or subset through direct spatial specification.
+    \item \textbf{Drag} is used to move or adjust existing interactive elements and, in some cases, to support structural rearrangement.
+\end{itemize}
+
+Importantly, these actions do not map one-to-one to visualization tasks; their role depends on chart structure and task context.
+
+% 因排版调整位置
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.8\linewidth, alt={Pipeline Overview}]{pipeline_overview_v6.png}
+  \caption{Template-driven construction pipeline of \dataset{}. Starting from semantic design, the pipeline derives reusable chart and question templates, instantiates concrete data under package constraints, and realizes each case as an executable HTML chart paired with grounded QA annotations.}
+  \label{fig:benchmark_construction_pipeline}
+\end{figure*}
+
+\subsection{Visualization Tasks}
+
+% While interaction actions define how interaction is carried out on a chart, visualization goals define why the interaction is performed. Drawing on Yi et al.’s intent-oriented taxonomy of interaction~\cite{yiDeeperUnderstandingRole2007}, we use five visualization goals in our benchmark: Identify/Select, Explore, Filter, Reconfigure, and Abstract/Elaborate. These goals capture the main analytical intents supported within our single-chart interaction scope. The current version excludes Encode or Connect: Encode is not included because it falls outside the interaction scope targeted by our benchmark, while Connect primarily concerns cross-view or relational linking beyond our single-chart scope.
+Interaction actions define how interaction is carried out on a chart, while visualization tasks define why the interaction is performed. Drawing on Yi et al.'s intent-oriented taxonomy of interaction~\cite{yiDeeperUnderstandingRole2007}, we adopt five high-level visualization tasks that capture the main analytical intents within our single-chart interaction scope: Identify/Select, Explore, Filter, Reconfigure, and Abstract/Elaborate. We exclude Encode, which falls outside the interaction scope of our benchmark, and Connect, which concerns cross-view linking beyond the single-chart setting.
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Identify/Select} refers to locating or isolating specific items of interest.
+    
+    \item \textbf{Explore} refers to inspecting different regions, states, or subsets of the data space.
+
+    \item \textbf{Filter} refers to conditionally showing or restricting the visible subset of data.
+
+    \item \textbf{Reconfigure} refers to changing the arrangement or organization of visual elements to support a different analytical view.
+
+    \item \textbf{Abstract/Elaborate} refers to shifting between overview and detail, such as revealing precise values or changing the level of visible detail.
+\end{itemize}
+
+These visualization tasks are not in one-to-one correspondence with interaction actions. The same action may serve different goals depending on the chart structure and task context. For example, a click may support Identify/Select in one case and Filter in another; similarly, zoom may serve Explore or Abstract/Elaborate depending on the question being asked.
+
+% Taken together, chart types, action categories, and visualization goals do not combine freely in our benchmark. Not all chart-action-goal combinations are meaningful or executable. We therefore instantiate only compatible combinations.
+Taken together, chart types, action categories, and visualization tasks do not combine freely.
+% Out of \placeholder{TODO: theoretical combinations} possible combinations, we instantiate \placeholder{TODO: Num. selected combinations} that are both meaningful and executable. \placeholder{TODO: Rationale behind the selection above.}
+Out of 300 possible combinations, we instantiate 63 that are both meaningful and executable. A combination is included only if the chart type supports the action in the chart library and if that action can serve the target visualization task on that chart.
+
+\section{Benchmark Construction}
+
+% \subsection{Overview}
+
+% The construction pipeline of \dataset{} consists of four stages: semantic design, template realization, data synthesis, and instance realization. We first define the semantic specifications of each case, including its analytical context, supported interactions, and data constraints and patterns. We then derive reusable chart and question templates from these specifications. Based on them, we synthesize concrete data instances and instantiate each benchmark case as an executable interactive chart and a set of grounded question--answer pairs. Figure~\ref{fig:benchmark_construction_pipeline} summarizes the full pipeline.
+The construction pipeline of \dataset{} consists of four stages. Semantic design defines the analytical context, interaction requirements, and data constraints for each target chart setting, producing a structured package. Template realization converts each package into reusable chart templates and question templates. Data synthesis instantiates concrete data under template constraints. Instance realization renders the final executable HTML chart page and its corresponding QA file. Figure~\ref{fig:benchmark_construction_pipeline} summarizes the full pipeline.
+
+Rather than directly generating charts and questions from open-ended prompts, the pipeline separates semantic intent from data instantiation and executable rendering through an explicit template layer. 
+% \placeholder{Need to add multiple sentences for the role of LLM in data generation. See the Overleaf comment for details.}
+In the current pipeline, LLM assistance is used mainly in upstream semantic construction, including theme expansion, package construction, and question-side template preparation. The resulting outputs are normalized into a fixed structured format with predefined fields and validated before entering the next stage. Later data instantiation, answer computation, and executable rendering are primarily programmatic.
+
+A key property of \dataset{} is that each benchmark case is released as an executable webpage rather than a static chart image. Many target questions depend on hidden values, filtered subsets, or state changes that are not available in the initial view and become observable only after interaction.
+
+
+\subsection{Semantic Design}
+
+Semantic design serves as the anchor of the construction pipeline. Before any concrete data are instantiated, it defines the analytical intent, interaction requirements, and data patterns of each target chart setting.
+
+% Each case begins from a theme. A theme provides the domain background, the central analytical challenge, and the core analytical pattern to be reflected in the chart. It does not yet determine concrete values, visual layouts, or executable chart instances. Instead, it defines the semantic frame within which later templates and data instances will be constructed. Based on each theme, we then construct a semantic specification that records the field roles, supported interactions, data constraints, and event patterns of the target chart. It also includes potential confusion patterns that may lead to misleading first impressions. We organize these fields into a package, which provides a unified representation for later template realization, data synthesis, and instance realization. At this stage, package construction is LLM-assisted but schema-constrained: prompts are used to expand themes into structured packages, while the resulting fields are normalized into a fixed representation for later validation, repair, and reuse.
+Each case begins from a theme. For example, a theme might specify that the benchmark case involves a line chart showing monthly active enterprise customers for nine competing brands over 24 months, where the default view is cropped to the first eight months such that brand \texttt{G} appears to be a persistent low-performer, and the analyst must extend the timeline to discover that late entrant brand \texttt{I} overtakes all brands by month 23. More generally, a theme provides the domain background, the central analytical challenge, and the core analytical pattern to be reflected in the chart, without determining concrete values, visual layouts, or executable chart instances. Based on each theme, we construct a semantic specification that records the field roles, supported interactions, data constraints, and event patterns of the target chart, as well as potential confusion patterns that may lead to misleading first impressions. We organize these fields into a package, which provides a unified representation for later template realization, data synthesis, and instance realization.
+
+% This layer is important because it separates semantic intent from later template construction and data instantiation. Rather than directly prompting an LLM to generate a chart and its questions, we first build a structured semantic specification that can be reused, inspected, revised, and verified before large-scale generation. This separation makes it easier to keep the construction process consistent and controllable across different combinations of Chart Types, Interaction Actions, and Visualization Tasks.
+This separation between semantic intent and later construction stages makes the pipeline more controllable. Packages can be reused, inspected, revised, and verified before large-scale generation, keeping the construction process consistent across different combinations of chart types, interaction actions, and visualization tasks.
+
+\subsection{Template Realization}
+
+% After semantic specifications are defined, the pipeline converts them into reusable generation templates. This stage translates high-level semantic specifications into concrete template artifacts that can later support both chart construction and QA instantiation. Template realization combines LLM assistance with programmatic processing. In this stage, LLMs help refine packages and prepare reusable question templates. Structural checks are then applied, and the validated outputs are used for later chart construction and QA generation.
+After semantic specifications are defined, the pipeline converts them into reusable generation templates: concrete artifacts that support both chart construction and QA instantiation.
+
+% We derive two complementary template families. The first is chart templates, which organize base chart specifications, layout candidates, interaction definitions, and control elements for later executable rendering. The second is question templates, which specify the intended question focus, required interaction conditions, answer format, and question types for later QA realization. These question templates are further instantiated into different difficulty levels, adapted from Lundgard and Satyanarayan's four-level model of semantic content~\cite{lundgardAccessibleVisualizationNatural2022}.
+We derive two complementary template families. Chart templates organize base chart specifications, layout candidates, interaction definitions, and control elements for later executable rendering. Question templates specify the intended question focus, required interaction conditions, answer format, and question types for later QA realization. 
+% In addition, question templates are further organized into difficulty levels. 
+% \placeholder{Need a brief description of the "four-levels". See details in the Overleaf comment.~\cite{lundgardAccessibleVisualizationNatural2022}}
+Question templates are further organized into four difficulty levels, L1--L4, following Lundgard and Satyanarayan's four-level model of semantic content~\cite{lundgardAccessibleVisualizationNatural2022}. In our benchmark, L1 covers questions answerable from directly visible chart information, while L2--L4 progressively require interaction, chart-state tracking, and more complex reasoning over updated views. We use this model as a guiding structure, but adapt it to the interactive chart setting during template design.
+
+% This stage makes the benchmark construction process more explicit and inspectable. Because chart templates and question templates are derived from the same semantic specification, they remain aligned before any concrete data are synthesized. Together, the specification and the realized templates can support multiple later data instantiations under the same package. As a result, the chart and the QA outputs are grounded in the same intended interaction logic rather than being generated independently.
+Because chart templates and question templates are derived from the same semantic specification, they remain aligned before any concrete data are synthesized. A single package can therefore support multiple data instantiations, with chart and QA outputs grounded in the same interaction logic.
+
+% To improve consistency, we perform automatic structural validation and repair during template realization. These checks verify whether required fields are present, whether field-role assignments are compatible with the target chart type, whether the declared interactions are supported, whether event patterns are structurally valid, and whether the resulting template can support later interaction-dependent question construction. Templates that fail these checks are revised or regenerated before entering the next stage.
+Templates are validated against automatic structural checks and revised or regenerated before entering the next stage. Details of these checks are described in the quality control process below.
+
+\subsection{Data Synthesis}
+
+% Once a package is finalized, the pipeline instantiates concrete data from it. At this stage, the package has already defined the relevant field constraints, expected patterns, and target structures. Accordingly, we mainly use code to instantiate concrete data records under these predefined conditions, such as category sets, temporal spans, dimensional assignments, and value ranges. In contrast to the preceding LLM-assisted stages, data synthesis is primarily programmatic: code instantiates seed-specific data under package constraints and applies controlled variations consistent with the target pattern or event condition.
+Once a package is finalized, the pipeline instantiates concrete data. In contrast to the preceding LLM-assisted stages, data synthesis is primarily programmatic, generating data records under the field constraints, expected patterns, and value ranges defined in the package while applying controlled variations consistent with the target analytical pattern.
+
+% On top of this, the instantiated data may further include controlled variations. These variations are introduced to increase instance diversity while preserving the intended patterns, so that the generated instances do not become overly rigid. Depending on the theme, the instantiated data may include concrete variations consistent with the target pattern or event condition. As a result, the difficulty of the benchmark is not created mainly by question wording. Instead, it comes more from the construction logic predefined in the templates and is concretely realized during data instantiation. Answering later questions therefore often depends on accessing the relevant view, isolating subsets, or comparing chart states after interaction.
+
+% By separating template realization from data synthesis, the pipeline can preserve the same analytical intent while instantiating multiple concrete data instances. In this way, the templates define the core constraints and target patterns, while data synthesis generates diverse instances under those constraints. This separation improves benchmark diversity without giving up control over the underlying reasoning target.
+These controlled variations increase instance diversity while preserving the intended analytical patterns, so that generated instances do not become overly rigid. The difficulty of the benchmark arises primarily from the construction logic predefined in the templates and concretely realized during data instantiation, not from question wording alone. Answering questions often depends on accessing a specific view, isolating subsets, or comparing chart states after interaction. By separating template realization from data synthesis, the pipeline preserves the same analytical intent across multiple data instantiations, improving benchmark diversity without giving up control over the underlying reasoning target.
+
+\subsection{Instance Realization}
+
+Given a package and its instantiated data, the pipeline realizes each case as an executable chart webpage and its corresponding QA file. Both outputs are derived from the same package and the same underlying data, so the released chart and questions remain aligned.
+
+% On the chart side, we render each instance as a standalone ECharts-based HTML page. The page is fully interactive rather than a static image. Executable chart realization is primarily programmatic: the pipeline materializes package-defined chart structure, instantiated data, interaction handlers, and layout variants into runnable HTML pages. Based on the package definition, the realization process can produce different layout variants and different initial chart states. These variations include different default views, control states, visible series, and zoom ranges. This is important because many target questions depend not only on the chart content itself, but also on what is initially visible and what becomes available only after interaction.
+On the chart side, we render each instance as a standalone interactive HTML page implemented in Apache ECharts~\cite{liEChartsDeclarativeFramework2018}, an open-source JavaScript visualization library. The pipeline materializes the package-defined chart structure, instantiated data, and interaction handlers into runnable HTML pages. Based on the package definition, the realization process can produce different layout variants and initial chart states, such as different default views, control states, visible series, and zoom ranges. 
+% \placeholder{Add 2 sentences for the layout variants. See Overleaf comments.}
+Layout variants are used to increase instance diversity across realized cases, rather than to create repeated test conditions for the same question. In the current release, differences in the initially visible context are introduced through two initial-state variants that share the same realized layout and QA set but start from different chart states.
+Many target questions depend not only on the chart content itself, but also on what is initially visible and what becomes available only after interaction.
+
+% On the QA side, we instantiate a case-specific QA file from the same package and the same data instance. At this stage, the main question forms have already been prepared upstream during template realization. The realization process maps them to the current data instance, computes the concrete answers programmatically, and writes the final question--answer pairs. As a result, the final HTML page and QA file together form one executable benchmark case.
+On the QA side, the realization process instantiates and samples questions from the question template defined by the package, computes concrete answers programmatically against the current data instance, and writes the final QA pairs. The resulting HTML page and QA file together form one executable benchmark case.
+
+\subsection{Quality Control}
+
+Quality control is applied throughout the pipeline at three levels:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Template level:} Automatic structural checks verify whether required fields are present, whether field-role assignments are compatible with the target chart type, whether declared interactions are supported, and whether templates can support interaction-dependent question construction. Templates that fail these checks are revised or regenerated before entering data synthesis.
+    \item \textbf{Package level:} We review whether the analytical situation is plausible, whether the intended combination of chart type, interaction action, and visualization task is executable, and whether the resulting questions truly require interaction. This step is especially important for avoiding cases whose interaction is only superficial.
+    \item \textbf{Instance level:} Spot checks after rendering verify whether the chart faithfully reflects the instantiated data, whether interactions behave as expected, and whether answers remain consistent with the final executable chart state.
+\end{itemize}
+The main quality control burden is concentrated at the template and package levels, where errors are cheaper to detect and correct. Instance-level checks serve as a final safeguard on the fidelity of realized outputs.This process combines automatic checks with manual review. In particular, we review packages before large-scale instantiation and perform spot checks on realized cases after rendering.
+
+% Although the pipeline is largely programmatic, benchmark quality still depends on targeted review and spot checking. Our quality control is centered primarily at the package level, as the package serves as the direct input to later data synthesis, chart realization, and QA realization. Because multiple upstream stages are LLM-assisted, quality control combines structural validation, package-level review, and instance-level spot checks rather than relying on free-form generation alone. At this stage, we examine whether the analytical situation is plausible, whether the package defines a well-formed chart setting, whether the intended combination of chart type, interaction action, and visualization goal is executable, and whether the resulting questions truly require interaction rather than static inspection. This step is especially important for avoiding cases whose interaction is only superficial. Because the package is the immediate carrier of earlier semantic design decisions, package-level review also serves as the main checkpoint for preserving the intended benchmark quality.
+
+% In addition to package-level review, we perform instance-level spot checks after rendering and QA generation. These checks focus on whether the rendered chart faithfully reflects the instantiated data, whether the supported interactions behave as expected, and whether the released answers remain consistent with the final executable chart state. In this way, the main quality control burden is handled upstream at the package level, while instance-level checks are used to verify the fidelity of the final realized outputs.
+
+\section{Evaluation Protocol}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth, alt={Evaluation Protocol showing Path A and Path B}]{Eval_protocol_v3.png}
+  \caption{Execution-based evaluation protocol of \dataset{}. The model receives the current chart screenshot and question, predicts an action, and interacts with the chart through browser automation in a multi-turn loop. The protocol supports both direct interaction and structured tool calling.}
+  \label{fig:eval-protocol}
+\end{figure}
+
+\begin{figure*}[t]
+  \vspace{30pt}
+  \centering
+  \includegraphics[width=\linewidth, alt={Dataset Overview}]{figs/Dataset_v1.png}
+  \caption{Overview of representative \dataset{} cases under two initial states, together with example questions.}
+  \label{fig:dataset_overview}
+\end{figure*}
+
+% We evaluate  \dataset{} in a controlled browser environment implemented with Playwright, where each benchmark instance is executed as a single interactive HTML chart page. 
+
+We evaluate \dataset{} in a controlled browser environment implemented with Playwright~\cite{microsoftPlaywright}, a browser automation framework that enables programmatic webpage rendering and simulated user interactions. Each benchmark instance is executed as a single interactive HTML chart page implemented in ECharts~\cite{liEChartsDeclarativeFramework2018}. To ensure a consistent interaction setting, the chart page is rendered in a standardized viewport. During evaluation, the framework maintains a complete interaction record, including screenshots, model outputs, tool execution feedback, and interaction logs. Final submitted answers are scored automatically, while the full interaction record is retained for later inspection and analysis and is not used in scoring. The protocol is restricted to single-chart, chart-centered interaction, without broader web navigation or cross-page operations.
+
+\subsection{Evaluation Loop}
+
+% Each question in  \dataset{} is evaluated in a separate run. At the start of a run, the model is given a screenshot of the chart in its initial state together with an initial prompt that contains the task instructions and the target question. In our evaluation protocol, each run allows for a predefined interaction turn budget. At each turn, the model may either call the give-answer tool to submit its final answer or request another interaction.
+Each question in \dataset{} is evaluated in a separate run. At the start of a run, the model receives a screenshot of the chart in its initial state together with an initial prompt containing the task instructions and the target question. Each run allows a fixed interaction budget. At each turn, the model may either call the \texttt{give-answer} tool to submit its final answer or request another interaction.
+
+% If the model requests another interaction, the framework executes the corresponding action in the browser, returns the execution feedback, captures a new screenshot, and proceeds to the next turn. In subsequent turns, the model receives updated chart screenshots together with the accumulated textual interaction history. To limit visual context length, screenshot pruning is enabled: only the most recent three screenshots are retained, while the textual history is preserved in full.
+If the model requests another interaction, the framework executes the corresponding action in the browser, returns execution feedback, captures a new screenshot, and proceeds to the next turn. In subsequent turns, the model receives updated chart screenshots together with the accumulated textual interaction history. The framework also maintains a complete interaction record including all screenshots, model outputs, tool execution feedback, and interaction logs, which is retained for later inspection and analysis but not used in scoring.
+
+% If the model calls the give-answer tool, the run proceeds to automatic answer evaluation. If the interaction budget is exhausted, the evaluation also stops, and the run is treated as having no answer submission. Invalid actions do not terminate the run. If the model issues an erroneous tool call, such as malformed parameters or an interaction on a non-responsive target, the framework returns an error message and allows the interaction loop to continue within the remaining turn budget. This design prevents isolated execution errors from terminating the run and preserves the full interaction trace for later analysis.
+A run ends when the model calls the \texttt{give-answer} tool, which triggers automatic answer evaluation, or when the interaction budget is exhausted, in which case the run is treated as having no answer submission. It should be noted that invalid actions do not terminate the run. If the model issues an erroneous tool call (such as malformed parameters or an interaction on a non-responsive target) the framework returns an error message and the interaction loop continues within the remaining turn budget. This design prevents isolated execution errors from terminating the run and preserves the full interaction trace for later analysis.
+
+\subsection{Interaction Pathways}
+
+We compare two interaction pathways under the same evaluation setting. Both pathways share the same chart environment, visual observation setting, pruning rule, turn budget, and answer submission mechanism. They differ only in the interaction interface available to the model.
+
+% In the \textbf{structured tool-calling pathway}, the model is provided with the interaction tools corresponding to the five Interaction Actions defined in Section 3: Hover, Click, Zoom, Brush, and Drag. In our evaluation, the full tool set is exposed rather than filtered for each chart instance. As a result, some tools may be irrelevant or inapplicable to a given chart, and the model must infer which interactions are appropriate for the current task.
+In the \textbf{structured tool-calling pathway}, the model is provided with interaction tools corresponding to the five action categories defined in the design space: \texttt{Hover}, \texttt{Click}, \texttt{Zoom}, \texttt{Brush}, and \texttt{Drag}. The full tool set is exposed for every chart instance, meaning some tools may be irrelevant or inapplicable to a given chart. We expose the same tool set to all chart instances rather than filtering tools case by case. This avoids revealing chart-specific interaction affordances through the interface itself and requires the model to infer which actions are applicable under the current chart state and task.
+
+% In the \textbf{direct interaction pathway}, the model interacts through coordinate-based mouse actions such as move, click, drag, and scroll. These actions require the model to specify explicit screen coordinates for each step. Compared with the structured tool-calling pathway, this setting places a stronger burden on coordinate-level spatial grounding.
+In the \textbf{direct interaction pathway}, the model interacts through coordinate-based mouse actions. These actions require the model to specify explicit screen coordinates for each step, placing a stronger demand on visual spatial grounding compared with the abstract interaction interface of the structured tool-calling pathway.
+
+\subsection{Answer Scoring}
+
+% Automatic scoring in \dataset{} is based on the final submitted answer. Once the model calls the give-answer tool, the framework compares the submitted answer against the reference answer associated with the sample. The reasoning submitted by the model is recorded for later analysis but is not used in automatic scoring.
+Automatic scoring is based on the final submitted answer. Once the model calls the \texttt{give-answer} tool, the framework compares the submitted answer against the reference answer. The reasoning trace is recorded for later analysis but is not used in scoring.
+
+% Before comparison, the framework applies basic answer normalization to reduce irrelevant formatting differences, such as variations in letter case, brackets, and delimiters. Runs that do not invoke the give-answer tool within the maximum budget of turns are treated as incorrect.
+Before comparison, the framework applies answer normalization to reduce irrelevant formatting differences.
+% \placeholder{Need to clarify detailed rules here. See Overleaf comments.}
+Normalization removes leading and trailing spaces, lowercases text, and standardizes common brackets and delimiters. It does not attempt semantic rewriting beyond these surface-level formatting adjustments.
+Runs that do not invoke the \texttt{give-answer} tool within the turn budget are treated as incorrect.
+
+Our primary reported metric is overall answer accuracy, defined as the proportion of all evaluation samples answered correctly. In later analysis, we additionally examine answer submission rate and accuracy conditioned on submitted runs to separate interaction failure from post-submission reasoning failure. Results can also be broken down by interaction pathway, chart type, interaction action, and question difficulty level.
+
+\section{Benchmark Results and Analysis}
+
+\subsection{\dataset{} Dataset}
+
+The current release of \dataset{} Dataset is an executable interactive-chart benchmark rather than a static chart-image dataset. It covers 12 chart types, 1,464  executable cases, and 5,856 QA pairs. Figure~\ref{fig:dataset_overview} provides a qualitative overview of representative released cases across chart structures, initial states, and associated questions.
+
+Each released case consists of two coordinated artifacts: an interactive HTML chart page and a JSON annotation file. The HTML page is the executable target used for interaction and evaluation, while the JSON file records case metadata and grounded QA pairs. Each base case is released in two initial-state variants that share the same realized layout and QA set but differ in the visible chart state at the start of a run. In the current release, this design yields 4 QA pairs per case on average.
+
+% We organize questions into four levels, L1--L4, as a benchmark-oriented adaptation of Lundgard and Satyanarayan's four-level model of semantic content~\cite{lundgardAccessibleVisualizationNatural2022}. In this mapping, L0, L1, L2, and L3 correspond to the original model's L1, L2, L3, and L4, respectively. We rename the lowest tier as L0 as an explicit non-interactive base level: questions at this level can be answered based on the initial view, ideally without requiring additional interaction turns. By contrast, L1--L3 progressively require interaction, chart-state tracking, and higher-level reasoning over updated views.
+The current release contains questions at four difficulty levels, L1--L4. Their definitions follow the construction scheme described in Section~4.
+
+\begin{table}[h]
+  \centering
+  \caption{
+    Summary of the released \dataset{} Dataset instances by chart family.
+  }
+  \label{tab:dataset_summary}
+  \begin{tabular}{lcccc}
+    \toprule
+    Chart Family & Templates & Cases & QA & QA (\%) \\
+    \midrule
+    Bar charts           & 10 & 160 &  640 & 10.93\% \\
+    Box plots            & 10 & 160 &  640 & 10.93\% \\
+    Calendar charts      &  4 &  64 &  256 &  4.37\% \\
+    Funnel charts        &  4 &  64 &  256 &  4.37\% \\
+    Heatmap              &  4 &  64 &  256 &  4.37\% \\
+    Line charts          & 10 & 200 &  800 & 13.66\% \\
+    Parallel coordinates & 10 & 160 &  640 & 10.93\% \\
+    Pie charts           &  4 &  64 &  256 &  4.37\% \\
+    Sankey diagrams      &  4 &  64 &  256 &  4.37\% \\
+    Scatter plots        & 10 & 200 &  800 & 13.66\% \\
+    Stacked area charts  & 10 & 200 &  800 & 13.66\% \\
+    Treemap              &  4 &  64 &  256 &  4.37\% \\
+    \midrule
+    Total                & 84 & 1464 & 5856 & 100.00\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Table~\ref{tab:dataset_summary} summarizes chart-family coverage in the current release. The counts are intentionally non-uniform rather than balanced by chart family. As discussed in Section~3, chart types differ in interaction affordances, layout flexibility, and compatible chart--action--goal combinations; we therefore instantiate only meaningful and executable combinations, which leads to more released cases for general-purpose charts and fewer for more constrained specialized charts. Across all QA pairs, the distribution over levels is 636 at L1, 1,184 at L2, 1,690 at L3, and 2,346 at L4; taken together, L2--L4 account for 89.1\% of the release. These statistics show that \dataset{} Dataset is characterized not only by scale but also by controlled coverage and a predominantly interaction-dependent question distribution.
+
+\subsection{Experimental Setup}
+
+To evaluate the interaction-driven analysis capabilities of multimodal models, we execute all benchmark cases in a unified browser environment. All chart pages are rendered in a 1200 x 1000 viewport. For each question, we set a maximum interaction budget of 15 turns; if a model fails to submit a final answer within this budget, the run is treated as incorrect.
+
+We evaluate two representative MLLMs: Gemini 3.1 Pro~\cite{googledeepmind2026gemini31pro} and Qwen3.5-Plus, the official hosted deployment corresponding to Qwen3.5-397B-A17B~\cite{qwenteam2026qwen35}. In the rest of the paper, we refer to them simply as Gemini and Qwen. We choose these two models because they provide strong multimodal support and stable deployment access. Both models are designed for multi-step reasoning and tool-using workflows, which makes them well suited to our execution-based evaluation protocol. Furthermore, they serve as strong baselines from two major model families while keeping the comparison compact and manageable.
+
+\subsection{Overall Performance}
+
+\begin{table*}[t]
+	\centering
+	\caption{
+		Overall benchmark performance across the four completed settings. 
+	}
+	\label{tab:overall_performance}
+	\scriptsize
+	\begin{tabular}{ll|cccc|ccccc}
+		\toprule
+		Model          & Pathway  & No Ans.$\downarrow$ & Succ. (\%)$\uparrow$ & Overall Acc. (\%)$\uparrow$ & Submit Acc. (\%)$\uparrow$ & Turns$\downarrow$ & L1$\uparrow$   & L2$\uparrow$   & L3$\uparrow$   & L4$\uparrow$   \\
+		\midrule
+		Gemini & Tool & 1         & \textbf{99.98}   & \textbf{50.26}      & 50.26             & \textbf{4.51}   & 95.91          & \textbf{34.80} & \textbf{36.09} & \textbf{55.88} \\
+		Gemini & Mouse    & 0         & \textbf{100.00}  & 42.90               & 42.90             & 4.96            & 96.70          & 26.18          & 29.11          & 46.68          \\
+		\midrule
+        Qwen  & Tool & 575       & 90.18            & 45.83               & \textbf{50.82}    & 9.05            & \textbf{97.01} & 28.89          & 31.78          & 50.64          \\
+		Qwen  & Mouse    & 1708      & 70.83            & 34.72               & \textbf{49.01}    & 10.07           & \textbf{97.01} & 22.21          & 20.71          & 34.23          \\
+		\bottomrule
+	\end{tabular}
+\end{table*}
+
+\begin{figure*}[t]
+	\centering
+	\includegraphics[width=\textwidth, alt={Failure cases}]{figs/failure_v2.png}
+	\caption{Three representative failure modes observed during interactive evaluation: (A) budget exhaustion with tool-call restriction, (B) protocol/argument error from malformed tool inputs, and (C) interaction-state misreading including chart-state confusion (C1) and visual miscounting (C2).}
+	\label{fig:failure_cases}
+\end{figure*}
+
+Table~\ref{tab:overall_performance} summarizes the four completed evaluation settings. Gemini under the structured tool-calling pathway achieves the strongest overall result. Across both pathways, Gemini remains consistently stronger overall, while Qwen show very similar behavior in both pathways.
+
+Table~\ref{tab:overall_performance} also separates two sources of performance loss. For Gemini, the gap between overall accuracy and accuracy on submitted runs is very small. In most runs, it successfully submits an answer before reaching the interaction budget. For Qwen, failures to submit within budget are more common, and many submitted answers are still incorrect. This shows that the gap between Qwen and Gemini is not explained by submission failure alone. Many runs still fail even after an answer has been submitted.
+
+Overall, the results show a clear pathway effect. Both models perform better under structured tool-calling than under direct interaction. This pattern is especially pronounced for Qwen. Its submission rate and final accuracy both decline sharply in the direct interaction setting. Once interaction must be grounded at the coordinate level, current models face a greater burden in action selection, state control, and reading updated chart views.
+
+\subsection{Interaction Process Analysis}
+
+\begin{figure}[t]
+    \vspace{20pt}
+	\centering
+	\includegraphics[width=\linewidth]{figs/Turn_v2.png}
+	\caption{
+		Interaction-turn distributions. Left panel summarizes L1 questions, where correct answers concentrate in very short trajectories. Right panel aggregates L2--L4 questions and shows that, once interaction is required, probability mass shifts toward longer trajectories and incorrect runs increasingly dominate the high-turn regime.
+	}
+	\label{fig:int_turn_distribution}
+\end{figure}
+
+Beyond final accuracy, the benchmark also reveals clear differences in how models use the interaction budget. Figure~\ref{fig:int_turn_distribution} shows that L1 serves as a useful anchor for what current models already do well. When the relevant evidence is already available in the initial view, runs are usually short and highly reliable. This suggests that basic chart recognition, encoding lookup, and direct reading are no longer the main bottleneck in the current benchmark.
+
+The main difficulty emerges once the model must change the chart state and recover evidence from the updated view. In this process, budget exhaustion becomes one of the strongest warning signals. Gemini reaches the turn cap only rarely, whereas Qwen hit it much more often, especially under the direct interaction pathway. Unanswered runs are also heavily concentrated near this limit. This pattern suggests that many failures are not isolated action errors, but interaction traces that continue without reaching a decisive evidence state.
+
+Longer traces are consistently associated with worse outcomes. Long runs are usually not a sign of better exploration. More often, they mean that the model is still searching without getting to the key evidence. In other words, effective interaction is less about taking more actions and more about getting the chart into the right view.
+
+\subsection{Difficulty Level and Initial-State Effects}
+
+\begin{table}[t]
+	\centering
+	\caption{
+		Comparison between the default full-view state and the corresponding \texttt{\_show} state. Each row compares the same base item and question under the two initial states, and reports only accuracy.
+	}
+	\label{tab:show_effects}
+	\begin{tabular}{lcccc}
+		\toprule
+		Model    &  Pathway & Full Acc. & Show Acc. & $\Delta$Acc. \\
+		\midrule
+		Gemini   &  Tool       & 54.51     & 46.00     & -8.50      \\
+		Gemini   &  Mouse      & 47.61     & 38.18     & -9.43      \\
+		Qwen     &  Tool       & 49.90     & 41.77     & -8.13      \\
+		Qwen     &  Mouse      & 39.21     & 30.23     & -8.98      \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+Difficulty effects are clearly non-monotonic. While L1 questions are close to ceiling across all settings, L2 and L3 questions emerge as the main bottlenecks, and L4 questions remain consistently higher than both. This means that we do not observe a simple progression in which performance steadily decreases from L1 to L4. Instead, the middle levels are where interaction-driven analysis is currently most fragile.
+
+In the benchmark, L2 and L3 questions place more weight on value retrieval, extremum identification, local comparison, and window-based inspection after interaction. These tasks depend heavily on both correct interaction to reach the relevant chart state and precise reading of local chart details after the view has changed. By contrast, L4 questions include more claim verification, reversal detection, and multi-step derivation. This suggests that, once the model reaches the relevant chart state, some L4 questions become easier to complete, whereas many L2 and L3 questions still depend on precise local reading after interaction.
+
+Initial chart state also produces a clear and consistent effect. Table~\ref{tab:show_effects} compares a full-view state with a partially visible initial state under the same base item and question. Across all settings, the partially visible condition lowers final accuracy and increases interaction cost. The effect is especially pronounced under the direct interaction pathway, where the model must first recover missing context and then still perform precise low-level actions. This result highlights that current models are sensitive not only to which interaction should be executed, but also to how much relevant information is already visible before interaction begins.
+
+\subsection{Chart-Type Patterns and Representative Failures}
+
+\begin{table}[t]
+	\centering
+	\caption{
+		Chart-type accuracy averaged by model. Each model value averages its structured tool-calling pathway and mouse pathways.
+	}
+	\label{tab:chart_family_patterns}
+	\begin{tabular}{lccc}
+		\toprule
+		Chart Type  & Gemini         & Qwen             & Average        \\
+		\midrule 
+		Calendar    & 48.63          & \textbf{47.66}   & 48.15          \\
+		Parallel    & \textbf{52.50} & 44.22            & \textbf{48.36} \\
+		Line        & 50.56          & 43.19            & 46.88          \\
+		StackedArea & 49.38          & 41.62            & 45.50          \\
+		Scatter     & 48.75          & 42.31            & 45.53          \\
+		Bar         & 51.17          & 38.98            & 45.08          \\
+		Box         & 41.72          & 41.25            & 41.49          \\
+		Heatmap     & 39.26          & 36.33            & 37.80          \\
+		Treemap     & 39.06          & 30.47            & 34.77          \\
+		Sankey      & 38.67          & 31.64            & 35.16          \\
+		Pie         & 37.89          & 31.05            & 34.47          \\
+		Funnel      & 33.79          & 35.74            & 34.77          \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+Table~\ref{tab:chart_family_patterns} shows that chart-type effects remain stable across models and pathways. Calendar, Parallel, and Line charts form the strongest group overall, whereas Funnel, Pie, Sankey, and Treemap remain the weakest. This pattern suggests that some chart types are consistently easier or harder for current models under interactive evaluation.
+
+It is also important that this pattern does not align with a simple distinction between general-purpose and specialized charts. Calendar is a useful counterexample: despite belonging to the specialized family, it remains one of the stronger chart types. Chart difficulty depends less on whether a chart is general-purpose or specialized, and more on whether the post-interaction view remains easy to read and whether the needed chart details can be found without excessive search. This is also consistent with the results above, which show that many failures appear after the chart state has changed.
+
+Figure~\ref{fig:failure_cases} further illustrates three representative failure types.
+The first is budget exhaustion, where the interaction continues without reaching a final answer in time.
+The second is protocol or parsing error, including malformed outputs, invalid tool arguments, and other interface-level failures. 
+The third is interaction or state judgment error, where the model either fails to choose the needed interaction or continues reasoning on an unchanged or incorrect chart state. More cases and additional analysis are provided in the supplementary material.
+
+\section{Discussion and Conclusion}
+
+In this paper, we introduce InterChartQA, an execution-based benchmark and evaluation framework for interactive chart analysis. InterChartQA extends chart evaluation beyond static inputs by requiring models to interact with executable charts, track view changes, and answer questions grounded in updated chart states. Our results confirm that interaction-driven chart analysis poses challenges distinct from static chart understanding, and that current multimodal large language models still have substantial room for improvement in this direction. We hope InterChartQA provides a useful foundation for future research on building models capable of autonomous interactive data exploration.
+
+\vspace{1.2mm}\noindent\textbf{Interaction as a distinct evaluation target.} Our results show that current multimodal large language models already perform strongly when the required information is visible in the initial chart view, but become much less reliable once successful answering depends on interaction and subsequent reasoning over updated views. Current models are not failing simply because they cannot recognize charts; they are failing because they cannot yet use interaction to reach and read the right chart state reliably. This gap suggests that interaction-driven chart analysis constitutes a distinct evaluation target that cannot be addressed by improving static chart reading alone.
+
+\vspace{1.2mm}\noindent\textbf{Interaction understanding as a coordinated process.} The contrast between the structured tool-calling pathway and the direct interaction pathway further indicates that interaction understanding is not a single capability but a coordinated process involving action choice, chart-state reasoning, and spatial grounding. The larger performance drop under the direct interaction pathway suggests that precise spatial grounding remains a central bottleneck once action decisions must be tied to concrete chart locations. A model may identify the correct action to perform yet fail to execute it accurately on the rendered chart, indicating that action reasoning and spatial execution pose different challenges that merit separate evaluation.
+
+\vspace{1.2mm}\noindent\textbf{Implications for future model development.} These findings point to several directions for improving model capabilities on interactive chart analysis. First, future progress will likely require training signals that go beyond static chart reading, such as interaction-aware training data that exposes models to the relationship between actions and resulting view changes. Second, evaluation that considers only the initial chart state or the final answer may miss important failure modes; finer-grained assessment over intermediate chart states could help identify where in the interaction process models break down. Third, the spatial grounding gap revealed by the direct interaction pathway suggests that targeted support for grounding stability and coordinate-level execution deserves attention alongside higher-level action reasoning.
+
+\vspace{1.2mm}\noindent\textbf{Scope and design intent.} InterChartQA evaluates interaction-centered chart analysis under minimally guided settings. We use minimal prompts and avoid extra operational hints, because the benchmark is intended to test whether models can recognize when and how to interact under realistic conditions, not whether they can follow detailed step-by-step instructions. This choice reflects how people typically explore interactive visualizations in practice: they decide how to inspect the chart on their own rather than following prescribed procedures. Our main contribution is to establish an interaction-centered automated framework for data generation and evaluation; the benchmark is not intended as a human-versus-model comparison study.
+
+\vspace{1.2mm}\noindent\textbf{Limitations and future work.} InterChartQA has several limitations that point to future improvements. First, the current design space covers 12 chart types and 5 interaction actions, which represent common cases but do not exhaust the full range of chart forms and interaction techniques. Extending coverage to additional types and more complex interaction patterns is a natural next step. Second, the template-driven pipeline generates QA pairs programmatically, which ensures consistency but may not capture the full complexity of real-world analytical scenarios where interaction sequences are longer and more exploratory. Thus, expanding toward more open-ended, multi-step interaction chains would better reflect such settings. Third, beyond the single-chart scope, evaluating models in multi-view analytical environments and comparing minimally guided settings with more explicitly guided prompting regimes are also promising directions.
+
+% all charts are currently rendered with ECharts. Extending to multiple visualization libraries (e.g., D3.js, Vega-Lite, Plotly) would help assess whether model performance generalizes across different interaction implementations and visual feedback patterns. B
+
+% In this paper, we introduce InterChartQA, an execution-based benchmark and evaluation framework for interactive chart analysis. InterChartQA extends chart evaluation beyond static inputs by requiring models to interact with executable charts, track view changes, and answer questions grounded in updated chart states. Taken together, the benchmark and the evaluation results show that interaction-driven chart analysis should be treated as a distinct evaluation target, rather than as a minor extension of static chart understanding.
+
+% Our results show that current MLLMs already perform strongly when the required information is visible in the initial chart view, but become much less reliable once successful answering depends on interaction and subsequent access to the needed information from updated views. In other words, current models are not failing simply because they cannot recognize charts; they are failing because they cannot yet use interaction to reach and read the right state reliably.
+% This suggests that future progress on interactive chart analysis should not focus on static chart reading alone. It should focus more on helping models understand the meaning of different interaction actions, choose suitable actions under the current chart state and task goal, and obtain the needed information after interaction.
+% Possible directions include interaction-aware training data, supervision, or finer-grained evaluation over intermediate chart states, rather than focusing only on the initial state or on final answers alone. Correspondingly, more benchmarks should explicitly evaluate this interaction-centered process.
+
+% The contrast between the structured tool-calling pathway and the direct interaction pathway further indicates that interaction understanding is not a single capability, but a coordinated process involving action choice, chart-state reasoning, and spatial grounding. The larger drop under the direct interaction pathway suggests that precise grounding remains a central bottleneck once action decisions must be tied to concrete chart locations.
+% More broadly, this comparison shows that a successful interaction depends on whether the model can coordinate multiple abilities throughout the whole interaction process.
+% This implies that future MLLM research on interactive visualizations will need more targeted support for capabilities such as state tracking, grounding stability, and interaction-aware training or evaluation, rather than relying on stronger general multimodal reasoning alone.
+% It also points to more targeted forms of supervision, such as intermediate-state annotations, grounding-aware traces, or training objectives that reward correct action selection and correct information use under changing chart states.
+
+% Last but not least, it is important to interpret InterChartQA within its intended scope. Our goal is to evaluate interaction-centered chart analysis under minimally guided settings. A key design choice in InterChartQA is that we use minimal prompts and avoid extra operational hints, because the benchmark is intended to test whether models can understand when and how to interact under realistic chart-reading conditions, rather than whether they can follow detailed instructions that are not central to interaction itself. This choice is also consistent with how people usually explore interactive visualizations in practice: they are rarely given step-by-step instructions, and instead need to decide how to inspect the chart on their own. By contrast, a setting with much more explicit guidance would place greater weight on instruction following and textual reasoning, and would therefore evaluate a different capability mix. At the same time, our main contribution is to establish an interaction-centered automated framework for data generation and evaluation, and to use it to instantiate a controlled set of executable interactive chart cases for probing model capability. It is not intended as a human-versus-model comparison study on interactive visualizations.
+
+% Several extensions follow naturally from this foundation, including testing on multi-view analytical environments and more complex combined charts with interactions, as well as constructing finer-grained annotated datasets that can support practical model improvement. It would also be valuable to compare minimally guided settings with more explicitly guided prompting regimes, so that interaction understanding can be separated more clearly from instruction following. These directions would extend the benchmark’s coverage and depth, while continuing to build on the current contribution.
+
+%% if specified like this the section will be omitted in review mode
+% \acknowledgments{%
+%   Anonymous submission
+% }
+
+\bibliographystyle{abbrv-doi-hyperref}
+%\bibliographystyle{abbrv-doi-hyperref-narrow}
+%\bibliographystyle{abbrv-doi}
+%\bibliographystyle{abbrv-doi-narrow}
+
+\bibliography{newref}
+
+\appendix % You can use the `hideappendix` class option to skip everything after \appendix
+\crefalias{section}{appendix} % this is to make sure that cleverref switches to referring to Appx. X from here on
+
+\end{document}

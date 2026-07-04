@@ -1,0 +1,385 @@
+
+\documentclass[sigconf]{acmart}
+% \usepackage{enumitem}  % 用于自定义列表环境
+\usepackage{enumitem}
+\usepackage{xcolor}
+% \setlength{\parindent}{2em} 
+%%
+%% \BibTeX command to typeset BibTeX logo in the docs
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
+
+%% Rights management information.  This information is sent to you
+%% when you complete the rights form.  These commands have SAMPLE
+%% values in them; it is your responsibility as an author to replace
+%% the commands and values with those provided to you when you
+%% complete the rights form.
+
+
+
+% 重要 重要 版权与会议信息：
+\setcopyright{acmlicensed}
+\copyrightyear{2025}
+\acmYear{2025}
+\setcopyright{cc}
+\setcctype{by}
+\acmConference[VINCI 2025]{Proceedings of the 18th International Symposium on Visual Information Communication and Interaction}{December 01--03, 2025}{Linz, Austria}
+\acmBooktitle{Proceedings of the 18th International Symposium on Visual Information Communication and Interaction (VINCI 2025), December 01--03, 2025, Linz, Austria}
+\acmPrice{}
+\acmDOI{10.1145/3769534.3769587}
+\acmISBN{979-8-4007-1845-8/25/12}
+
+% 修改review的格式，用红色标注
+% xcolor 已在上面加载，无需重复
+
+% \newcommand{\REVISE}[1]{\textcolor{red}{#1}}
+\newcommand{\REVISE}[1]{#1}
+
+\begin{document}
+
+%%
+%% The "title" command has an optional parameter,
+%% allowing the author to define a "short title" to be used in page headers.
+\title{FairAttrCNN: Enhancing CNN Debiasing through Interactive Visual Analytics of Multiple Sensitive Attributes}
+
+
+\begin{abstract}
+  In recent years, image recognition tasks have demonstrated significant success across various applications. However, fairness issues often arise in the decision-making process, leading to biased outcomes against groups characterized by certain attributes. \REVISE{While existing fairness-aware visual analytics frameworks have advanced in detecting single-attribute biases, insufficient attention has been devoted to multiple sensitive attributes bias analysis and debiasing in CNN models.} To address this gap, we propose a visual analytics framework, \textbf{FairAttrCNN}, designed to help users explore the correlations among multiple sensitive attributes in CNN models, with a focus on identifying which attributes are more susceptible to the influence of sensitive attributes and may lead to unfair decisions. Integrated into CNN debiasing workflows, it allows users to interactively optimize fairness and analyze attribute-sensitivity relationships. We evaluated our framework through case studies and user feedback to illustrate its effectiveness in supporting fairness-aware decision analysis in image-based models.
+\end{abstract}
+
+
+\begin{CCSXML}
+<ccs2012>
+ <concept>
+  <concept_id>10003120.10003121.10003122</concept_id>
+  <concept_desc>Human-centered computing~Visualization</concept_desc>
+  <concept_significance>500</concept_significance>
+ </concept>
+ <concept>
+  <concept_id>10003120.10003121.10011762</concept_id>
+  <concept_desc>Visualization~Visualization application domains</concept_desc>
+  <concept_significance>300</concept_significance>
+ </concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Human-centered computing~Visualization}
+\ccsdesc[300]{Visualization application domains~Visual analytics}
+
+\keywords{Visual analytics, machine learning fairness, CNN, multiple sensitive attributes}
+
+
+\begin{teaserfigure}
+  \centering
+  \includegraphics[width=0.95\textwidth]{picture/overview.png}
+  \Description{Overview of the FairAttrCNN visual analytics framework.}
+  \caption{
+  \textbf{FairAttrCNN} is a multi-view visual analytics framework designed to optimize fairness in CNN models with multiple sensitive attributes. (A) The Attribute Correlation Exploration Module combines the Experiment Profile (\( \mathrm{A_{1}} \)) and Attribute Correlation Explorer (\( \mathrm{A_{2}} \)), enabling users to examine metadata and explore relationships between sensitive and protected attributes for bias identification. (B) The Dynamic Bias Mitigation Module integrates the Data Balance Adjuster (\( \mathrm{B_{1}} \)) and Correlation Monitor (\( \mathrm{B_{2}} \)), supporting interactive adjustment of real and generated data distributions, real-time evaluation of fairness and correlation metrics, and enabling users to iteratively refine performance in response to observed bias patterns. (C) The Multi-Level Fairness Evaluation Module features Macro Fairness Analysis (\( \mathrm{C_{1}} \)) and Micro Model explainability (\( \mathrm{C_{2}} \)), providing both high-level visualization of data distributions and detailed explanations of model decisions with Grad-CAM. Collectively, these modules facilitate dynamic, efficient, and explainable fairness optimization in deep learning frameworks.
+  }
+  \label{fig:one}
+\end{teaserfigure}
+
+
+% 重要
+% \received{20 February 2007}
+% \received[revised]{12 March 2009}
+% \received[accepted]{5 June 2009}
+
+
+%%
+%% This command processes the author and affiliation and title
+%% information and builds the first part of the formatted document.
+\maketitle
+
+\section{Introduction}
+
+The increasing deployment of machine learning (ML) models in critical fields such as healthcare, finance, and criminal justice has intensified scrutiny over algorithmic fairness~\cite{chinta2024ai, mavrogiorgos2024bias, berk2021fairness, mustard2001racial}. ML systems are susceptible to perpetuating or amplifying societal biases embedded in data or learned by algorithms~\cite{mavrogiorgos2024bias}, leading to real-world harms. For example, automated recruitment systems have exhibited gender discrimination, with female applicants experiencing significantly lower selection rates~\cite{dastin2022amazon}. These failures highlight the ethical imperative to systematically evaluate and mitigate bias in ML-driven decision making.
+
+Fairness challenges are especially pronounced in image-based models, where multiple visual attributes, including skin tone, gender, accessories, and facial expressions, interact in complex ways~\cite{DBLP:journals/csur/ParragaMOGKMMSB25, torfason2017face}. Attributes may correlate with protected characteristics, causing models to inadvertently encode or reinforce biases. Unlike conventional tabular data, where each attribute is explicit and easily separable, image-based models must contend with attributes that are intrinsically entangled in high-dimensional feature spaces, complicating both assessment and mitigation.
+
+
+\REVISE{Visual analytics has emerged as a promising approach for addressing complex fairness challenges in image-based models, enabling interactive and interpretable examination of model decisions. Human-in-the-loop strategies are crucial in this context: domain experts contribute knowledge that is unavailable to optimizers, including attribute semantics, data-collection artifacts, and acceptable fairness targets, and they interpret explainability signals to separate spurious correlations from task-relevant cues. Tools such as VisCuit~\cite{DBLP:conf/cvpr/0007HWC22}, FairVis~\cite{DBLP:conf/ieeevast/CabreraEHKMC19}, FairSight~\cite{DBLP:journals/tvcg/AhnL20}, and IBM AI Fairness 360~\cite{IBMbellamy2019aif360} exemplify frameworks that integrate human insights with algorithmic evaluation. Despite recent advances, most existing tools are limited in their ability to support dynamic, multi-attribute analysis or to provide actionable pathways for debiasing~\cite{DBLP:conf/icde/CachelRH22, DBLP:conf/cvpr/RamaswamyKR21, hu2024enhancing}. }
+
+
+To bridge this gap, we introduce \textbf{FairAttrCNN}, a visual analytics framework designed for multiple sensitive attributes fairness analysis in image-based deep learning, instantiated for the CelebA dataset~\cite{DBLP:conf/iccv/LiuLWT15}. \textbf{FairAttrCNN} integrates correlation-aware bias diagnosis, interactive debiasing workflows, and transparent model explanation techniques. Our main contributions are as follows:
+
+
+\begin{itemize}[left=0pt, itemsep=0pt, parsep=0pt, topsep=0pt]
+  \item \textbf{A comprehensive visual analytics framework} that addresses multi-attribute group fairness in image-based deep learning, enabling correlation-aware bias detection and fine-grained mitigation, \REVISE{and explicitly encodes expert knowledge to support bias hypothesis formulation, fairness target setting.}
+  \item \textbf{An interactive system} that integrates debiasing algorithms with dynamic, interpretable visualizations and explainability such as Grad-CAM, supports user-driven iterative fairness optimization and multi-level model explainability.
+  % \REVISE{and surfaces the fairness–utility trade-off.}
+  \item \textbf{Empirical validation} \REVISE{via case studies on the CelebA, illustrating how a domain expert identified biases, enhanced the training data,} showing effectiveness, usability, and real-world applicability.
+\end{itemize}
+
+
+
+\section{Related Work}
+
+\subsection{Fairness Evaluation in CNNs}
+CNNs have demonstrated impressive performance in image classification and recognition tasks~\cite{DBLP:journals/air/ZhaoWZHDP24}. However, their opaque, ``black-box'' decision-making processes~\cite{DBLP:conf/icis/WannerHHJZ20,DBLP:journals/csur/IbrahimS23} raise serious concerns when deployed in settings involving sensitive attributes such as gender, race, or age. This has motivated extensive research into fairness evaluation, which is typically divided into group fairness and individual fairness~\cite{DBLP:journals/csur/ParragaMOGKMMSB25,DBLP:journals/csur/MehrabiMSLG21}. Group fairness focuses on ensuring equitable predictive outcomes across demographic groups, with metrics such as statistical parity and equalized odds~\cite{DBLP:conf/innovations/DworkHPRZ12}. In contrast, individual fairness requires similar predictions for similar individuals, regardless of group membership~\cite{DBLP:journals/csur/MehrabiMSLG21}. 
+
+Despite the prevalence of quantitative metrics, traditional approaches often fall short of revealing nuanced or intersectional biases. Visualization techniques such as Grad-CAM~\cite{DBLP:conf/iccv/SelvarajuCDVPB17} have been developed to highlight model attention and help uncover group-level disparities. At the same time, the challenge of multi-attribute fairness, where combinations of sensitive attributes such as ``Black women'' introduce new forms of bias~\cite{DBLP:conf/fat/BuolamwiniG18}, has received growing attention. Approaches such as adversarial training and data reweighting~\cite{DBLP:conf/nips/LahotiBCLPT0C20} represent recent attempts to mitigate these biases. 
+
+\begin{figure*}[ht!]
+    \centering
+    \includegraphics[width=0.98\textwidth]{picture/flow.png}
+    \caption{The \textbf{FairAttrCNN} framework comprises three stages: (A) preliminary exploration and analysis, (B) bias mitigation tuning via real-time rebalancing, and (C) effectiveness evaluation. Stage (A) involves dataset and model selection and sensitive attribute analysis. In stage (B), users interactively optimize debiasing using tools such as the CellAdjustment and DistributionSlider. Stage (C) supports ample fairness assessment at both macro and micro levels, enabling iterative refinement and stable model performance.\REVISE{The human analyst, illustrated by the icon, plays an active and interactive role throughout the process. Note that the views shown in bold indicate interactive modules where user decisions directly influence debiasing outcomes.}}
+    \label{fig:flow}
+\end{figure*}
+
+\subsection{Explainable CNNs and Bias Mitigation}
+The complexity and opacity of CNNs have heightened the demand for explainability methods, which are essential for transparency and fairness assessments~\cite{DBLP:journals/csur/IbrahimS23}. Explainability approaches can be broadly categorized into intrinsic methods, which incorporate interpretable components such as attention mechanisms to provide direct insights into model reasoning~\cite{DBLP:conf/iclr/LinsleySES19}, and post-hoc techniques, including backpropagation-based attribution and model-agnostic approaches such as LIME~\cite{DBLP:conf/kdd/Ribeiro0G16}, which generate explanations without altering the original architecture. These methods support local interpretations of individual predictions and global analyses of overall model behavior~\cite{DBLP:journals/csur/MehrabiMSLG21}. \REVISE{
+Recent progress in zero-shot referring image segmentation has leveraged global-local context features to capture fine-grained visual and textual representations for dense prediction tasks~\cite{wang2025iterprime}.}
+
+% \bibitem{wang2025iterprime} Wang, Ni, Liu, Yuan, Tang. IteRPrimE: Zero-shot Referring Image Segmentation with Iterative Grad-CAM Refinement and Primary Word Emphasis. AAAI 2025.
+
+At the same time, a variety of bias mitigation strategies have been developed to address fairness concerns in CNNs. At the dataset level, distributional adjustments or generative models can help counteract imbalances~\cite{DBLP:conf/iccv/ChenJ21}. Within model training, interventions such as adversarial learning~\cite{zhang2018mitigating} and causal reasoning~\cite{byun2025mitigating} aim to reduce bias within the learning process itself, while multi-phase training protocols and inference-time corrections further expand the toolkit~\cite{DBLP:journals/csur/IbrahimS23}. \REVISE{Beyond intra-domain mitigation, recent advances in deepfake detection demonstrate that disentangling demographic and domain-agnostic features, combined with fairness-oriented objectives over flatter loss landscapes, improves fairness generalization across unseen domains~\cite{lin2024fairnessgeneralization}.} Despite these advances, most existing methods lack dynamic, user-driven mechanisms for fairness optimization and struggle with high-dimensional, image-based data, limiting their applicability in complex vision tasks.
+% \bibitem{lin2024fairnessgeneralization} Lin, He, Ju, Wang, Ding, Hu. Preserving Fairness Generalization in Deepfake Detection. CVPR.
+
+
+% \bibitem{wang2025iterprime} Wang, Ni, Liu, Yuan, Tang. IteRPrimE: Zero-shot Referring Image Segmentation with Iterative Grad-CAM Refinement and Primary Word Emphasis. AAAI 2025.
+% \bibitem{lin2024fairnessgeneralization} Lin, He, Ju, Wang, Ding, Hu. Preserving Fairness Generalization in Deepfake Detection. CVPR.
+
+
+
+
+
+
+\subsection{Visual Analytics for Group Fairness}
+Visual analytics has emerged as a powerful paradigm for fairness evaluation, offering intuitive, interactive interfaces to support bias identification and mitigation in machine learning models. Systems such as FairVis~\cite{DBLP:conf/ieeevast/CabreraEHKMC19} and FairSight~\cite{DBLP:journals/tvcg/AhnL20} utilize coordinated views and sensitivity analyses to facilitate the discovery of intersectional biases and guide fairness optimization. Tools like Fairness Indicators~\cite{DBLP:conf/fat/GoyalRHSU22} and the What-If Tool~\cite{DBLP:journals/tvcg/WexlerPBWVW20} enable real-time monitoring and dynamic adjustment of fairness during model development, supporting iterative human-in-the-loop analysis. These approaches demonstrate the effectiveness of visual analytics in making complex fairness concepts more accessible and actionable for both researchers and practitioners.
+
+ 
+Nevertheless, current visual analytic systems are often limited in their ability to handle complex, multi-attribute interactions and lack comprehensive support for interactive, real-time debiasing in image-based scenarios. Furthermore, there is a growing need for frameworks that integrate advanced visualization techniques with domain-specific requirements, particularly in computer vision. Addressing these gaps, our proposed framework enables dynamic exploration of attribute relationships, supports real-time fairness assessment, and facilitates targeted bias mitigation for CNN models.
+
+
+
+
+
+
+\section{Design Overview}
+
+We present an interactive visual analytics framework designed to address group fairness challenges in machine learning models, particularly for multi-sensitive attribute scenarios. The framework’s design is grounded in a systematic analysis of user needs, literature review, and interviews, which revealed key challenges: difficulty in assessing fairness involving multiple attributes, lack of clarity and interactivity in debiasing optimization, and insufficient integration of interpretability methods. To tackle these challenges, we distill three core design requirements:
+
+\REVISE{
+\textbf{R1: Analyzing Complex Inter-attribute Relationships.} Sensitive attributes like gender, age, and skin color often interact, leading to complex bias patterns. Liu et al.~\cite{liu2023facial} show that attribute classification tasks exhibit strong inter-attribute correlations. Cachel et al.~\cite{DBLP:conf/icde/CachelRH22} demonstrate that fairness must consider multiple protected attributes and their intersections, as ignoring them can result in biased outcomes. Building on these insights, our framework supports visual and quantitative exploration of attribute correlations, post-training bias assessment, and evaluation of debiasing strategies.}
+
+\REVISE{
+\textbf{R2: Interactive Optimization of Debiasing Processes and Effects.} Achieving fairness requires balancing performance and bias mitigation, yet most existing tools lack real-time, user-friendly interfaces. Inspired by prior visual analytics systems such as FairSight~\cite{DBLP:journals/tvcg/AhnL20} and FairVis~\cite{DBLP:conf/ieeevast/CabreraEHKMC19}, we introduce an interactive visualization tool that enables users to dynamically adjust debiasing strategies, and immediately observe their impacts, addressing issues of computational inefficiency and limited sample authenticity. }
+
+\REVISE{
+\textbf{R3: Building a Multi-dimensional Fairness Evaluation System.} Traditional fairness metrics often overlook subtle biases and provide limited explainability. Recent studies highlight the need for multi-dimensional evaluation frameworks that jointly capture fairness-performance trade-offs across multi-sensitive attributes~\cite{wang2025redefining}, and for systematic indicators that expose demographic and representational disparities in vision models~\cite{DBLP:conf/fat/GoyalRHSU22}. Motivated by these works, our framework integrates macro-level fairness metrics with micro-level explainability techniques, enabling users to visualize predictions in embedding space and conduct fine-grained analysis.}
+% By combining these requirements, the framework supports a holistic fairness analysis that unifies multi-attribute exploration, interactive optimization, and multi-level evaluation.
+% }
+
+\section{Visual Analytics Framework}
+\label{sec:interviews}
+
+
+
+The \textbf{FairAttrCNN} framework is designed to guide users through a structured, user-centered workflow for fairness analysis in CNNs (Figure~\ref{fig:flow}). The system comprises three core modules, each supporting a distinct phase of the fairness optimization process: attribute correlation exploration, dynamic bias mitigation, and multi-level fairness evaluation. This modular structure ensures an integrated workflow, where visual analytics and interactive adjustments are closely coupled to support efficient fairness optimization.
+
+\subsection{Background of Debiasing and Explainability}
+
+
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.45\textwidth]{picture/train.png}
+    \caption{Training process of \textbf{FairAttrCNN}. The core concept is to manipulate the latent space of GANs, modifying the sensitive attribute while keeping the target attribute unchanged. The process includes generating datasets, data preprocessing, model training, and fairness evaluation.}
+    \label{fig:train}
+\end{figure}
+
+To enable effective debiasing, our framework extends the GAN-based data augmentation approach of Ramaswamy et al.~\cite{DBLP:conf/cvpr/RamaswamyKR21} (Figure~\ref{fig:train}). Specifically, the sensitive attribute is manipulated in the GAN latent space while preserving the target attribute, thereby generating data samples that decouple the two. The transformation is defined as:
+\[
+z' = z - 2 \left( \frac{w_g^T z + b_g}{1 - (w_g^T w_g)^2} \right) (w_g - (w_g^T w_g) w_t)
+\]
+where $z$ is the latent vector, $w_g$ and $w_t$ are the weight vectors for the sensitive and target attribute classifiers, respectively, and $b_g$ is the bias term. This enables the framework to augment training data for improved fairness while maintaining classification utility.
+
+For model interpretability, we employ Grad-CAM~\cite{DBLP:conf/iccv/SelvarajuCDVPB17} to visualize the salient image regions influencing model decisions. Grad-CAM computes class-discriminative localization maps as follows:
+\[
+L_{\text{Grad-CAM}} = \text{ReLU} \left( \sum_k \alpha_k^c A_k^k \right)
+\]
+where $A_k^k$ is the $k$-th feature map and $\alpha_k^c$ is the class-specific gradient-weighted average. This technique supports transparent evaluation of whether model predictions rely on fair and relevant features.
+
+% \subsection{Sensitive Attribute Analysis}
+
+% The analysis begins with the \textbf{Attribute Correlation Exploration Module} (Figure~\ref{fig:one}A), which enables users to identify and evaluate sensitive attributes and their relationships to other features. By the \textit{Experiment Profile View} (Figure~\ref{fig:one}A\textsubscript{1}) and \textit{Attribute Correlation View} (Figure~\ref{fig:one}A\textsubscript{2}), users can explore experimental context, dataset composition, and model configurations, as well as statistical correlations and fairness measures. Interactive tables and visualizations highlight key metrics, supporting intuitive detection of imbalanced or potentially biased attribute pairings.
+
+
+
+\subsection{Sensitive Attribute Analysis}
+
+The analysis process starts with the \textbf{Attribute Correlation Exploration Module} (Figure~\ref{fig:one}A), which provides a foundation for identifying sensitive attributes and examining their relationships with other features. Through the \textit{Experiment Profile View} (Figure~\ref{fig:one}A\textsubscript{1}), users can quickly grasp the experimental context, including dataset composition, model configurations, and key parameters. The \textit{Attribute Correlation View} (Figure~\ref{fig:one}A\textsubscript{2}) further enables interactive exploration of statistical correlations and fairness measures between multiple sensitive attributes. 
+
+Users select protected attribute of interest, view dynamic tables and visualizations highlighting key metrics such as correlation coefficients and fairness indicators, and interact with pop-ups and charts that reveal distribution relationships.This module supports intuitive detection of imbalanced or biased attribute pairings, laying the groundwork for effective and targeted debiasing strategies in subsequent analysis stages.
+
+
+
+\subsection{Bias Mitigation via Interactive Adjustment}
+
+Upon identifying the select attribute within the dataset, users transition to the \textbf{Dynamic Bias Mitigation Module} (Figure~\ref{fig:one}B), which is specifically designed to facilitate interactive and iterative debiasing. This module serves as an essential intermediary within the overall workflow, bridging the gap between bias discovery and fairness evaluation. By leveraging this module, users can actively explore and adjust data distributions to mitigate bias, while continuously balancing the performance of fairness and predictive accuracy.
+
+Central to this module are two interconnected views: the \textit{Data Balance Adjuster View} (Figure~\ref{fig:one}B\textsubscript{1}) and the \textit{Correlation Monitor View} (Figure~\ref{fig:one}B\textsubscript{2}). The \textit{Data Balance Adjuster View} provides an intuitive interface for modifying the ratios between real and generated data across different subgroups, utilizing dual confusion matrices to visually communicate distributional changes. Real-time adjustment sliders including the CellAdjustment and the DistributionSlider empower users to incrementally alter the data composition, while immediate visual updates offer transparent feedback on the effect of each intervention.In parallel, the \textit{Correlation Monitor View} presents radar charts and bar graphs that capture the evolving relationships among sensitive attribute and protected attribute, enabling users to assess the impact of distributional modifications on attribute correlations and fairness metrics.
+
+With the integration of two views, the module supports a closed-loop optimization process in which users can iteratively refine debiasing strategies based on empirical observation. Ultimately, the \textbf{Dynamic Bias Mitigation Module} (Figure~\ref{fig:one}B) empowers users to achieve a practical balance between mitigating bias and preserving model performance.
+
+\subsection{Evaluation and Explainability}
+
+The final stage, the \textbf{Multi-Level Fairness Evaluation Module} (Figure~\ref{fig:one}C), supports detailed assessment at both the dataset and model level. The \textit{Macro Fairness Analysis View} (Figure~\ref{fig:one}C\textsubscript{1}) employs dimensionality reduction techniques to visualize group distributions and fairness indicators after debiasing. The \textit{Micro Model explainability View} (Figure~\ref{fig:one}C\textsubscript{2}) leverages Grad-CAM to present heatmaps and saliency overlays, enabling users to interpret the decision logic for individual samples. This multi-level evaluation ensures that fairness improvements are robust, lucid, and aligned with model performance objectives.
+
+
+
+These modules and views collectively empower the \textbf{FairAttrCNN} framework to support a systematic, interactive, and explainable workflow for fairness analysis and optimization in deep learning models.
+
+
+
+\section{Evaluation}
+
+This section provides a in-depth evaluation of the proposed visual analytics framework for group fairness analysis in deep learning models. The evaluation is structured into two main aspects: case study analysis, which demonstrates the system's practical workflow and user support, and user feedback and insights, which assesses usability and domain relevance via feedback from experienced practitioners. This dual approach ensures both the effectiveness and the applicability of the framework in real-world scenarios.
+
+\subsection{System Implementation}
+
+
+\begin{figure*}[ht!]
+    \centering
+    \includegraphics[width=0.98\textwidth]{picture/case1.png}
+    \caption{Key steps of Case Study 1: (1) The user selects ``Gender (Male)'' as the protected attribute and identifies notable correlations, including a high \textbf{Phi coefficient} (0.418) between ``Eyeglasses'' and gender, indicating bias. (2) By adjusting the ratio of generated to real data, the user improves fairness while maintaining model accuracy. (3) Evaluation via dimensionality reduction shows a minor accuracy decline (2.4\%) and significant fairness improvements. (4) Analysis of representative samples using Grad-CAM and integrated gradients confirms that model focuses on relevant features rather than other sensitive attributes.}
+    \label{fig:case1}
+\end{figure*}
+
+
+\REVISE{We implement a visual analytics system to systematically address group fairness challenges in computer vision models. The architecture comprises a Vue.js frontend that employs ECharts and D3.js \cite{DBLP:journals/tvcg/BostockOH11} for interactive and interpretable analysis, and a Python Flask backend for data preprocessing, model training, and result serving. Models are built in PyTorch with a ResNet-50 backbone \cite{DBLP:journals/corr/HeZRS15} selected for strong performance and training efficiency in visual tasks. All experiments are conducted on an NVIDIA GeForce RTX 3090 GPU, which enables efficient large-scale experimentation. After inference, model outputs are serialized as JSON and streamed to the frontend to support real-time exploration of fairness metrics, attribute correlations, and debiasing outcomes.}
+
+\REVISE{
+For the case study on the CelebA dataset \cite{DBLP:conf/iccv/LiuLWT15}, which contains more than 200,000 face images with forty binary attributes, we resize each image to 224 by 224 pixels, convert it to a tensor, and apply standard normalization. We normalize the red, green, and blue channels using ImageNet statistics with channel means of 0.485, 0.456, and 0.406 and channel standard deviations of 0.229, 0.224, and 0.225, and the dataset is partitioned into 80\% for training and 20\% for testing. Training uses the Adam optimizer with learning rate 0.0001 and weight decay set to zero for a total of 10 epochs. We set dropout to 0.5, the mini-batch size to 32 for training and 64 for validation, the number of data loading workers to zero, and the logging frequency to every 100 iterations.}
+
+
+
+
+
+
+
+
+
+
+\subsection{Case 1: Attribute Correlation and Debiasing}
+
+
+
+
+\REVISE{To evaluate the framework with target users, an in situ case study was conducted by a domain expert (Figure~\ref{fig:case1}). This session followed a think-aloud protocol with screen and a semi-structured exit interview. After a concise introduction to core functionalities, the expert completed a guided sequence of visual analytics tasks. Interactions, observations, and feedback were documented for subsequent analysis.}
+
+
+\textbf{Task 1: Exploring attribute correlations and identifying debiasing targets.}
+The expert began in the \textbf{Attribute Correlation Exploration Module} to screen attributes that could introduce fairness risks. Using the \textit{Experiment Profile View}, the expert confirmed the context, such as CelebA dataset, ResNet-50 backbone, and training parameters, establishing a shared understanding of the analysis setting. With ``Gender (Male)'' selected as the protected attribute, the expert examined correlation metrics, such as the Phi coefficient and odds ratio (OR) between gender and other facial attributes. As expected, attributes such as ``Lipstick,'' ``Makeup,'' and ``Beard'' exhibited strong correlations with gender and were deemed contextually reasonable. In contrast, ``Eyeglasses'' showed an unusually high Phi coefficient (0.418), second only to ``Beard,'' which raised concern. \REVISE{Group fairness indicators for ``Eyeglasses,'' including difference in equal opportunity (DEO) and bias amplification (BA)}, further suggested model-level bias. Hovering on the ``Eyeglasses'' row surfaced the matrix between gender and eyeglasses, revealing a pronounced imbalance: samples labeled ``Male with Eyeglasses'' far outnumbered those labeled ``Female with Eyeglasses.'' The expert concluded that ``Eyeglasses'' likely entangles data imbalance with learned bias and prioritized it as the debiasing target.
+
+\textbf{Task 2: Dynamic optimization of debiasing by interactive data adjustment.}
+The expert moved to the \textbf{Dynamic Bias Mitigation Module} to tune the data composition for ``Eyeglasses.'' The \textit{Data Balance Adjuster} and dataset matrix views contrasted initial distributions of real versus generated samples, with generated data showing a more balanced combination of gender and eyeglasses than the real data. By interactively adjusting the ratio of real to generated data, the expert monitored live changes in correlation metrics. Increasing the proportion of generated samples consistently reduced the association between gender and eyeglasses, whereas the inverse setting preserved it. Three representative ratios were selected for comparative training: (1) low real and high generated, which maximized fairness but substantially reduced accuracy; (2) high real and low generated, which left fairness largely unimproved; and (3) a balanced mix, which achieved noticeable fairness gains with minimal accuracy loss. Based on these outcomes, the balanced configuration was chosen for final retraining because it provided the best trade-off between fairness and utility.
+
+\textbf{Task 3: Multi-level evaluation of model fairness and explainability.}
+After retraining, the expert opened the \textbf{Multi-Level Fairness Evaluation Module}. In the \textit{Macro Fairness Analysis View}, PCA, t-SNE, and UMAP projections were compared; PCA yielded the clearest class boundaries. Filtering by prediction and ground truth showed improved group alignment after mitigation. Aggregate statistics indicated a small accuracy decrease (approximately 2.4\%) alongside marked improvements in DEO and BA. For micro-level assessment, the expert examined representative cases, namely ``Male with Eyeglasses'' and ``Female without Eyeglasses'', using Grad-CAM and Integrated Gradients. For the former, Grad-CAM highlighted the eyeglasses region. For the latter, attention concentrated around the eye region without spurious focus on gender-related areas. These insights indicate \textbf{FairAttrCNN} utilize both discriminative local cues and holistic context. A similarity-based retrieval panel showed that nearest neighbors shared both labels and visual cues, for example ``male with eyeglasses'' and ``female without eyeglasses'', suggesting consistent decision bases in the embedding space. Together, these findings support that the debiased model attends to task-relevant features rather than the protected attribute.
+
+
+\REVISE{\textbf{User feedback and insights.}
+The expert reported that \textit{``The progressive workflow reduced cognitive load during bias diagnosis and mitigation''}. The \textbf{Attribute Correlation exploration Module} accelerated target selection by exposing actionable associations. The \textit{Data Balance Adjuster view} clarified the fairness–utility trade-off and supported rapid iteration. The \textbf{Multi-level Fairness Evaluation Module} combined population-level metrics with instance-level explanations, which was essential for validating that improvements in fairness were not driven by spurious cues. The expert suggested adding inline guidance on interpreting OR and presets for common subgroup-balancing strategies to reduce the learning curve. The expert remarked: \textit{``The Attribute Correlation Explorer View makes it apparent where to start; I did not have to guess which attribute to treat.''} Regarding the mitigation loop, the expert noted: \textit{``The live metric trends made the trade-offs explicit; I could see when adding more generated samples stopped helping.''} On the evaluation tools, the expert commented: \textit{``Seeing Grad-CAM and Integrated Gradients align with the eyeglasses region increased my confidence that fairness gains were not accidental.''} Concerning usability, the expert added: \textit{``Tooltips for DEO and OR, combined with preset ratio options, would facilitate quicker convergence to a reasonable configuration.''}}
+
+
+
+\begin{figure*}[ht!]
+    \centering
+    \includegraphics[width=0.98\textwidth]{picture/last.png}
+    \caption{Overview of Case 2. The iterative optimization workflow in FairAttrCNN. (1) The user examines attribute correlations to choose ``Eyeglasses'' as an exploratory attribute, following the designation of ``Gender (Male)'' as the protected attribute. (2) Using iterative bias mitigation and evaluation, the user interactively tunes the balance of real and generated data, incorporating model performance, fairness metrics, and explainability tools to refine the debiasing strategy and reach an optimal balance between fairness and accuracy.}
+    
+    \label{fig:case2}
+\end{figure*}
+
+
+\subsection{Case 2: Iterative Fairness Optimization}
+
+\REVISE{This case study demonstrates how \textbf{FairAttrCNN} supports iterative fairness optimization with ``Eyeglasses'' as the exploratory attribute and ``Gender (Male)'' as the protected group (Figure~\ref{fig:case2}). Using the \textbf{Attribute Correlation Exploration Module}, the expert confirmed a strong dependence between gender and eyeglasses. }
+
+\REVISE{Unlike the linear progression observed in Case~1, this scenario followed a cyclical human-in-the-loop workflow explicitly designed to integrate expert judgment at three touchpoints. At the first touchpoint, during hypothesis formation, experts leveraged contextual domain knowledge together with the \textbf{Attribute Correlation Exploration Module} to determine whether detected correlations reflected plausible causal dependencies or spurious artifacts. At the second stage, during intervention, the expert employed the \textbf{Dynamic Bias Mitigation Module} to iteratively tune the balance of real and generated ``Eyeglasses'' samples across subgroups. Rather than relying solely on automatic rebalancing, expert control ensured that interventions remained interpretable and sensitive to the inherent balance between fairness and accuracy, and real-time visual feedback exposed the immediate effect of adjustments on group fairness metrics and overall accuracy, making the trade-offs explicit. At the third phrase, during validation and iterative refinement, the expert turned to the \textbf{Multi-Level Fairness Evaluation Module}, where fairness metrics were juxtaposed with attribution maps such as Grad-CAM and Integrated Gradients. Expert judgment was critical for confirming that fairness improvements were genuinely attributable to ``Eyeglasses'' rather than residual gender leakage, and for deciding whether further revisions to the mitigation strategy were necessary.}
+
+\REVISE{The iterative cycles revealed both challenges and opportunities in pursuing fairness. Initial configurations that heavily emphasized generated data achieved subgroup parity but substantially degraded overall accuracy. Through repeated adjustments, the expert identified an empirically optimized mixture of real and synthetic samples that preserved accuracy while also satisfying fairness criteria. Specifically, after several iterations, the model recovered to an accuracy of 80.1\%, with only a 0.8\% reduction compared to the original configuration, while fairness metrics improved substantially, with DEO reaching 0.69, slightly above the target of 0.66, and BA dropping to -0.03, meeting or exceeding predefined targets. Supporting tools such as projection plots, and attribution overlays provided cumulative evidence across iterations. These coordinated views enabled the expert to detect subtle distributional patterns, evaluate when improvements plateaued, and ultimately converge on a stable and interpretable solution that balanced fairness with predictive performance.}
+
+\REVISE{
+\textbf{User feedback and insights.}  
+The expert highlighted that ``The cyclical workflow gave me a sense of control, I could decide when it was worth trying another adjustment and when to stop iterating.'' Regarding hypothesis formation, the expert noted that ``The correlation explorer made it obvious which subgroups were missing, it saved me from speculating and gave me a concrete starting point.'' During intervention, the expert remarked that ``Adjusting subgroup ratios felt like a tangible way to test what-if scenarios. I could directly see how fairness and accuracy shifted as I changed the balance of real and generated samples.'' In the validation stage, the expert emphasized that ``Seeing Grad-CAM highlight the eyeglasses region reassured me that the model was really focusing on the right feature, not gender.'' At the same time, the expert suggested improvements for usability: ``Inline hints about when metric slopes flatten out would help me know sooner when further adjustments will not pay off. Alerts for potential regressions in fairness would also reduce trial-and-error.'' Overall, the expert concluded that ``\textbf{FairAttrCNN} did not just give numbers, it gave me evidence and confidence to trust that the fairness improvements were real and not side effects.''}
+
+\section{Discussion}
+
+
+This work advances fairness analysis in image-based deep learning by introducing a unified, interactive visual analytics framework. By integrating attribute correlation analysis, dynamic bias mitigation, and multi-level explainability, \textbf{FairAttrCNN} bridges the gap between technical debiasing and human-centered decision-making.Case studies and user feedback show that our system provides practical value for researchers and practitioners. \textbf{FairAttrCNN} allows users to detect complex interdependencies among attributes, apply adjustments, and explicitly examine fairness–accuracy trade-offs. Such capabilities are essential in sensitive domains where fairness and utility must be jointly optimized.
+
+\REVISE{Nonetheless, current evaluations are limited to binary and categorical attributes on facial data. Extending to continuous attributes and other domains, such as medical imaging, remains future work. While our system supports iterative human-in-the-loop optimization, further research could explore more advanced user guidance, recommendation strategies, and personalized adaptive interaction mechanisms that dynamically adjust to user expertise and intent.}
+
+\REVISE{We will extend \textbf{FairAttrCNN} to integrate user driven insights into training for context aware optimization, strengthening attribution and counterfactual tools, and improving adversarial robustness and longitudinal monitoring. Deployment requires access to reliable attribute labels, integration with governance pipelines, and handling challenges such as privacy, compliance, and distributional drift. Accordingly, we will run controlled human subject studies, deepen integrations with attribution and counterfactual toolkit, and evaluate long-term impacts on fairness and accountability.}
+
+
+
+
+\section{Conclusion}
+
+We presented \textbf{FairAttrCNN}, an interactive visual analytics framework designed to facilitate group fairness analysis and mitigation in convolutional neural networks for image-based tasks. Our system unifies attributes correlation exploration, dynamic debiasing, and multi-level explainability into a cohesive workflow, enabling users to systematically identify, understand, and address sources of bias within multiple sensitive attributes.
+
+\REVISE{Empirical evaluation via case studies and user feedback demonstrates effectiveness, usability, and practical relevance. By enabling transparent, iterative, and explainable fairness optimization, \textbf{FairAttrCNN} supports trustworthy deployment in high-stakes domains such as healthcare imaging, and public-sector biometrics. It surfaces disparities, enables timely remediation, and facilitates auditing and stakeholder communication. Overall, We believe \textbf{FairAttrCNN} advances interpretability and actionable fairness in CNNs and providing a practical toolkit for responsible AI.}
+
+
+% \REVISE{We will evaluate generalizability by applying FairAttrCNN to non facial vision datasets including chest X ray gender imbalance, and we will examine whether fairness and utility trade offs and mitigation gains persist under distribution shift, label noise, sparse annotations, and varying model architectures.}
+
+% In future work, we aim to extend \textbf{FairAttrCNN} to handle richer attribute types, support more fairness definitions, and incorporate additional explainability techniques. We also plan to apply the framework to other image-based tasks and datasets, and integrate user-driven insights into model training for more robust, context-aware fairness optimization.
+
+% \REVISE{\textbf{Deployment limitations.} Production deployment requires access to protected attribute labels or reliable proxies, integration with existing data governance and MLOps pipelines, and compute resources for iterative retraining. Practical bottlenecks include privacy and compliance constraints, drift and domain shift that affect metric stability, and the need for human oversight to calibrate trade offs between fairness and utility.}
+
+% \REVISE{\textbf{Future work.} Next steps include controlled human subject studies to quantify usability and decision quality, tighter integrations with explainable AI toolkits for attributions and counterfactuals, and extensions for adversarial robustness and longitudinal monitoring in changing environments.}
+
+
+
+% \section{Conclusion}
+
+% In this paper, we presented \textbf{FairAttrCNN}, an interactive visual analytics framework designed to facilitate group fairness analysis and mitigation in convolutional neural networks for image-based tasks. Our system unifies attributes correlation exploration, dynamic debiasing, and multi-level explainability into a cohesive workflow, enabling users to systematically identify, understand, and address sources of bias within multiple sensitive attributes.
+
+% Empirical validation through case studies and expert feedback demonstrates the framework’s effectiveness, usability, and practical relevance for fairness-aware machine learning. By supporting transparent, iterative, and explainable fairness optimization, \textbf{FairAttrCNN} lays a foundation for more trustworthy and responsible AI systems in real-world applications. We anticipate that our work will inspire future research on interactive fairness analysis and contribute to the broader adoption of fairness-centric design in machine learning practice.
+
+
+
+
+% Empirical validation through case studies and expert feedback demonstrates the framework’s effectiveness, usability, and practical relevance for fairness-aware machine learning. By supporting transparent, iterative, and explainable fairness optimization, \textbf{FairAttrCNN} lays a foundation for more trustworthy and responsible AI systems in real-world applications. We anticipate that our work will inspire future research on interactive fairness analysis and contribute to the broader adoption of fairness-centric design in machine learning practice.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\begin{acks}
+This work was supported in part by the National Natural Science Foundation of China (No. 62202217), Guangdong Basic and Applied Basic Research Foundation (No. 2023A1515012889), and Guangdong Key Program (No. 2021QN02X794).
+\end{acks}
+
+%%重要
+%% The acknowledgments section is defined using the "acks" environment
+% \begin{acks}
+% To Robert, for the bagels and explaining CMYK and color spaces.
+% \end{acks}
+
+%%
+%% The next two lines define the bibliography style to be used, and
+%% the bibliography file.
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{sample-base}
+
+
+
+
+\end{document}
+\endinput
+%%
+%% End of file `sample-sigconf.tex'.

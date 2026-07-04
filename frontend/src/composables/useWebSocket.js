@@ -79,6 +79,7 @@ export function useWebSocket(audioPlayer) {
         store.isAssistantSpeaking = true;
         if (audioPlayer) {
           audioPlayer.enqueue(msg.data, {
+            response_id: msg.response_id,
             item_id: msg.item_id,
             content_index: msg.content_index,
             sample_rate: msg.sample_rate,
@@ -114,12 +115,19 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "speech_started":
-        if (store.inputMode === "server_vad") {
+        if (msg.invalidated_response_id) {
           store.isAssistantSpeaking = false;
           assistantTranscriptBuffer = "";
           suppressCurrentAssistantTranscript = false;
           if (audioPlayer) {
-            audioPlayer.stop();
+            if (audioPlayer.stopAssistantAudio) {
+              audioPlayer.stopAssistantAudio({
+                responseId: msg.invalidated_response_id,
+                reason: "speech_started",
+              });
+            } else {
+              audioPlayer.stop();
+            }
           }
         }
         break;
@@ -174,6 +182,12 @@ export function useWebSocket(audioPlayer) {
     }
   }
 
+  function notifyLocalSpeechStarted() {
+    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      socket.value.send(JSON.stringify({ type: "local_speech_started" }));
+    }
+  }
+
   function truncateAssistantAudio(assistantAudio) {
     if (!assistantAudio?.item_id) return;
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
@@ -203,6 +217,7 @@ export function useWebSocket(audioPlayer) {
     startSession,
     truncateAssistantAudio,
     sendAudio,
+    notifyLocalSpeechStarted,
     disconnect,
     reconnect,
   };

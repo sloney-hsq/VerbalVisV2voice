@@ -17,6 +17,15 @@ import Dashboard from "./components/Dashboard.vue";
 
 body {
   background: #fff;
-  min-height: 100vh;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 </style>

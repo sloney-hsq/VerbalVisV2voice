@@ -57,49 +57,103 @@
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {\mbox  {III-C}4}Participants expected selective cancellation and preservation}{5}{subsubsection.3.3.4}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-D}}Design Requirements}{5}{subsection.3.4}\protected@file@percent }
 \newlabel{sec:design-requirements}{{\mbox  {III-D}}{5}{Design Requirements}{subsection.3.4}{}}
-\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-D}0a}DR1: Ground interpretation in active analytical commitments.}{5}{paragraph.3.4.0.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-D}0b}DR2: Support compound revisions through composable actions.}{5}{paragraph.3.4.0.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-D}0c}DR3: Distinguish analytical revision from repair and method change.}{5}{paragraph.3.4.0.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-D}0d}DR4: Coordinate supersession across speech, execution, and visual state.}{5}{paragraph.3.4.0.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-E}}Scope of Evidence}{5}{subsection.3.5}\protected@file@percent }
-\newlabel{sec:formative-scope}{{\mbox  {III-E}}{5}{Scope of Evidence}{subsection.3.5}{}}
-\citation{brehmer2013multi}
-\citation{yi2007toward}
-\citation{openai_realtime_prompt}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces VerbalVis architecture. The Realtime Layer handles conversational coordination; the Analytics Layer executes tool calls asynchronously and updates the dashboard state, which is reinjected as system context after every tool call.}}{6}{figure.2}\protected@file@percent }
-\newlabel{fig:arch}{{2}{6}{VerbalVis architecture. The Realtime Layer handles conversational coordination; the Analytics Layer executes tool calls asynchronously and updates the dashboard state, which is reinjected as system context after every tool call}{figure.2}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {IV}System Design and Implementation}{6}{section.4}\protected@file@percent }
-\newlabel{sec:system}{{IV}{6}{System Design and Implementation}{section.4}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Design Goals}{6}{subsection.4.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Architecture Overview}{6}{subsection.4.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Tool Taxonomy}{6}{subsection.4.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Layered Prompt Design}{6}{subsection.4.4}\protected@file@percent }
-\citation{openai_realtime_prompt}
-\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces VerbalVis Tool Taxonomy. Five operations are implemented end-to-end as schema-based tools (marked $\text  {$\mathsurround \z@ \mathchar "458$}$); the remainder define the broader design space. \emph  {Why} follows Brehmer--Munzner; \emph  {How} follows Yi et al.; \emph  {What} identifies the operation target.}}{7}{table.2}\protected@file@percent }
-\newlabel{tab:tools}{{II}{7}{VerbalVis Tool Taxonomy. Five operations are implemented end-to-end as schema-based tools (marked $\checkmark $); the remainder define the broader design space. \emph {Why} follows Brehmer--Munzner; \emph {How} follows Yi et al.; \emph {What} identifies the operation target}{table.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-E}}Dashboard State and Context Reinjection}{7}{subsection.4.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-F}}Supersession Control Protocol}{7}{subsection.4.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {V}Case Study: Three Forms of Analytical Intent Revision}{8}{section.5}\protected@file@percent }
-\newlabel{sec:case}{{V}{8}{Case Study: Three Forms of Analytical Intent Revision}{section.5}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Initial State}{8}{subsection.5.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Type 1 --- Goal Shift}{8}{subsection.5.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Type 2 --- Hypothesis Correction}{8}{subsection.5.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Type 3 --- Scope Narrowing}{8}{subsection.5.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-E}}Summary}{8}{subsection.5.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {VI}User Study and Technical Benchmark}{8}{section.6}\protected@file@percent }
-\newlabel{sec:study}{{VI}{8}{User Study and Technical Benchmark}{section.6}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-A}}Design}{8}{subsection.6.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-B}}Tasks}{9}{subsection.6.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-C}}Measurements}{9}{subsection.6.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-D}}Episode Coding}{9}{subsection.6.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-E}}Hypotheses}{9}{subsection.6.5}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-F}}Technical Benchmark}{9}{subsection.6.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-D}0a}DR1: Ground interpretation in the current analytical and visual state.}{5}{paragraph.3.4.0.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-D}0b}DR2: Support compound revisions through composable analytical actions.}{5}{paragraph.3.4.0.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-D}0c}DR3: Avoid treating every interruption or conversational repair as analytical revision.}{5}{paragraph.3.4.0.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {III-D}0d}DR4: Coordinate redirection across speech, analytical execution, and visual state.}{5}{paragraph.3.4.0.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-E}}Scope of Evidence}{6}{subsection.3.5}\protected@file@percent }
+\newlabel{sec:formative-scope}{{\mbox  {III-E}}{6}{Scope of Evidence}{subsection.3.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {IV}VerbalVis Design}{6}{section.4}\protected@file@percent }
+\newlabel{sec:design}{{IV}{6}{VerbalVis Design}{section.4}{}}
+\newlabel{eq:interaction-loop}{{1}{6}{VerbalVis Design}{equation.4.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Interaction Model}{6}{subsection.4.1}\protected@file@percent }
+\newlabel{sec:design-interaction}{{\mbox  {IV-A}}{6}{Interaction Model}{subsection.4.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Context-Grounded Interpretation}{6}{subsection.4.2}\protected@file@percent }
+\newlabel{sec:design-grounding}{{\mbox  {IV-B}}{6}{Context-Grounded Interpretation}{subsection.4.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Composable Analytical Actions}{7}{subsection.4.3}\protected@file@percent }
+\newlabel{sec:design-composable-actions}{{\mbox  {IV-C}}{7}{Composable Analytical Actions}{subsection.4.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Interpreting Overlapping Speech}{7}{subsection.4.4}\protected@file@percent }
+\newlabel{sec:design-overlap}{{\mbox  {IV-D}}{7}{Interpreting Overlapping Speech}{subsection.4.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-E}}Coordinated Redirection and State Preservation}{7}{subsection.4.5}\protected@file@percent }
+\newlabel{sec:design-redirection}{{\mbox  {IV-E}}{7}{Coordinated Redirection and State Preservation}{subsection.4.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-F}}Visualization as a Persistent Analytical Workspace}{8}{subsection.4.6}\protected@file@percent }
+\newlabel{sec:design-workspace}{{\mbox  {IV-F}}{8}{Visualization as a Persistent Analytical Workspace}{subsection.4.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-G}}Interaction Feedback}{8}{subsection.4.7}\protected@file@percent }
+\newlabel{sec:design-feedback}{{\mbox  {IV-G}}{8}{Interaction Feedback}{subsection.4.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-H}}Design Summary}{8}{subsection.4.8}\protected@file@percent }
+\newlabel{sec:design-summary}{{\mbox  {IV-H}}{8}{Design Summary}{subsection.4.8}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {V}System Implementation}{8}{section.5}\protected@file@percent }
+\newlabel{sec:system}{{V}{8}{System Implementation}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}System Architecture}{8}{subsection.5.1}\protected@file@percent }
+\newlabel{sec:system-architecture}{{\mbox  {V-A}}{8}{System Architecture}{subsection.5.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Mapping from design requirements to VerbalVis design responses.}}{9}{table.2}\protected@file@percent }
+\newlabel{tab:design-summary}{{II}{9}{Mapping from design requirements to VerbalVis design responses}{table.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Full-Duplex Audio Pipeline}{9}{subsection.5.2}\protected@file@percent }
+\newlabel{sec:audio-pipeline}{{\mbox  {V-B}}{9}{Full-Duplex Audio Pipeline}{subsection.5.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Prompting and Dashboard-State Grounding}{9}{subsection.5.3}\protected@file@percent }
+\newlabel{sec:system-grounding}{{\mbox  {V-C}}{9}{Prompting and Dashboard-State Grounding}{subsection.5.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Schema-Grounded Analytical Tools}{10}{subsection.5.4}\protected@file@percent }
+\newlabel{sec:system-tools}{{\mbox  {V-D}}{10}{Schema-Grounded Analytical Tools}{subsection.5.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-E}}Data and Visualization State}{10}{subsection.5.5}\protected@file@percent }
+\newlabel{sec:dashboard-state}{{\mbox  {V-E}}{10}{Data and Visualization State}{subsection.5.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-F}}Response--Tool Coordination}{10}{subsection.5.6}\protected@file@percent }
+\newlabel{sec:response-tool-coordination}{{\mbox  {V-F}}{10}{Response--Tool Coordination}{subsection.5.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Schema-grounded analytical tools in the active VerbalVis implementation.}}{11}{table.3}\protected@file@percent }
+\newlabel{tab:tools}{{III}{11}{Schema-grounded analytical tools in the active VerbalVis implementation}{table.3}{}}
+\newlabel{eq:stale-rule}{{2}{11}{Response--Tool Coordination}{equation.5.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-G}}Logging and Instrumentation}{11}{subsection.5.7}\protected@file@percent }
+\newlabel{sec:logging}{{\mbox  {V-G}}{11}{Logging and Instrumentation}{subsection.5.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-H}}Implementation Summary}{12}{subsection.5.8}\protected@file@percent }
+\newlabel{sec:implementation-summary}{{\mbox  {V-H}}{12}{Implementation Summary}{subsection.5.8}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}User Study and Technical Benchmark}{12}{section.6}\protected@file@percent }
+\newlabel{sec:study}{{VI}{12}{User Study and Technical Benchmark}{section.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-A}}Design}{12}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-B}}Tasks}{12}{subsection.6.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-C}}Measurements}{12}{subsection.6.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-D}}Episode Coding}{13}{subsection.6.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-E}}Hypotheses}{13}{subsection.6.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-F}}Technical Benchmark}{13}{subsection.6.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-G}}Results (to be reported)}{13}{subsection.6.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-H}}Anticipated Discussion}{13}{subsection.6.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Discussion}{13}{section.7}\protected@file@percent }
+\newlabel{sec:discussion}{{VII}{13}{Discussion}{section.7}{}}
 \bibstyle{IEEEtran}
 \bibdata{main}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-G}}Results (to be reported)}{10}{subsection.6.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-H}}Anticipated Discussion}{10}{subsection.6.8}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {VII}Discussion}{10}{section.7}\protected@file@percent }
-\newlabel{sec:discussion}{{VII}{10}{Discussion}{section.7}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {VIII}Conclusion}{10}{section.8}\protected@file@percent }
-\newlabel{sec:conclusion}{{VIII}{10}{Conclusion}{section.8}{}}
-\gdef \@abspage@last{10}
+\bibcite{russell1993cost}{1}
+\bibcite{pirolli2005sensemaking}{2}
+\bibcite{sacha2014knowledge}{3}
+\bibcite{battle2019characterizing}{4}
+\bibcite{gao2015datatone}{5}
+\bibcite{setlur2016eviza}{6}
+\bibcite{narechania2021nl4dv}{7}
+\bibcite{dibia2023lida}{8}
+\bibcite{wang2024dataformulator2}{9}
+\bibcite{zhao2024lightva}{10}
+\bibcite{klein2007dataframe}{11}
+\bibcite{bates1989berrypicking}{12}
+\bibcite{srinivasan2018orko}{13}
+\bibcite{srinivasan2020inchorus}{14}
+\bibcite{srinivasan2021databreeze}{15}
+\bibcite{srinivasan2021snowy}{16}
+\bibcite{mitra2022conversational}{17}
+\bibcite{wang2024dataformulator}{18}
+\bibcite{ma2023insightpilot}{19}
+\bibcite{xie2024waitgpt}{20}
+\@writefile{toc}{\contentsline {section}{\numberline {VIII}Conclusion}{14}{section.8}\protected@file@percent }
+\newlabel{sec:conclusion}{{VIII}{14}{Conclusion}{section.8}{}}
+\@writefile{toc}{\contentsline {section}{References}{14}{section*.1}\protected@file@percent }
+\bibcite{weng2025insightlens}{21}
+\bibcite{skantze2021turntaking}{22}
+\bibcite{heins1997bargein}{23}
+\bibcite{lin2022duplex}{24}
+\bibcite{veluri2024syncllm}{25}
+\bibcite{defossez2024moshi}{26}
+\bibcite{yu2025salmonnomni}{27}
+\bibcite{vakkari2001changes}{28}
+\bibcite{klahr1988dual}{29}
+\bibcite{chinn1993anomalous}{30}
+\bibcite{pirolli1999information}{31}
+\bibcite{brehmer2013multilevel}{32}
+\bibcite{wongsuphasawat2016voyager}{33}
+\bibcite{pontis2016influence}{34}
+\gdef \@abspage@last{15}

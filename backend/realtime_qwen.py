@@ -120,6 +120,7 @@ QWEN_OPENING_ENABLED = os.getenv(
     "QWEN_REALTIME_OPENING_ENABLED", "true"
 ).lower() in {"1", "true", "yes", "on"}
 
+
 # VerbalVis uses Qwen's native server VAD flow:
 # input_audio_buffer.append -> speech_started/stopped -> committed -> response.
 INPUT_MODE = "server_vad"
@@ -149,7 +150,10 @@ def _qwen_tool_schemas() -> list[dict[str, Any]]:
                 "series_limit=N with series_sort_by and series_sort_order instead of "
                 "limit. Do not encode Top N only in the chart title. Non-scatter charts are automatically "
                 "aggregated by the backend from x/y. Use chart_type=pie for pie/"
-                "占比/构成/share requests instead of silently falling back to bar."
+                "占比/构成/share requests instead of silently falling back to bar. "
+                "Use chart_type=table for 表格/列表/detail requests; for 5-10 states "
+                "with each state's top 3 product categories, use x=customer_state, "
+                "y=revenue, color=product_category, limit=5..10, series_limit=3."
             )
         if "function" in tool:
             qwen_tools.append({
@@ -455,8 +459,14 @@ class QwenRealtimeSession:
             "For 收入前十品类按月评分趋势, pass color=product_category, "
             "series_limit=10, series_sort_by=revenue, series_sort_order=desc. "
             "Do not use limit for Top N series; limit only limits rows.\n"
+            "- Table visuals: for 表格/列表/detail requests, use chart_type=table. "
+            "For 显示五到十个州的前三名商品类别, pass x=customer_state, "
+            "y=revenue, color=product_category, limit=5..10, series_limit=3, "
+            "sort_by=revenue, sort_order=desc, series_sort_by=revenue, "
+            "series_sort_order=desc. The backend formats integer revenue and "
+            "integer state-revenue share.\n"
             "- append_visual already performs backend aggregation for bar, line, "
-            "histogram, and pie charts. Use x/y fields; do not claim aggregation is "
+            "histogram, pie, and table visuals. Use x/y fields; do not claim aggregation is "
             "unsupported.\n"
             "- For pie/饼图/占比/构成 requests, call append_visual with "
             "chart_type=pie. For delivery-speed pie charts, use "
@@ -475,6 +485,10 @@ class QwenRealtimeSession:
             "准时率最低Top N -> sort_by=on_time_ratio, sort_order=asc.\n"
             "- If the user changes the definition of low score globally, call "
             "set_low_score_threshold instead of saying low_score_ratio is fixed.\n"
+            "- ASR correction handling: 同音字/误解/听错 means the user is correcting "
+            "recognition. Treat 试图 as 视图 when followed by dashboard actions; "
+            "resolve 州/周 by context (state vs week); 低于三分 means <=2, while "
+            "三分及以下 means <=3; 折线/多条线 means line or multi-series line.\n"
             "- Preserve filter scope: 跟随全局 -> inherit_global_filters=true; "
             "固定条件/独立比较/不要跟全局变 -> chart-local filters with "
             "inherit_global_filters=false; 固定当前结果 -> freeze=true.\n"
@@ -583,6 +597,8 @@ class QwenRealtimeSession:
                     if not self._qwen_ready:
                         continue
                     await self._truncate_assistant_audio(msg.get("assistant_audio") or msg)
+                elif msg_type == "local_speech_started":
+                    await self._handle_speech_started()
                 elif msg_type == "start_session":
                     try:
                         await self._restart_qwen_session("client.start_session")
@@ -643,6 +659,7 @@ class QwenRealtimeSession:
                 await self._send_client({
                     "type": "audio",
                     "data": event.get("delta", ""),
+                    "response_id": response_id,
                     "item_id": event.get("item_id"),
                     "content_index": event.get("content_index", 0),
                     "sample_rate": QWEN_OUTPUT_SAMPLE_RATE,
@@ -720,7 +737,8 @@ class QwenRealtimeSession:
                 task.add_done_callback(self._tool_tasks.discard)
 
             elif etype == "response.done":
-                self._finish_response_metrics(response_id, event.get("response", {}))
+                response_payload = event.get("response", {})
+                self._finish_response_metrics(response_id, response_payload)
                 has_tool_call = bool(response_id and response_id in self._responses_with_tool_calls)
                 assistant_text = self._assistant_transcript_buffer.strip()
                 if assistant_text:
@@ -747,6 +765,7 @@ class QwenRealtimeSession:
                 self._current_assistant_audio_generated_ms = 0
                 await self._send_client({
                     "type": "response_done",
+                    "response_id": response_id,
                     "metrics": self._response_metrics.get(response_id, {}) if response_id else {},
                 })
 
@@ -861,9 +880,8 @@ class QwenRealtimeSession:
         self._current_assistant_audio_generated_ms = 0
 
     async def _handle_speech_started(self) -> None:
-        # OpenAI realtime2 original used send_cancel=False because GA server VAD
-        # handles interruption. Qwen exposes response.cancel but not truncate, so
-        # cancel the active response on server-side speech start.
+        # Qwen does not expose conversation.item.truncate, so stop local playback
+        # via the client event and cancel the active response on speech start.
         await self._invalidate_current_response(source="speech_started", send_cancel=True)
 
     async def _invalidate_current_response(self, source: str, send_cancel: bool) -> None:
@@ -1013,10 +1031,6 @@ class QwenRealtimeSession:
                 "item": {
                     "type": "function_call_output",
                     "call_id": call_id,
-                    # OpenAI realtime2 original:
-                    # "output": self._tool_result_text(result, tool_duration_ms),
-                    # Qwen only supports function_call_output items here, so
-                    # include the refreshed dashboard context inside that output.
                     "output": self._tool_result_text(
                         result,
                         tool_duration_ms,

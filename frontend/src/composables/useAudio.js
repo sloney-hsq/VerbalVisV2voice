@@ -2,10 +2,10 @@ import { ref, onBeforeUnmount } from "vue";
 
 const DEFAULT_INPUT_SAMPLE_RATE = 16000; // Qwen realtime input rate
 const DEFAULT_OUTPUT_SAMPLE_RATE = 24000;
-const CHUNK_MS = 100;
+const CHUNK_MS = 40;
 const PREFIX_CHUNKS = 3;
 const TRAILING_SILENCE_CHUNKS = 9;
-const SPEECH_RMS_THRESHOLD = 0.014;
+const SPEECH_RMS_THRESHOLD = 0.01;
 const SILENCE_RMS_THRESHOLD = 0.006;
 
 /**
@@ -36,8 +36,10 @@ export function useAudio(options = {}) {
 
   // ---- Playback state ----
   let playbackCtx = null;
-  const playbackQueue = [];
-  let isPlaying = false;
+  let playbackGainNode = null;
+  const activeSources = new Set();
+  const invalidatedResponseIds = new Set();
+  let assistantAudioBlocked = false;
   let nextPlayTime = 0;
   let currentPlayback = null;
 
@@ -179,11 +181,22 @@ export function useAudio(options = {}) {
   function _ensurePlaybackCtx() {
     if (!playbackCtx || playbackCtx.state === "closed") {
       playbackCtx = new AudioContext({ sampleRate: outputSampleRate });
+      playbackGainNode = playbackCtx.createGain();
+      playbackGainNode.gain.value = 1;
+      playbackGainNode.connect(playbackCtx.destination);
+    } else if (!playbackGainNode) {
+      playbackGainNode = playbackCtx.createGain();
+      playbackGainNode.gain.value = 1;
+      playbackGainNode.connect(playbackCtx.destination);
     }
     return playbackCtx;
   }
 
   function enqueue(base64pcm, metadata = {}) {
+    const responseId = metadata?.response_id || metadata?.responseId || null;
+    if (assistantAudioBlocked) return;
+    if (responseId && invalidatedResponseIds.has(responseId)) return;
+
     const ctx = _ensurePlaybackCtx();
     const raw = atob(base64pcm);
     const bytes = new Uint8Array(raw.length);
@@ -204,7 +217,16 @@ export function useAudio(options = {}) {
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(ctx.destination);
+    source.connect(playbackGainNode || ctx.destination);
+    const sourceRecord = {
+      source,
+      responseId,
+      itemId: metadata?.item_id || metadata?.itemId || null,
+    };
+    activeSources.add(sourceRecord);
+    source.onended = () => {
+      activeSources.delete(sourceRecord);
+    };
     source.start(scheduledStart);
     nextPlayTime += buffer.duration;
     _trackPlayback(metadata, scheduledStart, buffer.duration);
@@ -216,14 +238,42 @@ export function useAudio(options = {}) {
 
   function stop() {
     const cursor = getPlaybackCursor();
-    // Hard stop: close context and reset
-    if (playbackCtx && playbackCtx.state !== "closed") {
-      playbackCtx.close();
-    }
-    playbackCtx = null;
-    nextPlayTime = 0;
-    currentPlayback = null;
+    stopAssistantAudio({});
     return cursor;
+  }
+
+  function stopAssistantAudio({ responseId = null, blockNewAudio = false } = {}) {
+    if (blockNewAudio) assistantAudioBlocked = true;
+    if (responseId) {
+      invalidatedResponseIds.add(responseId);
+    } else {
+      for (const record of activeSources) {
+        if (record.responseId) invalidatedResponseIds.add(record.responseId);
+      }
+      if (currentPlayback?.responseId) {
+        invalidatedResponseIds.add(currentPlayback.responseId);
+      }
+    }
+
+    for (const record of Array.from(activeSources)) {
+      if (!responseId || record.responseId === responseId) {
+        try {
+          record.source.stop();
+        } catch (_) {
+          // Already ended.
+        }
+        activeSources.delete(record);
+      }
+    }
+
+    if (!responseId || currentPlayback?.responseId === responseId) {
+      nextPlayTime = playbackCtx && playbackCtx.state !== "closed" ? playbackCtx.currentTime : 0;
+      currentPlayback = null;
+    }
+  }
+
+  function allowAssistantAudio() {
+    assistantAudioBlocked = false;
   }
 
   // ------------------------------------------------------------------
@@ -259,6 +309,7 @@ export function useAudio(options = {}) {
 
   function _trackPlayback(metadata, scheduledStart, duration) {
     const itemId = metadata?.item_id || metadata?.itemId;
+    const responseId = metadata?.response_id || metadata?.responseId || null;
     if (!itemId) return;
 
     const contentIndex = metadata?.content_index ?? metadata?.contentIndex ?? 0;
@@ -269,6 +320,7 @@ export function useAudio(options = {}) {
     ) {
       currentPlayback = {
         itemId,
+        responseId,
         contentIndex,
         startTime: scheduledStart,
         endTime: scheduledStart,
@@ -302,6 +354,7 @@ export function useAudio(options = {}) {
 
     if (!gateSilence) {
       onAudioChunk?.(base64);
+      _updateUngatedSpeechActivity(rms, chunk.peak ?? 0);
       return;
     }
 
@@ -344,6 +397,29 @@ export function useAudio(options = {}) {
     prefixBuffer = [];
   }
 
+  function _updateUngatedSpeechActivity(rms, peak) {
+    if (!speechActive) {
+      if (rms >= SPEECH_RMS_THRESHOLD) {
+        if (shouldStartSpeech && !shouldStartSpeech({ rms, peak })) return;
+        speechActive = true;
+        silenceChunks = 0;
+        onSpeechStart?.();
+      }
+      return;
+    }
+
+    if (rms < SILENCE_RMS_THRESHOLD) {
+      silenceChunks += 1;
+      if (silenceChunks >= TRAILING_SILENCE_CHUNKS) {
+        speechActive = false;
+        silenceChunks = 0;
+        onSpeechEnd?.();
+      }
+    } else {
+      silenceChunks = 0;
+    }
+  }
+
   onBeforeUnmount(() => {
     disposeRecording();
     stop();
@@ -372,5 +448,7 @@ export function useAudio(options = {}) {
     enqueue,
     flush,
     stop,
+    stopAssistantAudio,
+    allowAssistantAudio,
   };
 }
