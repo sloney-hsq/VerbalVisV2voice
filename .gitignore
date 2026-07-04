@@ -27,13 +27,13 @@ frontend/dist/
 .vite/
 frontend/.vite/
 
-# Logs
-*.log
-log*.md
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
+# # Logs
+# *.log
+# log*.md
+# npm-debug.log*
+# yarn-debug.log*
+# yarn-error.log*
+# pnpm-debug.log*
 
 # Env files
 .env
