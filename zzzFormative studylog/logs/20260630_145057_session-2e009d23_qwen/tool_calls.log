@@ -1,6 +1,0 @@
-14:52:02.367  TOOL_EVENT {"event_id": "event_ALEMOMcrEwqMXVpNwIcQ1", "type": "response.function_call_arguments.done", "response_id": "resp_WglK7byJxvBxRQ2YeYCWj", "item_id": "item_Uehh1IEKWhKMKc4rhPY6E", "output_index": 0, "name": "highlight_visual", "call_id": "call_34f58a67dfc74d2da331501d", "arguments": "{\"view_id\": \"view-map\"}"}
-14:52:02.367  TOOL_CALL name=highlight_visual args={"view_id": "view-map"}
-14:52:09.271  TOOL_EVENT {"event_id": "event_Ix6xm5XTTZH4GYdtKTsVO", "type": "response.function_call_arguments.done", "response_id": "resp_Z8WIp9gOG8zOSlu1O56Gp", "item_id": "item_Lak9sygnEzGfR64IwxvCN", "output_index": 0, "name": "highlight_visual", "call_id": "call_6093f3829f134b8cab74d1ef", "arguments": "{\"view_id\": \"view-map\"}"}
-14:52:09.272  TOOL_CALL name=highlight_visual args={"view_id": "view-map"}
-14:52:09.273  TOOL_START name=highlight_visual call_id=call_6093f3829f134b8cab74d1ef args={"view_id": "view-map"}
-14:52:09.300  TOOL_DONE name=highlight_visual call_id=call_6093f3829f134b8cab74d1ef dur=1.4ms success=True

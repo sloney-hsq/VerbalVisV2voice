@@ -1,1 +1,0 @@
-12:33:34.304  VIEWS_UPDATE tool=append_visual args={"chart_type": "bar", "x": "customer_state", "y": "low_score_ratio", "title": "各州低分订单比例", "sort_by": "low_score_ratio", "sort_order": "desc", "_user_transcript": "呃，先按不同地区来，不同地区的分布来看一下。"}

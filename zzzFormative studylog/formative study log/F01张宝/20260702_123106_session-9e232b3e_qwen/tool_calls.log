@@ -1,8 +1,0 @@
-12:32:39.173  TOOL_EVENT {"event_id": "event_XdiDkMmbkhtWCyTABg6lg", "type": "response.function_call_arguments.done", "response_id": "resp_Lp4uHxll565E9846UPZST", "item_id": "item_ME1KaE6pjuSsgojMuVZip", "output_index": 0, "name": "highlight_visual", "call_id": "call_cecba6371e2145f0acaae263", "arguments": "{\"view_id\": \"view-review\"}"}
-12:32:39.173  TOOL_CALL name=highlight_visual args={"view_id": "view-review"}
-12:32:39.174  TOOL_START name=highlight_visual call_id=call_cecba6371e2145f0acaae263 args={"view_id": "view-review", "_user_transcript": "评分分布。"}
-12:32:39.193  TOOL_DONE name=highlight_visual call_id=call_cecba6371e2145f0acaae263 dur=0.2ms success=True
-12:33:34.269  TOOL_EVENT {"event_id": "event_ZkxZfyZDgOv6inzCBPFS8", "type": "response.function_call_arguments.done", "response_id": "resp_R7qoVC1dsi54AKA5FzE5l", "item_id": "item_VEzGKlM2ou9JEVmPPhsdm", "output_index": 0, "name": "append_visual", "call_id": "call_0f7a9cc658a0444282ccf8c4", "arguments": "{\"chart_type\": \"bar\", \"x\": \"customer_state\", \"y\": \"low_score_ratio\", \"title\": \"各州低分订单比例\", \"sort_by\": \"low_score_ratio\", \"sort_order\": \"desc\"}"}
-12:33:34.270  TOOL_CALL name=append_visual args={"chart_type": "bar", "x": "customer_state", "y": "low_score_ratio", "title": "各州低分订单比例", "sort_by": "low_score_ratio", "sort_order": "desc"}
-12:33:34.270  TOOL_START name=append_visual call_id=call_0f7a9cc658a0444282ccf8c4 args={"chart_type": "bar", "x": "customer_state", "y": "low_score_ratio", "title": "各州低分订单比例", "sort_by": "low_score_ratio", "sort_order": "desc", "_user_transcript": "呃，先按不同地区来，不同地区的分布来看一下。"}
-12:33:34.303  TOOL_DONE name=append_visual call_id=call_0f7a9cc658a0444282ccf8c4 dur=14.3ms success=True

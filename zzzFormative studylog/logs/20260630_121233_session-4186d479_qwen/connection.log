@@ -1,4 +1,0 @@
-12:12:33.885  CONNECTING_QWEN model=qwen3.5-omni-plus-realtime url=wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime
-12:12:35.909  QWEN_CONNECTED
-12:12:35.909  SESSION_UPDATE_SENT
-12:12:36.431  SESSION_ENDED Parse RealtimeEvent error: Common error!

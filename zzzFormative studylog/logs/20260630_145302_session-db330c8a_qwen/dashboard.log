@@ -1,1 +1,0 @@
-14:54:23.774  VIEWS_UPDATE tool=filter_data args={"field": "order_month", "operator": "eq", "value": "2017-11", "append": false}

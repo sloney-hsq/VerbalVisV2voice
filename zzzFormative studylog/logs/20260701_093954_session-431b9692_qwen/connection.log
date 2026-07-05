@@ -1,7 +1,0 @@
-09:40:02.102  RESTART_QWEN_SESSION reason=client.start_session generation=1
-09:40:02.103  CONNECTING_QWEN model=qwen3.5-omni-plus-realtime url=wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime
-09:40:03.310  QWEN_CONNECTED
-09:40:03.312  SESSION_UPDATE_SENT
-09:40:03.849  SESSION_UPDATED
-09:40:04.624  IMPORTANT_EVENT response.created
-09:40:06.308  CLIENT_DISCONNECTED
