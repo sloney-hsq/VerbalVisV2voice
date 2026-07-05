@@ -1,0 +1,13 @@
+12:53:43.095  RESTART_QWEN_SESSION reason=client.start_session generation=1
+12:53:43.095  CONNECTING_QWEN model=qwen3.5-omni-plus-realtime url=wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime
+12:53:44.555  QWEN_CONNECTED
+12:53:44.599  SESSION_UPDATE_SENT
+12:53:45.172  SESSION_UPDATED
+12:53:48.559  BARGE_IN source=ptt_start invalidated=None
+12:53:50.694  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:53:50.759  BARGE_IN source=ptt_start invalidated=None
+12:53:50.781  IMPORTANT_EVENT response.created
+12:53:53.212  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:53:57.676  IMPORTANT_EVENT response.audio_transcript.done
+12:53:57.676  IMPORTANT_EVENT response.done
+12:54:03.670  CLIENT_DISCONNECTED

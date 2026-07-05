@@ -1,0 +1,3 @@
+10:39:09.242  VIEWS_UPDATE tool=filter_data args={"field": "review_score", "operator": "gte", "value": 6, "append": false}
+10:39:42.202  VIEWS_UPDATE tool=filter_data args={"field": "review_score", "operator": "eq", "value": 5, "append": false}
+10:40:58.152  VIEWS_UPDATE tool=append_visual args={"chart_type": "bar", "x": "product_category", "y": "revenue", "color": null, "title": "5-Star Orders: Revenue by Product Category"}

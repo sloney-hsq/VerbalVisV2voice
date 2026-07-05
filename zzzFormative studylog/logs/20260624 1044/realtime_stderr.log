@@ -1,0 +1,7 @@
+INFO:     Started server process [8780]
+INFO:     Waiting for application startup.
+2026-06-24 14:11:33,007 INFO main: Initialising DuckDB¡­
+2026-06-24 14:11:33,915 INFO db: main_table ready: 96478 rows
+2026-06-24 14:11:33,924 INFO main: Ready.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)

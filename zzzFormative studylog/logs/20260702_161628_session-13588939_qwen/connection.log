@@ -1,0 +1,4 @@
+16:16:29.955  RESTART_QWEN_SESSION reason=client.start_session generation=1
+16:16:29.955  CONNECTING_QWEN model=qwen3.5-omni-plus-realtime url=wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime
+16:16:39.960  START_SESSION_FAILED timed out during opening handshake
+16:16:44.055  CLIENT_DISCONNECTED

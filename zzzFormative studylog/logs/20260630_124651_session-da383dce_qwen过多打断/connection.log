@@ -1,0 +1,116 @@
+12:46:52.982  RESTART_QWEN_SESSION reason=client.start_session generation=1
+12:46:52.982  CONNECTING_QWEN model=qwen3.5-omni-plus-realtime url=wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime
+12:46:54.899  QWEN_CONNECTED
+12:46:54.901  SESSION_UPDATE_SENT
+12:46:55.603  SESSION_UPDATED
+12:46:58.851  BARGE_IN source=ptt_start invalidated=None
+12:47:00.223  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:47:00.453  IMPORTANT_EVENT response.created
+12:47:05.723  IMPORTANT_EVENT response.audio_transcript.done
+12:47:05.723  IMPORTANT_EVENT response.done
+12:47:08.851  BARGE_IN source=ptt_start invalidated=None
+12:47:10.648  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:47:10.764  IMPORTANT_EVENT response.created
+12:47:12.813  IMPORTANT_EVENT response.audio_transcript.done
+12:47:12.813  IMPORTANT_EVENT response.done
+12:47:25.153  BARGE_IN source=ptt_start invalidated=None
+12:47:27.341  BARGE_IN source=ptt_start invalidated=None
+12:47:28.395  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:47:28.396  IMPORTANT_EVENT response.created
+12:47:30.317  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:47:31.969  IMPORTANT_EVENT response.audio_transcript.done
+12:47:31.969  IMPORTANT_EVENT response.done
+12:47:40.341  BARGE_IN source=ptt_start invalidated=None
+12:47:42.892  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:47:42.920  IMPORTANT_EVENT response.created
+12:47:43.540  IMPORTANT_EVENT response.created
+12:47:44.849  IMPORTANT_EVENT response.function_call_arguments.done
+12:47:44.850  IMPORTANT_EVENT response.done
+12:47:46.037  IMPORTANT_EVENT response.created
+12:47:50.088  IMPORTANT_EVENT response.audio_transcript.done
+12:47:50.088  IMPORTANT_EVENT response.done
+12:47:50.541  BARGE_IN source=ptt_start invalidated=None
+12:47:52.321  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:47:52.413  IMPORTANT_EVENT response.created
+12:47:53.040  BARGE_IN source=ptt_start invalidated=resp_FUGI4OVBmyYyu3rgpgvlX
+12:47:53.455  IMPORTANT_EVENT response.audio_transcript.done
+12:47:53.455  IMPORTANT_EVENT response.done
+12:47:54.136  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:47:54.241  IMPORTANT_EVENT response.created
+12:47:56.278  IMPORTANT_EVENT response.audio_transcript.done
+12:47:56.278  IMPORTANT_EVENT response.done
+12:47:56.841  BARGE_IN source=ptt_start invalidated=None
+12:47:59.041  BARGE_IN source=ptt_start invalidated=None
+12:47:59.236  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:47:59.446  IMPORTANT_EVENT response.created
+12:48:01.623  IMPORTANT_EVENT response.audio_transcript.done
+12:48:01.623  IMPORTANT_EVENT response.done
+12:48:05.229  IMPORTANT_EVENT response.created
+12:48:05.233  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:48:06.043  BARGE_IN source=ptt_start invalidated=resp_SNjKss4dEsBBZtFtd5ZVA
+12:48:07.179  IMPORTANT_EVENT response.audio_transcript.done
+12:48:07.180  IMPORTANT_EVENT response.done
+12:48:07.341  BARGE_IN source=ptt_start invalidated=None
+12:48:07.539  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:48:08.540  BARGE_IN source=ptt_start invalidated=None
+12:48:09.237  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:48:09.370  IMPORTANT_EVENT response.created
+12:48:09.917  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:48:11.815  IMPORTANT_EVENT response.audio_transcript.done
+12:48:11.816  IMPORTANT_EVENT response.done
+12:48:13.741  BARGE_IN source=ptt_start invalidated=None
+12:48:24.040  BARGE_IN source=ptt_start invalidated=None
+12:48:26.727  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:48:26.819  IMPORTANT_EVENT response.created
+12:48:27.462  IMPORTANT_EVENT response.created
+12:48:31.421  IMPORTANT_EVENT response.function_call_arguments.done
+12:48:31.422  IMPORTANT_EVENT response.done
+12:48:32.213  IMPORTANT_EVENT response.created
+12:48:32.925  IMPORTANT_EVENT response.created
+12:48:39.852  IMPORTANT_EVENT response.function_call_arguments.done
+12:48:39.853  IMPORTANT_EVENT response.done
+12:48:41.159  IMPORTANT_EVENT response.created
+12:48:41.312  IMPORTANT_EVENT response.function_call_arguments.done
+12:48:41.312  IMPORTANT_EVENT response.done
+12:48:42.019  IMPORTANT_EVENT response.created
+12:48:42.819  IMPORTANT_EVENT response.created
+12:48:44.831  IMPORTANT_EVENT response.function_call_arguments.done
+12:48:44.832  IMPORTANT_EVENT response.done
+12:48:45.582  IMPORTANT_EVENT response.created
+12:48:45.941  BARGE_IN source=ptt_start invalidated=resp_CyyrzqkTneQDEeFxKPc9B
+12:48:46.185  IMPORTANT_EVENT response.created
+12:48:46.493  IMPORTANT_EVENT response.function_call_arguments.done
+12:48:46.493  IMPORTANT_EVENT response.done
+12:48:47.543  IMPORTANT_EVENT response.created
+12:48:47.708  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:48:48.725  IMPORTANT_EVENT response.created
+12:48:50.033  IMPORTANT_EVENT response.function_call_arguments.done
+12:48:50.035  IMPORTANT_EVENT response.done
+12:48:50.795  IMPORTANT_EVENT response.created
+12:48:56.049  IMPORTANT_EVENT response.audio_transcript.done
+12:48:56.049  IMPORTANT_EVENT response.done
+12:49:02.841  BARGE_IN source=ptt_start invalidated=None
+12:49:04.101  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:49:04.204  IMPORTANT_EVENT response.created
+12:49:06.060  IMPORTANT_EVENT response.audio_transcript.done
+12:49:06.060  IMPORTANT_EVENT response.done
+12:49:07.941  BARGE_IN source=ptt_start invalidated=None
+12:49:08.959  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:49:09.161  IMPORTANT_EVENT response.created
+12:49:11.197  IMPORTANT_EVENT response.audio_transcript.done
+12:49:11.197  IMPORTANT_EVENT response.done
+12:49:12.740  BARGE_IN source=ptt_start invalidated=None
+12:49:16.639  BARGE_IN source=ptt_start invalidated=None
+12:49:17.260  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:49:17.346  IMPORTANT_EVENT response.created
+12:49:19.209  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:49:21.328  IMPORTANT_EVENT response.audio_transcript.done
+12:49:21.328  IMPORTANT_EVENT response.done
+12:49:24.260  RESTART_QWEN_SESSION reason=client.start_session generation=2
+12:49:24.261  CONNECTING_QWEN model=qwen3.5-omni-plus-realtime url=wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime
+12:49:25.777  QWEN_CONNECTED
+12:49:25.778  SESSION_UPDATE_SENT
+12:49:26.317  SESSION_UPDATED
+12:49:29.541  BARGE_IN source=ptt_start invalidated=None
+12:49:30.740  BARGE_IN source=ptt_start invalidated=None
+12:49:31.059  CLIENT_DISCONNECTED

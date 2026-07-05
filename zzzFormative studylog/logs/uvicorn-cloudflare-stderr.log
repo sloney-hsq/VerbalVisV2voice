@@ -1,0 +1,154 @@
+INFO:     Started server process [35504]
+INFO:     Waiting for application startup.
+2026-07-02 13:34:41,687 INFO main: Initialising DuckDB...
+2026-07-02 13:34:43,179 INFO db: fact_order ready: 96478 rows | fact_item ready: 110197 rows
+2026-07-02 13:34:43,188 INFO main: Ready.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 13:35:54,201 INFO main: Client connected (qwen): session-9ac5be14 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     2409:895b:3843:c820:18bc:abcc:57e3:6e0d:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 13:40:52,004 INFO main: Client connected (qwen): session-8ce1d0a2 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     116.7.234.231:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 13:44:09,233 INFO main: Client connected (qwen): session-d692f2e4 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     2409:895b:3843:c820:18bc:abcc:57e3:6e0d:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 14:43:07,967 INFO main: Client connected (qwen): session-675d9d9e model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     2409:895b:3843:c820:18bc:abcc:57e3:6e0d:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 15:50:32,102 INFO main: Client connected (qwen): session-28cb856b model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     2409:895b:3843:c820:18bc:abcc:57e3:6e0d:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 15:51:10,454 INFO main: Client connected (qwen): session-a13b662a model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     110.65.147.210:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:04:36,743 INFO main: Client connected (qwen): session-233e7df8 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     2001:da8:201d:1113::f97a:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:10:48,473 INFO main: Client connected (qwen): session-919cf628 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     2409:895b:3843:c820:18bc:abcc:57e3:6e0d:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:11:59,901 INFO main: Client connected (qwen): session-b6bb9da5 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+2026-07-02 16:12:04,880 ERROR asyncio: Exception in callback Connection.connection_lost(ConnectionResetError())
+handle: <Handle Connection.connection_lost(ConnectionResetError())>
+Traceback (most recent call last):
+  File "C:\Users\admin\miniconda3\envs\VerbalVis\Lib\asyncio\events.py", line 84, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\admin\miniconda3\envs\VerbalVis\Lib\site-packages\websockets\asyncio\connection.py", line 1018, in connection_lost
+    self.recv_messages.close()
+    ^^^^^^^^^^^^^^^^^^
+AttributeError: 'ClientConnection' object has no attribute 'recv_messages'
+INFO:     connection closed
+INFO:     2001:da8:201d:1113::f97a:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:12:21,915 INFO main: Client connected (qwen): session-db3f5ed6 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+2026-07-02 16:12:25,739 ERROR asyncio: Exception in callback Connection.connection_lost(ConnectionResetError())
+handle: <Handle Connection.connection_lost(ConnectionResetError())>
+Traceback (most recent call last):
+  File "C:\Users\admin\miniconda3\envs\VerbalVis\Lib\asyncio\events.py", line 84, in _run
+    self._context.run(self._callback, *self._args)
+  File "C:\Users\admin\miniconda3\envs\VerbalVis\Lib\site-packages\websockets\asyncio\connection.py", line 1018, in connection_lost
+    self.recv_messages.close()
+    ^^^^^^^^^^^^^^^^^^
+AttributeError: 'ClientConnection' object has no attribute 'recv_messages'
+INFO:     connection closed
+INFO:     connection closed
+INFO:     60.249.87.103:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:16:28,010 INFO main: Client connected (qwen): session-13588939 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     60.249.87.103:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:16:45,171 INFO main: Client connected (qwen): session-bfb31386 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:18:30,283 INFO main: Client connected (qwen): session-80f28b6e model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:18:40,355 INFO main: Client connected (qwen): session-2b57b3ab model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:18:56,310 INFO main: Client connected (qwen): session-1b4c9cb6 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:20:09,812 INFO main: Client connected (qwen): session-079c3d36 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+2026-07-02 16:25:08,037 WARNING tools: Stats computation error for workspace-2: unsupported operand type(s) for +: 'int' and 'str'
+2026-07-02 16:25:13,617 WARNING tools: Stats computation error for workspace-3: unsupported operand type(s) for +: 'int' and 'str'
+INFO:     connection closed
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:56:17,952 INFO main: Client connected (qwen): session-c1729533 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     43.132.141.24:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 16:59:57,198 INFO main: Client connected (qwen): session-4b4d8e6e model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     43.132.141.24:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 17:00:21,896 INFO main: Client connected (qwen): session-f7a20b14 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 17:40:06,455 INFO main: Client connected (qwen): session-5514804b model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 17:46:53,546 INFO main: Client connected (qwen): session-04b4a186 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 17:47:14,525 INFO main: Client connected (qwen): session-91e6f3ec model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     2409:895b:3843:c820:18bc:abcc:57e3:6e0d:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 18:31:32,173 INFO main: Client connected (qwen): session-90fd64a6 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     2409:895b:3843:c820:18bc:abcc:57e3:6e0d:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 18:49:43,713 INFO main: Client connected (qwen): session-06960f8f model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     2409:895b:3843:c820:18bc:abcc:57e3:6e0d:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 18:50:49,206 INFO main: Client connected (qwen): session-b02f4e78 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     42.194.225.248:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 20:37:46,089 INFO main: Client connected (qwen): session-fdd786e1 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     43.139.146.212:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 20:44:28,717 INFO main: Client connected (qwen): session-3cc8db4e model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     2409:895b:3843:c820:18bc:abcc:57e3:6e0d:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 21:49:00,119 INFO main: Client connected (qwen): session-d2975a22 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     2409:895b:3843:c820:18bc:abcc:57e3:6e0d:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-02 21:49:11,609 INFO main: Client connected (qwen): session-cb4c2dd3 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-03 11:09:07,313 INFO main: Client connected (qwen): session-4641f82c model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-03 11:27:46,882 INFO main: Client connected (qwen): session-a8a13f71 model=qwen3.5-omni-plus-realtime
+INFO:     connection open
+INFO:     connection closed
+INFO:     191.40.7.49:0 - "WebSocket /ws?model=qwen3.5-omni-plus-realtime" [accepted]
+2026-07-03 18:16:29,849 INFO main: Client connected (qwen): session-54eeef86 model=qwen3.5-omni-plus-realtime
+INFO:     connection open

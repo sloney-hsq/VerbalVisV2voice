@@ -1,0 +1,483 @@
+14:50:23.809  CLIENT => {"type":"start_session"}
+14:50:32.574  SESSION_UPDATE_SENT
+{
+  "type": "session.update",
+  "session": {
+    "modalities": [
+      "text",
+      "audio"
+    ],
+    "instructions": "## Role and Objective\nYou are VerbalVis, a speech-first visual analytics assistant for the Olist\nBrazilian e-commerce dataset. The dashboard is the shared workspace.\n\nHelp the user explore orders, reviews, geography, categories, delivery, and\nrevenue through short spoken turns and tool-driven dashboard updates.\n\nGround claims in the current dashboard state or tool results. Do not invent\nfields, statistics, causes, or unsupported insights. If the dashboard should\nchange, call a tool instead of describing imaginary work.\n\nOpening: by default use Chinese to greet the user, name Olist, mention the four\nbase views in one short sentence, and ask what they want to explore. Do not\nchange the dashboard before the user answers.\n\n## Language\nUse the same language as the user. If the user mixes Chinese and English, keep\ntechnical field names in English and explain naturally in Chinese.\n\n## Dashboard and Fields\nBase views:\n- view-trend: Monthly Orders Trend.\n- view-review: Review Score Distribution.\n- view-map: Orders by State.\n- view-category: Category Revenue Top 15.\n\nMap \"first/second/third/fourth view\" and \"图一/图二/图三/图四\" to these ids.\nWorkspace charts created by append_visual return ids like workspace-1.\n\nUse only these field names:\n- order_month: \"YYYY-MM\"; default for broad time trends.\n- order_week: \"YYYY-WNN\"; weekly trends.\n- order_date: \"YYYY-MM-DD\"; daily trends or exact date filters.\n- order_dow: 1-7, Monday-Sunday.\n- order_hour: 0-23 purchase hour.\n- review_score: 1-5; 1-2 low, 4-5 high.\n- customer_state: two-letter Brazilian state code such as SP, RJ, MG.\n- product_category: English category slug such as bed_bath_table.\n- delivery_days: purchase-to-delivery days; nulls are excluded in aggregates.\n- revenue: Brazilian reais; say \"reais\", not \"dollars\".\n- order_count: aggregate count measure for bar/line charts; not a filter field.\n\nChinese aliases:\n评分/评价/星级=review_score; 州/地区/省=customer_state;\n品类/类别/商品种类=product_category; 配送/物流/送货时间=delivery_days;\n营收/收入/销售额/订单金额=revenue; 月份/月度=order_month;\n每周/周维度/按周=order_week; 每天/日期=order_date;\n星期/工作日/周末=order_dow; 时段/小时/几点下单=order_hour.\n\nUse the coarsest time grain that answers the request. Treat dashboard\nstatistics as facts, but do not claim causality without evidence.\n\n## Reasoning\nFor direct answers, simple highlights, and short confirmations, respond quickly\nand do not do extended reasoning.\n\nFor multi-step analysis, tool selection, failed tool recovery, or changing an\nanalysis path after interruption, reason before acting. Keep reasoning private:\ndo not narrate hidden reasoning, tool mechanics, or repeated context.\n\nWhen intent, field, value, or chart type is unclear, ask one concise\nclarification question instead of guessing.\n\n## Qwen Realtime Tool Calling\nYou are running in Qwen-Omni-Realtime voice mode with server VAD. There are no\nOpenAI-style assistant message channels. Speak naturally to the user, and call\ntools only through the provided function tools.\n\nWhen a dashboard change or exact dashboard lookup is needed:\n- Do not claim the action is complete before the tool result is returned.\n- If a short acknowledgement helps, say one brief phrase such as \"好的，我来处理。\"\n- Then call exactly the needed tool with valid JSON arguments.\n- After the tool result returns, give one short spoken result grounded in that\n  result and suggest at most one next step.\n\nNever mention internal event names such as session.update, response.create,\nfunction_call_output, or VAD to the user.\n\n## Verbosity\nDirect answers: 1 short sentence.\nTool results: give the key result first, then at most one useful next step.\nClarifying questions: ask one question.\nComparisons: mention only the most decision-relevant contrast.\n\nAvoid filler, long summaries, and repeated dashboard context.\n\n## Tools\nUse only the provided tools. Do not invent, rename, simulate, or assume tools.\nCall a dashboard tool when the user's intent is clear and required fields are\navailable. Use one tool call for one clear action; avoid parallel or redundant\ntool calls.\n\nhighlight_visual:\n- Direct attention to an existing view; it does not change data.\n- Use for questions clearly answered by an existing view.\n- If the user says \"this one\", \"highest\", \"lowest\", or names a visible item in\n  an existing view, highlight that view or item instead of creating a chart.\n\nfilter_data:\n- Narrows the global dataset; all views refresh automatically.\n- Operators: eq, neq, in, gte, lte, between.\n- append=true adds an AND filter; append=false replaces filters.\n- field=\"__all__\" clears all filters.\n- If filtered_rows=0, say so and suggest relaxing or clearing filters.\n- For Chinese \"低于三分\" or \"小于三分\", use review_score lte 2. For \"三分及以下\",\n  use review_score lte 3. For \"高于三分\", use review_score gte 4.\n- For \"最高订单量的月份\", highlight view-trend first if the existing trend\n  already shows the answer; filter only if the user asks to filter to that\n  month.\n\nremove_filter:\n- Remove filters for exactly one field while preserving the others.\n- Use when the user says to remove one constraint, such as \"keep November and\n  SP, but remove the rating filter.\"\n\nappend_visual:\n- Create a chart only if no existing view or workspace chart answers the\n  request. Otherwise highlight the existing view.\n- chart_type: scatter, bar, line, histogram.\n- x must be a valid field. y must be a valid field or order_count for\n  aggregate count bar/line charts.\n- Do not use order_count for scatter plots.\n- color is optional for scatter/bar/line; valid values are customer_state,\n  product_category, review_score. For bar/line, color becomes an extra grouping\n  field.\n- For \"按周分布\", use append_visual with chart_type=line, x=order_week,\n  y=order_count, unless an existing weekly chart already answers it.\n\ndelete_visual:\n- Delete a workspace or dashboard view only when the user clearly asks to remove\n  it.\n\nTool recovery:\n- If a tool fails, retry once with corrected arguments when the fix is obvious.\n- Do not repeat the same failed tool call with identical arguments.\n- If still blocked, briefly explain the limitation and ask for the missing\n  information or offer the closest supported action.\n\n## Unclear Audio\nAct only on speech you understand with confidence. If the transcript is unclear,\nfragmentary, background speech, or not addressed to you, ask one brief\nclarification question or wait for a clearer request.\n\nDo not infer missing field names, dates, states, categories, or numeric values\nfrom unclear audio.\n\n## Entity Capture\nCapture entities exactly:\n- Brazilian state codes are uppercase two-letter codes, for example SP.\n- Dates must keep the requested grain: month YYYY-MM, week YYYY-WNN, date\n  YYYY-MM-DD.\n- Product categories use exact English slugs such as bed_bath_table.\n- Numeric thresholds keep the user's operator: \"at least\" -> gte, \"at most\" ->\n  lte, \"between\" -> between.\n\nFor vague values such as \"slow delivery\" or \"high rating\", choose a practical\ndataset threshold only if the user accepts your framing or the threshold is\nalready established in the conversation. Otherwise ask a short question.\n\n## Long Context Behavior\nThis is a cost-sensitive Qwen realtime voice session using server VAD. The\nnewest completed user utterance wins when interruption is enabled.\n\nDo not repeat old analysis unless asked. Use current filters, highlighted view,\navailable view ids, and tool results from the latest injected dashboard update.\nWhen the user changes direction, stop pursuing the previous path and continue\nfrom the latest request.\n\nCURRENT DASHBOARD CONTEXT (authoritative, refreshes after each tool call):\nDashboard state:\nfilters=none\nrows=96478\nhighlighted=none\nviews:\n- view-trend | Monthly Orders Trend | line | peak_month=2017-11, peak_value=7289, avg_monthly=4194.7\n- view-review | Review Score Distribution | bar | low_score_ratio=0.127, dominant_score=5\n- view-map | Orders by State | bar | top_state=SP, top_state_count=40501, top_state_ratio=0.42, state_count=27\n- view-category | Category Revenue (Top 15) | bar | top_category=health_beauty, top_revenue=1412089.53, category_count=15",
+    "voice": "Tina",
+    "input_audio_format": "pcm",
+    "output_audio_format": "pcm",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "filter_data",
+          "description": "Apply a filter to the global dataset. All dashboard views update automatically. Pass field='__all__' to clear all filters.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "enum": [
+                  "order_month",
+                  "order_week",
+                  "order_date",
+                  "order_dow",
+                  "order_hour",
+                  "review_score",
+                  "customer_state",
+                  "product_category",
+                  "delivery_days",
+                  "revenue",
+                  "__all__"
+                ],
+                "description": "Field to filter on. Use '__all__' to clear all filters."
+              },
+              "operator": {
+                "type": "string",
+                "enum": [
+                  "gte",
+                  "eq",
+                  "between",
+                  "neq",
+                  "in",
+                  "lte"
+                ],
+                "description": "Comparison operator."
+              },
+              "value": {
+                "description": "Filter value. Use a string/number, or an array for 'in' and 'between'.",
+                "type": "string"
+              },
+              "append": {
+                "type": "boolean",
+                "description": "true = add to existing filters; false = replace all."
+              }
+            },
+            "required": [
+              "field"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "highlight_visual",
+          "description": "Highlight a dashboard view to direct user attention. Other views are dimmed.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "view_id": {
+                "type": "string",
+                "description": "ID of the view to highlight."
+              },
+              "highlight_element": {
+                "type": "string",
+                "description": "Optional data point to emphasise inside the view (e.g. '2017-11', 'review_score=1')."
+              },
+              "dim_others": {
+                "type": "boolean",
+                "description": "Whether to dim other views. Default true."
+              }
+            },
+            "required": [
+              "view_id"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "remove_filter",
+          "description": "Remove active filters for one field while preserving all other filters.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "enum": [
+                  "order_month",
+                  "order_week",
+                  "order_date",
+                  "order_dow",
+                  "order_hour",
+                  "review_score",
+                  "customer_state",
+                  "product_category",
+                  "delivery_days",
+                  "revenue"
+                ],
+                "description": "Field whose active filters should be removed."
+              }
+            },
+            "required": [
+              "field"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "append_visual",
+          "description": "Create a new chart and append it to the dashboard grid.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "chart_type": {
+                "type": "string",
+                "enum": [
+                  "scatter",
+                  "bar",
+                  "line",
+                  "histogram"
+                ]
+              },
+              "x": {
+                "type": "string",
+                "enum": [
+                  "order_month",
+                  "order_week",
+                  "order_date",
+                  "order_dow",
+                  "order_hour",
+                  "review_score",
+                  "customer_state",
+                  "product_category",
+                  "delivery_days",
+                  "revenue"
+                ],
+                "description": "X-axis field."
+              },
+              "y": {
+                "type": "string",
+                "enum": [
+                  "order_month",
+                  "order_week",
+                  "order_date",
+                  "order_dow",
+                  "order_hour",
+                  "review_score",
+                  "customer_state",
+                  "product_category",
+                  "delivery_days",
+                  "revenue",
+                  "order_count"
+                ],
+                "description": "Y-axis field or order_count for count aggregations."
+              },
+              "color": {
+                "type": "string",
+                "enum": [
+                  "customer_state",
+                  "product_category",
+                  "review_score"
+                ],
+                "description": "Optional color encoding field."
+              },
+              "title": {
+                "type": "string",
+                "description": "Human-readable chart title."
+              }
+            },
+            "required": [
+              "chart_type",
+              "x",
+              "y",
+              "title"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "delete_visual",
+          "description": "Delete a chart/view from the dashboard grid by its view_id. Use this to remove a view the user no longer wants. The remaining views are unaffected.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "view_id": {
+                "type": "string",
+                "description": "ID of the view to delete (e.g. 'workspace-1', 'view-trend')."
+              }
+            },
+            "required": [
+              "view_id"
+            ]
+          }
+        }
+      }
+    ],
+    "turn_detection": {
+      "type": "server_vad",
+      "threshold": 0.5,
+      "prefix_padding_ms": 300,
+      "silence_duration_ms": 800,
+      "create_response": true,
+      "interrupt_response": true
+    }
+  }
+}
+14:50:32.615  SESSION {"event_id":"event_Bjd9s3aG7TDZGpJhpmb4y","type":"session.created","session":{"object":"realtime.session","model":"qwen3.5-omni-plus-realtime","modalities":["text","audio"],"voice":"Tina","input_audio_format":"pcm","output_audio_format":"pcm","input_audio_transcription":{"model":"qwen3-asr-flash-realtime"},"turn_detection":{"type":"server_vad","threshold":0.5,"prefix_padding_ms":300,"silence_duration_ms":800,"create_response":true,"interrupt_response":true},"id":"sess_PqDON6pd9S53VjuqbWt9O"}}
+14:50:33.392  SESSION {"event_id":"event_KCgUoYZCBmyjX6wIoFCMT","type":"session.updated","session":{"id":"sess_PqDON6pd9S53VjuqbWt9O","object":"realtime.session","model":"qwen3.5-omni-plus-realtime","modalities":["text","audio"],"instructions":"## Role and Objective\nYou are VerbalVis, a speech-first visual analytics assistant for the Olist\nBrazilian e-commerce dataset. The dashboard is the shared workspace.\n\nHelp the user explore orders, reviews, geography, categories, delivery, and\nrevenue through short spoken turns and tool-driven dashboard updates.\n\nGround claims in the current dashboard state or tool results. Do not invent\nfields, statistics, causes, or unsupported insights. If the dashboard should\nchange, call a tool instead of describing imaginary work.\n\nOpening: by default use Chinese to greet the user, name Olist, mention the four\nbase views in one short sentence, and ask what they want to explore. Do not\nchange the dashboard before the user answers.\n\n## Language\nUse the same language as the user. If the user mixes Chinese and English, keep\ntechnical field names in English and explain naturally in Chinese.\n\n## Dashboard and Fields\nBase views:\n- view-trend: Monthly Orders Trend.\n- view-review: Review Score Distribution.\n- view-map: Orders by State.\n- view-category: Category Revenue Top 15.\n\nMap \"first/second/third/fourth view\" and \"图一/图二/图三/图四\" to these ids.\nWorkspace charts created by append_visual return ids like workspace-1.\n\nUse only these field names:\n- order_month: \"YYYY-MM\"; default for broad time trends.\n- order_week: \"YYYY-WNN\"; weekly trends.\n- order_date: \"YYYY-MM-DD\"; daily trends or exact date filters.\n- order_dow: 1-7, Monday-Sunday.\n- order_hour: 0-23 purchase hour.\n- review_score: 1-5; 1-2 low, 4-5 high.\n- customer_state: two-letter Brazilian state code such as SP, RJ, MG.\n- product_category: English category slug such as bed_bath_table.\n- delivery_days: purchase-to-delivery days; nulls are excluded in aggregates.\n- 
+14:50:33.392  OPENING_RESPONSE_CREATE
+14:50:33.392  DASHBOARD_CONTEXT_UPDATED Dashboard state:
+filters=none
+rows=96478
+highlighted=none
+views:
+- view-trend | Monthly Orders Trend | line | peak_month=2017-11, peak_value=7289, avg_monthly=4194.7
+- view-review | Review Score Distribution | bar | low_score_ratio=0.127, dominant_score=5
+- view-map | Orders by State | bar | top_state=SP, top_state_count=40501, top_state_ratio=0.42, state_count=27
+- view-category | Category Revenue (Top 15) | bar | top_category=health_beauty, top_revenue=1412089.53, category_count=15
+14:50:33.660  CLIENT audio chunk len=4268
+14:50:33.762  CLIENT audio chunk len=4268
+14:50:33.860  CLIENT audio chunk len=4268
+14:50:33.960  CLIENT audio chunk len=4268
+14:50:34.059  CLIENT audio chunk len=4268
+14:50:34.159  CLIENT audio chunk len=4268
+14:50:34.260  CLIENT audio chunk len=4268
+14:50:34.360  CLIENT audio chunk len=4268
+14:50:34.460  CLIENT audio chunk len=4268
+14:50:34.560  CLIENT audio chunk len=4268
+14:50:34.660  CLIENT audio chunk len=4268
+14:50:34.740  {"event_id":"event_YN5doUOabE9HmZHLPJ2bw","type":"response.created","response":{"id":"resp_I4nEcOl2KAQBAPxerRpNz","object":"realtime.response","conversation_id":"conv_UJK1uQ43OzZstAuDMgmpS","status":"in_progress","modalities":["text","audio"],"voice":"Tina","output_audio_format":"pcm","output":[]}}
+14:50:34.741  {"event_id":"event_CBLOQDYQRIObHGHphQnw7","type":"response.output_item.added","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","output_index":0,"item":{"id":"item_VzhuuhFe69U4HvhVczSa1","object":"realtime.item","type":"message","status":"in_progress","role":"assistant","content":[]}}
+14:50:34.741  {"event_id":"event_DxY8nMdd2Hf7XwEGp8xaY","type":"conversation.item.created","item":{"id":"item_VzhuuhFe69U4HvhVczSa1","object":"realtime.item","type":"message","status":"in_progress","role":"assistant","content":[]}}
+14:50:34.741  {"event_id":"event_Wfb2gjf9xOkofs4LlzryJ","type":"response.content_part.added","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"part":{"type":"audio","text":""}}
+14:50:34.741  {"event_id":"event_VBGgqN1BZfcR7bvrCkwpG","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"你好"}
+14:50:34.760  CLIENT audio chunk len=4268
+14:50:34.863  CLIENT audio chunk len=4268
+14:50:34.911  {"event_id":"event_CQDUDcQgsdSqgJd38iqAX","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"，这里是"}
+14:50:34.912  {"event_id":"event_ZM3UqQAdchat1d5BDEZnr","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":" Olist 巴西电商"}
+14:50:34.912  {"event_id":"event_OCj7VROI5PiMFtrSThoWA","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"数据"}
+14:50:34.912  {"event_id":"event_Pi6DaBg8p6HBxR6VgDSbj","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"助手"}
+14:50:34.912  {"event_id":"event_JkBm6aLKf8SsKl6bK9aLG","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"。当前仪表盘"}
+14:50:34.912  {"event_id":"event_ZtBXrB4byFL6iFlVTVpZY","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"包含"}
+14:50:34.912  {"event_id":"event_QPNL8Ek15VKcc1aroUUM9","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"月度"}
+14:50:34.912  {"event_id":"event_JP8lgWL4R6nBF3VmPcqhl","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"订单趋势、评分"}
+14:50:34.913  {"event_id":"event_TAa351RVu97jNPABdF9XF","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"分布、各"}
+14:50:34.913  {"event_id":"event_HL7VmczsspiT8LQSEl1JK","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"州订单量和"}
+14:50:34.913  {"event_id":"event_HbTrSWK6rweQJTeRaVBxl","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"品类营收"}
+14:50:34.913  {"event_id":"event_AS7FciaO7mIaawdoRePod","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"前十五"}
+14:50:34.913  {"event_id":"event_YuZ6ggZ5LLuYL4YOaIT7I","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"这四个"}
+14:50:34.913  {"event_id":"event_BNwPEcrukYRZFx9mY29OP","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"基础"}
+14:50:34.913  {"event_id":"event_NyHl7EdNObC7S1tcnoMrd","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"视图。你想先"}
+14:50:34.913  {"event_id":"event_Ebq2nFb5MsPTkFtQ15ZBB","type":"response.audio_transcript.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"探索哪一部分？"}
+14:50:34.960  CLIENT audio chunk len=4268
+14:50:35.060  CLIENT audio chunk len=4268
+14:50:35.161  CLIENT audio chunk len=4268
+14:50:35.260  CLIENT audio chunk len=4268
+14:50:35.360  CLIENT audio chunk len=4268
+14:50:35.460  CLIENT audio chunk len=4268
+14:50:35.560  CLIENT audio chunk len=4268
+14:50:35.659  CLIENT audio chunk len=4268
+14:50:35.759  CLIENT audio chunk len=4268
+14:50:35.860  CLIENT audio chunk len=4268
+14:50:35.960  CLIENT audio chunk len=4268
+14:50:36.060  CLIENT audio chunk len=4268
+14:50:36.160  CLIENT audio chunk len=4268
+14:50:36.260  CLIENT audio chunk len=4268
+14:50:36.360  CLIENT audio chunk len=4268
+14:50:36.459  CLIENT audio chunk len=4268
+14:50:36.518  {"event_id":"event_Z5UKJ1yPhc7MudQro6H2u","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+14:50:36.560  CLIENT audio chunk len=4268
+14:50:36.660  CLIENT audio chunk len=4268
+14:50:36.759  CLIENT audio chunk len=4268
+14:50:36.860  CLIENT audio chunk len=4268
+14:50:36.960  CLIENT audio chunk len=4268
+14:50:37.060  CLIENT audio chunk len=4268
+14:50:37.159  CLIENT audio chunk len=4268
+14:50:37.260  CLIENT audio chunk len=4268
+14:50:37.359  CLIENT audio chunk len=4268
+14:50:37.460  CLIENT audio chunk len=4268
+14:50:37.560  CLIENT audio chunk len=4268
+14:50:37.660  CLIENT audio chunk len=4268
+14:50:37.759  CLIENT audio chunk len=4268
+14:50:37.859  CLIENT audio chunk len=4268
+14:50:37.959  CLIENT audio chunk len=4268
+14:50:38.059  CLIENT audio chunk len=4268
+14:50:38.160  CLIENT audio chunk len=4268
+14:50:38.260  CLIENT audio chunk len=4268
+14:50:38.360  CLIENT audio chunk len=4268
+14:50:38.460  CLIENT audio chunk len=4268
+14:50:38.560  CLIENT audio chunk len=4268
+14:50:38.660  CLIENT audio chunk len=4268
+14:50:38.759  CLIENT audio chunk len=4268
+14:50:38.859  CLIENT audio chunk len=4268
+14:50:38.960  CLIENT audio chunk len=4268
+14:50:39.060  CLIENT audio chunk len=4268
+14:50:39.159  CLIENT audio chunk len=4268
+14:50:39.262  CLIENT audio chunk len=4268
+14:50:39.360  CLIENT audio chunk len=4268
+14:50:39.460  CLIENT audio chunk len=4268
+14:50:39.559  CLIENT audio chunk len=4268
+14:50:39.662  CLIENT audio chunk len=4268
+14:50:39.760  CLIENT audio chunk len=4268
+14:50:39.860  CLIENT audio chunk len=4268
+14:50:39.959  CLIENT audio chunk len=4268
+14:50:40.059  CLIENT audio chunk len=4268
+14:50:40.160  CLIENT audio chunk len=4268
+14:50:40.260  CLIENT audio chunk len=4268
+14:50:40.360  CLIENT audio chunk len=4268
+14:50:40.460  CLIENT audio chunk len=4268
+14:50:40.562  CLIENT audio chunk len=4268
+14:50:40.659  CLIENT audio chunk len=4268
+14:50:40.760  CLIENT audio chunk len=4268
+14:50:40.860  CLIENT audio chunk len=4268
+14:50:40.959  CLIENT audio chunk len=4268
+14:50:41.009  {"event_id":"event_AFZpb6uW6iwiR93z34pzZ","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"S//LAYcBWwK/Ba8JPw0/EZ8TnxX/Gv8eXx7fHP8cvxyfG/8bvxkfGL8aPx5/IL8iPye/LT82Pz//QH86vzZ/M78ufyLfEt8GAf6B+LHzofFR89H3yf7fBQ8IPwzvD88PfwzfBz8D9P/F/BH2Qe8B73HyAfER8cHy4fKh8qHzsfMR8OHrweph6GHoAelB6OHooemB6kHpwehB6EHjwd4B34HfQd8B30HhoeJh5EHpoe3h70Hx8fFR81H1EfUh8wHxEfCB7qHugfFh8kHy4fTh9+H50ftl/QX+Ov+hAO7/2f63AGsCpwLPBE8HzwofEV8Y3xv/HB8fvyG/IF8efxqfFj8VXxWfF38X/xffHL8l/zC/N783Pzk/PH86fzS/Kv8f3xJvCccC0fnh8/H0Efix+en63fybAy8KHw1/CQ8HbwgfBpgATf25+XH08fKB8wHxoe1B8WHzYfHB70HtIeoB68HsAewh6UHqIe3B7+HygfAB7YHqQenh5QHjoeCB20HYgduB3iHgIePB5gHr4e8B9rH4Efrx+bn4KfiB9zH0UfFh72HtIe2h7vHw4fFh9AH40fot/Yv/TQFzARcAB//5/ZP+BwKPBf8I/wv/Dt8T3xv/IX8g3xwfG78Z3xZfFZ8THxBfER8Vvxn/ID8o/y7/N78/vz4/Oj87/ze/Kx8fnxR/B/38eflB9BHwwfDB8wn6twRPCh8Ljw/fEi8O7whvB6MA8fdh9eHxoe4x8LHy4fKB9dH54fYB9OH30fdh7+Hq4elB54HmQenB6eHmYegh66HrAetB6AHlgeEB34Hegd0B3gHfAeHh5SHt8fMx9oH3Ufqp+pH5Ufgx9YHvAexh60Hqoelh66HtAe9h8hH26fiB+938pf2d/pP+Sf44AMsC9wK3BF8Ifw1/Et8XPxtfHN8dvx8/H18b3xV/Et8TfxS/FX8WHxifGv8fvyf/MH83fzo/OT85vza/MH8sPyLfERcElQBj/uH4YfSx9VH3YfvrAfcHXwl/Cr8J3whvCtcHnwPt/mn7sfRx8SH0wfZh8eHsoeyh7YHvQfBB7kHroekB6gHuAfAh74HuAe/h7gHuIe0B62HnwePB3wHfQd5B3MHcQd5B38HhAehB7kHxQfSh9gH4SfpR+1H5cfXB8eHvYe9B8FHwYe7B7gHyIfYh+bH6qfth+wX8f/5R/0b/j/8zAv8EDwk/DZ8QHxNfF18cPx7/Hf8afxh/F18WvxJ/D18Nnw9/E78YnxzfH78mPzN/PL89Pzu/OL82PzC/KB8cvww3AdX94fvJ+CH4Ufrl/v8EbwmfDF8PLw4PC38FfwP9AEH7EfaR9CH0AfJx8dHzQfVh8kHxAfIR8vHwwe5h7GHsge0B7WHtIe2h6wHrAesB6AHkYePB4mHhweDB34HfweOh58HpoexB7+Hw0fKh9dH1gfMB8ZHwgfCh7qHswesh68HrQe2B70HxgfNB9hH4ufoB/qv/Q/8B/1r/jv/e/0cBewHyAH8CNwVPCT8NHw8fEf8W/x0/IX8ifyK/IN8dPx4fHd8YfxX/En8RnxO/GN8fPyZ/LP8xvzV/Ov84/zI/LT8mHxofDFMDv/4B+JHzsfMB9wn7fv/PBW8IfwnvC38M3wnXBW8Cd/6x+fH3YfQx8EHuQe7B7sHvAe5h6+HsAe/B7cHsge2h7OHroe1h7yHuQe6B6yHpwejh5+HjYeBh4AHfAeDB4oHjweIh50Hsge6B8DHz8fNR9QH4CfjB90H3UfZR9eH08fOh8pHyEfJx8aHy0fNR9HH24fix+gH92f9DApsD1w
+14:50:41.060  CLIENT audio chunk len=4268
+14:50:41.159  CLIENT audio chunk len=4268
+14:50:41.259  CLIENT audio chunk len=4268
+14:50:41.359  CLIENT audio chunk len=4268
+14:50:41.461  CLIENT audio chunk len=4268
+14:50:41.559  CLIENT audio chunk len=4268
+14:50:41.659  CLIENT audio chunk len=4268
+14:50:41.759  CLIENT audio chunk len=4268
+14:50:41.859  CLIENT audio chunk len=4268
+14:50:41.959  CLIENT audio chunk len=4268
+14:50:42.060  CLIENT audio chunk len=4268
+14:50:42.159  CLIENT audio chunk len=4268
+14:50:42.259  CLIENT audio chunk len=4268
+14:50:42.360  CLIENT audio chunk len=4268
+14:50:42.459  CLIENT audio chunk len=4268
+14:50:42.559  CLIENT audio chunk len=4268
+14:50:42.663  CLIENT audio chunk len=4268
+14:50:42.759  CLIENT audio chunk len=4268
+14:50:42.860  CLIENT audio chunk len=4268
+14:50:42.914  {"event_id":"event_QfBSd8Kck4WVFyYaNiu3n","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"cwI/BGcCXf2x9sH1gfrXBg8Npwdp+qHzJwXvBo392fn5/TsBPwMRASn4oftHBF8KtwSx+FH0kfnRAf8Exwf/Aun8Qf5nBLn5MfOfBU8M4wLp+n3/ifwV/DH9Lf0DALcHowIl/av+ofup+mMAvwdB/IH2zP+3BvH4YfkjAS8DNwUnApn6+fjVATcFzP9F/d0B+P+x/Mn+AwMzA5cGTQF5+jH+uf+gAGMDffxp+z8FfwgnAYn6oflV/ScE1wXLA8n9lfxPAh8FD/6V/Fz/JwYrAzH32fga/38B+wIfCY0AkfbR+Zn9YABvAwUBXf6TAbz/IfrB+0cEfwivA+n6MfYR+9cFhwf7AzH+0fRx924AJwZnAy8CHwbe/yH3QfJR+r8HjwuXBbH7NfxNAJUBXQAL/gAAQ/+p+9H9twFvA/MDtwRrAin4cfWx/a8EVwYbAvP/wAA4/y0BmwPXAl38MfcN/IIAkwLHAj8FlwZx/3H5+fl5+wAATwR/Arj/fQFDAiUBqQFIAPv+Vv8LAqT/cf2PARcFLwiXBQ8BCf25/QEBqQH//xX9T/6V/7cB0wJiAAn9QwC7AkwACfsJ+Tn9Af+CAEEBKwGtAOoAl/7p+BH3XfzjAhMDlgAw//H7Mfy1/W3+Mf4z/mkBswKUAJH9oP9bAhgAzf4H/h391v/xAf8B1gCmANr/6f78/wv/lf4B/r3+2//x/ob/c//ZAR8DtwBa/98BowODAaMAEwPnBj8GJwSzAscE7waXBicFUwOnBLcFXwVHBp8FbwavB08GVwTXAvcDNwQ/BDMD3wJXBBcErwFNAYUBIQEVAJ39YfxZ+/X88/6T/iX8afmR9zH2sfYx93H3qfjR+An6OfpR99H1EfbB9gH2wfWx9gn4cfkJ+pH5Afhx9hH1wfa5+BH5Ufox+mH5Afk5+YH5Qfr5+dH56frp/A/+I/7V/8AAdQEfA8cEfwbPCV8LrwuPCz8MDw+/El8UXxRfEx8TPxW/Fd8YnxyfHl8ePxz/Gd8YXxh/GJ8ZXxn/F38VXxKfEK8PrwqfBUgAC/4R/cn5ofkh+Wn5AfQh7GHngeQB5WHj4eKB48Hk4eQB4QHfAd3B3cHcgdtB3oHggeTB5OHkoeUB52Ho4ehh6iHtgfCB8jH0cfVB+UH6wfr5+mn79fxB/b/+BQFjA7cFTwWHBT8HHwmfDO8NfxBfE18VnxUfFp8Xvxz/IH8iPyG/IL8lfym/LT8v/y9/Mf8s/yb/JP8jPyZ/Iv8fHxw/GX8VzwzPCk8FmwPt/YH3wfQR89Hwweuh5UHhIeHB3AHbQdnB2kHdwdnB1kHUwdXB2cHYQdkB2cHcQd/B4cHlgeeB7AHqgevh7YHxofgJ/Sb/v/45/AH7Yf0AAPMCnwUHBi8ETwPPAX0BdQHW/8T/qQHMAJ8BRQG5Ad0ADf1x+xX9nwUPDP8RvxZ/F/8ZXxnfGT8bPxv/H/8pvzR/On89vzX/Mj8tvye/KH8nfyx/LD8rfyC/Gd8R7wr/DN8FDADR9hHw4fDR8MHqQeTh4AHawdQBy4HLAdIB1gHVwdHB0UHPAdCBzAHTwdrB3YHewd4B5IHqQe/h7rHzYfcB+9f+v/+vBH8I3wo/DO8LPwvvCo8MzwrPCi8JLwjPCe8G/wMVAen+sfyZ+3n6sfqx/GH6kflB+Fn4KfuJAK8HDw1/FF8Xnxy/Hd8bHx7/ID8s/zQ/PX8+fz2/NX8w/y7/KP8tfyl/LT8ovx//Fb8PXxAPBbz/4fKB8YHvgefh4iHggd8B2UHRQciByEHJQcgBy8HLwc4BzQHOwc
+14:50:42.959  CLIENT audio chunk len=4268
+14:50:43.059  CLIENT audio chunk len=4268
+14:50:43.159  CLIENT audio chunk len=4268
+14:50:43.259  CLIENT audio chunk len=4268
+14:50:43.360  CLIENT audio chunk len=4268
+14:50:43.419  {"event_id":"event_FA2pwV8YvVSlBYYOEhG8M","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"Dw+/Fb8b3x+/I78oPy0/MX8v/y5/LD8mPyH/Fz8TPwvh/9H2weuB6IHk4eEB3UHWAdjB2mHg4eMh5CHnwehh7NH1sfgR+sn5VfwvBJ8EfwbfCj8PnxI/Er8Unxh/Gb8avxp/GB8Tnw1PDE8KDwTB+hH0UfCh7AHqgeWh4qHgQd5h4CHgwd8h4EHgweOh5CHkYeSh52HrIe4h8FHywfeJ+xUBLwZfCR8Mrw2fEf8TvxIfER8Qrw8/Dd8Jjwd3B+8GXwhfCh8MDw9/E/8Z/x9/JH8mPyr/Kr8sfzE/MH8r/yJfG58avxL/CgsDofnR88Hroekh52HkoeKB4SHjYeKB4yHpYevB7WHtIe4x86Hzsfex+UH6ifuJ+6cA/wNnBq8Hbwi/Cm8K7wovCx8KnwgvBUEBAf5Z+GH14fPh7+HrQebh5KHmwebh5iHn4efB6aHrIe9x8eHysfPB9AH3Ife5+AH6ufq9/I38Gf3D/uIAHwQHBm8GTwiPCd8MvxD/Eb8UXxWfGX8dfyC/Iz8n/yn/KT8rfyw/MD8vPys/J78iXx5/GJ8R3wqVAfH3cfLB6oHmgeFB3QHdgdjB2UHcgd6h4kHjweeh6+HtofLR9RH5MfrJ+13+uP+XAg8DpwWHBRcFTwcXB6cH5wa/BT8EfwH1/Z38ofrB96Hzge+B7aHsAevB6eHpoeiB6UHqQeyB7mHvEfEh8lHzAfXR9iH42fi5+Tn7sfsV/TH/IQH/A78EjwfPCZ8M3xA/FP8X/xk/Hn8iPyi/Kz8uvzG/MT8y/zO/Nf80PzD/Jz8lvx8/Gh8SxwdmAEH14e7h6AHkwd1B2MHWAdYB1wHXwdqB3WHgoeQh50HsMfBB87H3Ifkh+pH83/7DATcDxwL3AxcEdwUvBscG9wZzA1sBFABIAKX94fkx9yH0wfFB74HuYezh6uHowemB6oHpwerh64Huge+h8JHxcfRh9xn58foZ+6H8wf6TAXcDNwX3Bd8IXwzPDX8RXxT/GB8dfyA/JT8rPy6/Mb8zvzP/Nb82fzf/Mn8tfyc/JD8ePxafDisDDfwh9UHvQehB4YHdQdtB2gHYQdjB2UHcwd7h4WHkQefh6qHtsfKh87H1cfd5+kn9//6S/xYAOwIzAocFywP3Ag8CtQF3Ayv/1fx5+in58fdx9GHysfAh7sHtYe2h7aHsAeuh7eHugfBx8NHw8fNh9bH2cfgx+Vn7SfzB/TkAOQFrAzcFzwhfC48MLw8fE38Znx2/IP8l/yq/Lz8zPzR/N/84fzk/On80fzD/Kf8lfyH/FV8NzwNJ+3H0IeyB5QHhAdtB2IHVAdaB2IHXwdpB3IHgIeOh5mHroe5h8nHyofZJ+Un7Zf63/jEAZACiAEsDJwN/AjMBpv9mAF/+Yf3x+pn5yfgR9RH0YfIB8mHx4e4B70HuAe5B7uHu4e9B74HvUfDR8VHz0fMx9ZH2wfYR+dH7lf62AJcC1wWPCf8MPxA/Fb8Zfx4/Ij8oPy4/NL81fza/Ov86vz4/PD84/zN/Lf8pPyNfGr8RrwZd/dH1wezB54HfgdkB2AHUAdUB0wHWgdqB2sHfweGh5mHrIe7h8dHzYfSB9zn5UftB/Dn7ef0B/XAAqwDUAKUBpwDfAqEBUwGBAHf+XfwR+0H4gfXB8kHwge9B7GHqAenB6eHpgerh6gHs4e3B7wHzwfSR9tH3AfrN/GT/JwEvAh8EvwfPCc8Mjw//E/8Y3xw/JL8oPy//Mr80fzv/PX9Af0A/PX87fzV/MP8q/yJ/Gd8M1wTh+2HyYeuB4kHegdiB08HUAd
+14:50:43.459  CLIENT audio chunk len=4268
+14:50:43.560  CLIENT audio chunk len=4268
+14:50:43.659  CLIENT audio chunk len=4268
+14:50:43.759  {"event_id":"event_OeL61cZTVx4CTQMpRxIE7","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"AgAEAAYABQAGAAcACQABAAEACgD8/wIALAACAPr/HAAHABQA8P8QACMA+P8qAO//EgAeAPX/GQAEAAkAFQAUAP//GgAIAAwACwAEAPr/CAAdAPT/BQARAAEA+P8LAPH/BQADAAIAAwD4/wAAAwD9/+//CAD0/+7/9//1//P/7//9//3/6P/6//b/8P/5//b/9f/3//v////+//b/+v/6/wIA8f8DABMA9//7/wcACAD+/wgA//8MAA4AAQAMAAEACQAMAAYACwASAAkADAARAA8ABgASABAA//8SAA0ACgATAAoADgAOAAkABgAHAAgAAwAIAAcAEQAMAP//DgANAAMADQABAAkABwAAAAUAAQABAAMAAAAAAAIABAD3/+//BADy//n//v/2//f/8P/6/+//7v/w/+//8//p/+n/8f/z/+n//v/u/9P/8//v/9//6//l/+n/5//n/+H/9f/w/9z/7v/k/+n/4//i/+7/6//s/+n/4//q//L/7v/m//j/8P/v//b/8P/9//D/AAD4//3/BQD0/wsAAwAAAAoACAANAAYADgACAAsADgAKAA0ADQAXAAgADgAUAAsABQAYABMAEwAUABcAFwATABYAGAAWABYAGgAWABIACwAaABAAEQASAA0AEQASABIADgAMAAkACQAAAAgABwD//wEAAAD9//7/+v/3//z/8/////H/7v/s/+X/9P/k/9j/6P/o/+L/3v/a/97/2v/c/9j/6P/b/9f/3//X/9//3v/V/97/2P/Q/9v/3f/d/+P/5v/b/+T/5P/q/+X/6f/n/+n/8f/l/+//8v/u//D/+P/3//7/+v8EAAUA+/8EAAMAAQAOABYACgANABUAFwAeAA0AJwAiABoAIQAfAB4AIwAtACAAKQAnACMAHQAyACQAJwA1ACAALgAwACsAKwAjACEAGgAzACEAGAAhABwAHQATABIAFQAIABIAEAAAAA4A+/8GAAIA/P8AAAIA///w//H/9P/v//P/8//j/+//5v/i/+D/2P/k/9v/1P/i/+L/2v/V/9X/zv/Z/9T/1v/T/83/3P/X/+L/4f/X/+r/5P/c/+r/6f/y//D/9P/y//7/9f///woA9f8TABAAAgACABcAFwAfAB0AJAAmADEALAAgAEMAJQAlADwASgBGADwAPABZAFcAQQBSAGoAPwBUAEkARABeAEEAVQBhAFAAHgBQAGYASQA4AEoAMwA6ACMAIwBSABIAKAANAAMAAAAPAAEA7/8KABUAAADR//z/1//m/9//0v/C/8r/5v/o/63/v//a/7b/df+5/8L/cP+r/33/IQDf/6D/DAD6//n/0P/m//v/9P/k////9/8AAB8A0//8/+f/LQCx/w4Asv+W/5H/2/+N/uP/FgBV/rH9Sfv7/mn9ZQCfAvv/LwDmANcAFwBFAGX/lQCoABsAMQCBACIABwHhANoA2wFtAd8AMQFnAYUBFQFfAaMBvQF3AcUBtwHmAJ8A/ADtABMBKQHYAF0B5QBvAaMAaQB6AOj/XAAxAewArwAvAWgASv/Z/8n+lgCT/sH9Qf4B/kcAZ/6v/7H+PP82//n82f2Z/bH9e/7V/HX+0/5F/sn+sf7T/o3+aAAF/r38GgBx+0H84wE/B2cGuwGbAFUBK/5h+p0AWftp+9n6qfrZ/C39JwAb/v38swKPAhkBUQEwAH3+2fuN/WH8Xv+p/bn7GftJ/An5hfzX/gH9VwZvCU8GzwOvBGwAhwITAqsC3wWXBF8I3wVnBtMCqwL/A1UApQGLAmkATQEL/1sBhwG3AdsBdf
+14:50:43.760  CLIENT audio chunk len=4268
+14:50:43.860  CLIENT audio chunk len=4268
+14:50:43.959  CLIENT audio chunk len=4268
+14:50:44.060  CLIENT audio chunk len=4268
+14:50:44.079  {"event_id":"event_I2dkEJQbbD7MHOXfyMncu","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"/zl/NX8zPzR/Mv8qnx8fFQ8KAf9x90HyQekB4EHbIeBB5oHvUfZR/N38Qf5jA98KfxE/Dd8IBwY/CKcEhwIRAMn7ofOB6eHjQeNh5qHlgeUB5iHoQeuh8Sn5afzh+QH1sfLB8UH00fax9zH1gfAB7kHv4fLh74HrYeih6EHqoe7x9uH84gBQAM0BewMPBWMD6P/5+8H3MffZ+QH/nQE3BW8JzwwfDB8MzwxPD/8SHxq/JX8yPzv/Oz85/zM/Mv8zPzU/Kj8bvw4vCIoAsfuB9sHv4eaB3uHgIejx8THy0fSx9zH9DwMfCP8M3wtvCv8F3wPDAQAA9f2h9uHv4eoh6kHoYecB6KHngeYh5qHrEfJh9iH1wfRR9fH14fYp+fn50fVx8UHvgfAx8dHwge5h7EHswezB74HyYfdp+Zn7Hf3T/uMA+QFbA2kBEQAF/UX8pfyb/scB7wU/Cj8Lfwx/EJ8UfxlfHH8i/yn/Mv83Pzj/NT8v/y6/ML8vfyG/Es8KDwb7/iH3AfPh6wHkAd+h55HxIfjh9JH1Efkv/scC7wV/CP8DjwPzAHMDGwKDAjn+YfcB74HpQeph6WHnoeNB4+HiQeZB7IH2Ufqx94HyofRZ+BH40fVB8wHyoe5B7wHxsfMR8mHuYezB7GHuUfHB9SH5CfuB/Mn/TwEPAgcBoQCV/nX9Pf65AKcDpwSHBo8JXww/C68K7w3/Ej8Y/x+/Kn8z/zY/Nr8wPyx/Kb8u/y2/Jf8ZnxI/DncGawKJ+aHyYeRB32HkYe8R9OHyQfax90v+nwO/CPcGmwMo/+38yf7HABUB6fvR9uHxwe8h7UHsgerh5iHlweWB6CHrgfEB88Hwge3B7wH0YfUR9fHygfKh8LHx8fMR9rHyoe7h7UHvsfCB8jH0AfVB90H76v/jAasC8QF7Aar//f5B/pj/1wFnBn8JTwv/DU8PnxHfE38Zfx5/Jr8t/zK/NP8w/yo/Jv8rfy5/KR8c3xM/EA8LDwiTACH6oexB5WHkoe4x9XH14fQR9UH5Mf5PBCcD0wJnAccA6f2L/uH+5f3B+OHyQe6B7QHsgerB6UHqIeuh6WHqAe0R8iHxMfAx8LHxofCh7+HwsfKh8nHx4fCB8RHxofAB8jHzUfIB8oH0WfjZ+p39UP+P/1v/s/8nAosCcACB+5n79fyRAfcFDw0fEP8QnxA/FF8afx8/Jf8o/y3/K38pfyR/KL8ufzI/KV8dfxT/Eh8QTwoDA+H5IfFB6EHtgfXB/XH6cfYh8wH2+forAWsC/v/x+nn6SftZ+5H+PP9x/VHxoewh6yHx4e6h6mHnQeah5kHnAe+R8SHxYexh7MHvIfSh9ZH1AfTx8AHvYfGh80HzYfGh7wHvIe+R8RH0Mfch9xH4cfll/Ab/LwKVAez/K//fAYcFxwcfCp8LTw6vDT8PnxJfGN8ZPx5/JT8tPy8/LT8mvx4/ID8n/yp/I78d/xZ/FZ8QnxFvDocEIfiB7/HxkfPJ+jH38fPx8MH0wfkZ/Mn+mfyh+7H2Qfdx/BcB2fsR9NHwIfBh7zHw0fHx8OHrIeYB6EHtkfAB7gHsoelh6cHroe6h8BHw4e5h7KHt8fBx9BH1cfMB84HyUfNB9MH18fYx+LH4ufmZ++n8Ff39/dH+uf8TApcEtwZfCN8LXxDfFd8W3xcfHf8k/yp/Lr8tfyW/Ht8afyD/KH8uvyVfG/8W/xXfFR8S7w79ASH7MfPB9/n7wf6h92HvEfKh9DH8WfvL/vn6aflh9x38+wEc/wn5sfNR8jHwofFh83Hwgesh6aHpwe
+14:50:44.160  CLIENT audio chunk len=4268
+14:50:44.259  CLIENT audio chunk len=4268
+14:50:44.360  CLIENT audio chunk len=4268
+14:50:44.460  CLIENT audio chunk len=4268
+14:50:44.560  CLIENT audio chunk len=4268
+14:50:44.661  CLIENT audio chunk len=4268
+14:50:44.759  CLIENT audio chunk len=4268
+14:50:44.859  CLIENT audio chunk len=4268
+14:50:44.960  CLIENT audio chunk len=4268
+14:50:45.052  {"event_id":"event_PjxCSLYxKArov4mUA7Vks","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"kfFh8mHxkfBh7wHuAe3B60HpoeYB5uHl4eZh58HngejB5EHiwd8h4mHkIeUB5sHl4eXh4+HjYeWh6IHpYekh6uHrQe1h7sHvwfHh86HzQfVR9xH6FfyZ/IH+m/9LAXsCfwXfCA8MDw1vDp8PPxJfFZ8YPx8/Iz8m/yQ/Ij8hfyL/KL8v/zI/MT8qPyUfHz8g/yB/JD8inxpfFI8PfxH/D18NDwijAx3+7f2J/WEBAwCh+UHzYe9h8QHxEfJB8eHwYe7h6qHpwepB6iHoweVh5qHoAeih5gHlQeSB5MHiAeRh5UHmIeZB5IHm4eYB6KHmAecB6eHqgeyB7UHv4e+x8HHwIfNB9SH4+fhB+kX8lf0c/5P/rwG3BI8H3wmPDE8OHxA/Ef8SHxffGz8gPyP/Iz8jvyG/If8lvyu/L38vvyq/J78hfyG/IL8i/yI/HH8XvxEfE58RTw8vC78FFwKV/yX/DwK7AAn9AfYR8rHxkfFh8/HxsfLh7oHsYepB6uHqYenB5uHmgech6MHnIeZB5oHkgeQB44HlIeZB5yHmgeZB5yHmIech5sHoAemh6sHrYe2h7iHvUfDh8JHy4fMB9hH4ofqh+xP+X/5aAA8CnwS3Bx8JbwuvDD8Q3xFfFV8XPxufHv8gvyJ/Iv8h/yD/JD8p/y4/Lj8svyb/IL8fXx+/Iz8k3x//GP8TnxEfEZ8Pbw0PCV8E0wBHAWMDcwIB/qH2AfOx8SHykfQx9GHz4e4h62Hqgesh7AHqYeih5WHn4eZh6OHnoeXB4yHhgeIh5CHnAecB5qHkYeQB5UHmQecB6aHpYenh6sHrwe4h7+Hv0fBB8mH0kfUJ+Jn5SfvB+4H9S/9nAsMDzwU/CO8JXwwfDr8R/xM/Fz8Z3x0/IX8jvyK/IX8g/yI/KD8tfzD/LL8pvyF/IL8fvyP/JT8jHx0fFh8T/xAfEp8P7w3HBm8DRQCZAdsCnwD1/OH3sfQR8uHxkfHB87Hx4e+B7MHqwelB6OHmQech6OHnAech5eHkAeSB4+HioeSB5KHkYeRB5SHnAeeB5oHmYeYh52HoQepB7eHtge4h7oHvofCx8nH00faZ+NH5ofud/Uf/AQEfAq8DVwYvCK8Lzw1/EJ8SPxQ/Fp8ZHx3/IL8hvyBfHn8gvyN/Kb8sPyy/Kb8jvx9fHj8iPyU/Jh8fPxq/E18TnxI/E18S/wwXByMBlwP3A48GJgAJ/MH1IfJx8QH0GfhR9zHzweqh6OHmYenh6mHroeoB50HkgeNh5MHlgeWh5EHjIeNB48Hl4eZB58HmoeQh5QHloedB6cHr4euh7IHsAe0B7qHuQfEB87H1Yfdp+VH64fqR+yX9pQCLA18GjwgvCa8Kvwu/Dj8SXxWfFx8aXxxfHz8gPyDfHn8f/yL/JT8rfyq/Kr8kvyAfHz8gfyT/I/8hXxs/GN8TXxXfE38S/w2/CLcFrwO/BW8EJwT1/Jn5UfRB9DH04fOR9YHxMfDh6uHqIemh6CHngeYh6AHnYedB5EHk4eKB4gHj4eMh5UHkAeRB46HlIeZh5+HmYebB5gHnAeoh7EHvQe9h7sHtge5x8UH0cffZ+CH60fnh+jH9iADXA58EzwVHBg8JDwxfEF8TPxbfF/8Y/xp/HB8evx0fHz8h/yQ/KL8pvyf/JH8fnx5/H/8jPyZ/JL8gnxl/F78SXxQfE18SHxBPCw8K5wZPBvsCHwGJ/Rn7QfnB91n4Mfbx9NHxUfBB7aHroelB6cHqYemB6sHnAefh44HioeLh4wHmweWB5mHlIeWB5AHloeXh5iHnge
+14:50:45.060  CLIENT audio chunk len=4268
+14:50:45.159  CLIENT audio chunk len=4268
+14:50:45.260  CLIENT audio chunk len=4268
+14:50:45.360  CLIENT audio chunk len=4268
+14:50:45.459  CLIENT audio chunk len=4268
+14:50:45.559  CLIENT audio chunk len=4268
+14:50:45.660  CLIENT audio chunk len=4268
+14:50:45.759  CLIENT audio chunk len=4268
+14:50:45.859  CLIENT audio chunk len=4268
+14:50:45.869  {"event_id":"event_EkwBKUFKDcPZOX5cxipz1","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"Qeqh7YHvEfJh9FH2IfhJ+0380/4NAfsCPwZPCF8Lrw1fDz8RnxE/E78TnxR/FR8WXxm/G78dPyA/JP8nvyt/KX8n/ye/I38kPyAfHj8dPxj/FR8S/xNfET8PXwt3Bw8G6wAd/FH5sfYR8zHw4epB6wHqAelB58HmweUB5GHigd/B4MHeAd3B2gHbwdvB3QHeQd9B4gHjgeWB5qHpwezh7SHv4fAx8/H18fep+kn9DwBrAqsD3wb/CQ8Mjw2PDi8PfxE/EX8SXxNfFF8WfxdfGp8dPyA/I78m/yg/Kf8kPyU/If8gvx+/Gt8afxffFT8UnxMfEz8RHw0PCgcG5wLV/bn5EfjB9IHyge9h7aHu4e2B62HrQejB52HkweFB4cHewd2B20HbwdzB3UHfYeDh4aHjweTh5WHnwekB64Hsge5x8IHzwfbh+On7w/5vAM8CNwU3B68J/wp/DD8Nbw4/EF8QPxJ/Eh8U/xWfF78aHx1fH38ifyV/Jj8kPyG/IL8d/x6/G58YXxkfFl8WXxRfFJ8TvxCfDD8JbwavApb/gfsJ+xH48fYB9CHzIfWR8hHxQe1h68HpQeaB5GHigeGh4EHewd4B4CHhIeJh4SHh4eLh4sHjgeVB54HpQeqB7AHv0fLR9TH30fmR+6n9+f9XAT8ErwavB68JvwrfDK8O/w+/EB8R3xFfEn8UnxYfGX8a3xs/Hn8h/yG/Hp8d3xr/Gv8ZHxZ/Fh8VnxX/E98RfxIfEc8PLwyPCScHVwQbARoA+f47/k38IfpZ+qH52fih9fHyEfGB7qHr4elh6KHnoebB5GHkYeRh5GHkgeMB46HjoeMh5AHmYeeB6SHrQeyh7tHwYfPx9LH2MfhJ+kH89f0HAV8DDwVvBmcHDwlfCj8LnwtPDA8Nvw2PDl8QvxG/Ez8VXxRfFr8Xnxh/F58V/xNfE/8SHxKfER8RnxGfEP8Pfw+fDk8Orwx/C08J5wb/BmcFHwb3BPsDHwOPAXUBZACT/o38mfop+LH2AfRB8zHyMfGh72Ht4exB7IHrgeph6UHp4eih6OHpYeph7IHtwe3h7gHw0fHh8iH0gfWx9qH3Wfnh+iX9Ff7j/jr/4v9jAZkBZwIjAtsD7wTPBI8FFwfvB18JDwnvCC8KHwoPC58LXwyfDM8LvwqPC28MXwyPC/8LbwtvDP8LLwu/DI8MDw2/C08LzwsPDI8LzwqfCj8Knwn/CD8IvwcnB3cFxwNfAs8A1f8X/sn8kfv5+eH4cfch90H2QfVB9HHzUfMh85HyofLx8vHyAfNB8pHyQfPR87HzIfOx8yH0sfTx9NH08fUR9pH2IfdR92H4kfiR+ZH5Afqh+ln76fw1/d39vf6S/1EAMQFZARMCEwMPBL8ENwX/BUcGdwcvCF8Irwg/Cd8JnwoPC48L3wtPDA8NHw0/DR8Nnw2fDW8NLw3fDN8MnwwfDJ8L7wovCn8Jbwh/B5cGjwV3BFMDQwJlAXcAbf9T/kn9XfxZ+3H6cfnB+CH4UfeR9vH1gfUx9cH0QfTx85HzgfNh80HzUfNR80HzcfOR89HzMfRx9KH0EfWh9UH24faB91n4+fix+WH6Ifv5+/X8pf19/m7/NQA5ARMCAwPbA68ENwXvBZ8GNwfXBy8I3whvCe8JTwq/Cj8LjwvPC+8LDwwfDA8M/wu/C68Lbws/C+8Kjwo/Cq8JLwl/CNcHFwdfBpcFtwTjAwcDNwJVAZQAtf/T/gH+Mf15/Kn78fo5+on54fhB+KH3Efex9kH28fWR9VH1IfUR9QH10fTh9PH0EfVB9XH10f
+14:50:45.960  CLIENT audio chunk len=4268
+14:50:46.060  CLIENT audio chunk len=4268
+14:50:46.160  CLIENT audio chunk len=4268
+14:50:46.259  CLIENT audio chunk len=4268
+14:50:46.359  CLIENT audio chunk len=4268
+14:50:46.460  CLIENT audio chunk len=4268
+14:50:46.559  CLIENT audio chunk len=4268
+14:50:46.660  CLIENT audio chunk len=4268
+14:50:46.759  CLIENT audio chunk len=4268
+14:50:46.859  CLIENT audio chunk len=4268
+14:50:46.960  CLIENT audio chunk len=4268
+14:50:47.061  CLIENT audio chunk len=4268
+14:50:47.159  CLIENT audio chunk len=4268
+14:50:47.260  CLIENT audio chunk len=4268
+14:50:47.360  CLIENT audio chunk len=4268
+14:50:47.459  CLIENT audio chunk len=4268
+14:50:47.560  CLIENT audio chunk len=4268
+14:50:47.660  CLIENT audio chunk len=4268
+14:50:47.759  CLIENT audio chunk len=4268
+14:50:47.860  CLIENT audio chunk len=4268
+14:50:47.959  CLIENT audio chunk len=4268
+14:50:48.059  CLIENT audio chunk len=4268
+14:50:48.119  {"event_id":"event_PaMpuKcZM1pE6e38nvkts","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"EwM/CEcFagD5AMP+wfjZ+aH7Of7bA+8IHw5vCs8FrwiXB08COf13A+cHRwSHBAcFNQHnAx8LHwi3BpcGvwUHBVcGQwBd/P8CHwZvBmcEFwV/Ck8HW/4L/sH9MftH/4cE/wSjA9EB+wNvBaMCLf2j/t3+4fex9eH2ZfwJ/ygAlwT3AmL/ifqB+1f+4fZR8yn4+frx9WH4VfyTADMDwwHXAcH84faZ+HH5mfqs//n5IfZR+w39xfzqANH/0wLHA60BHwJp/dH6u/6D/qn4AfsQAAcH7wmPB48FDwgHA9H+IwJp+qH3nP+PB48GVwZ/Bl8ChwPvCR8IU/5gAOcCNwXjAwn98fuHBp8J3we/CQEBxfx/AH0BMfqB93n76wJXBS8CTwfvDL8Ipf4J+RH0IfDh9uH38wDPCl8KnwZJAEYA+fuR9dH4uABZ/PH3m/8HB1H++flp/0cDWwLJAD8DJ/5R9tHxAfgZ/Sn7KwHPCu8IpwPfAjf+jACaAKn4ofcJ+2H4wfllAScB3f9fBU8P7wvfBz8ESfxR+AH0Ie8x8OX9nwwvDJ8NfxFvDIMD8fQh9AH3gfSx82n9PwTHB28Mbw0fCA8DtQGB98n80wGR++H3BfyPAl8HnwVHBN8JDwlx/LH7QfyB9/H1IfbPAScHbwzLAwn5Sfk3BU8NOQAB8oH56wOZ+IHuwfUXB48JfwqfE38KMfcR9BH1ifmB+tH5Df1PBP8EPwhfCKH2OfivCP8IlwFjA3/+ifsJ+vn6jf15/X38pv9vCd8KAwDFAQ8H//45+r38afqB9/H9Hwm/D4X+QfYh+17/AwJ/BAsCIQDXAjAAmwAX/2H8Nf3fBJ8HFwO//yn9Uf2vAIH6ofFMAA8KLwp/CMcBBQAJ/Nn54fbJ+An5K/4vCF8Gifus/78IXQHnAgcEwQEPBBH7Ae+B8EH4/QAPCe8H/w9fFP8DwfXR9JH4AfRh9msDvwkvDKcHGf44AHEBEv+5/F8EwP8J+gcBCflB99n9zwVfCF8IJwLp/XH+hfyJ+cHz4fynBcsAnwPnBmcCrgBx+lH9bwPb/sH4UfmTAG8F7wg8AEn4Afgv/k8JBQFp+UMCDwp/CVsAIfYh99n79wV/BJn56f5//k8DxwbGAGn7KwL/EO8GsfQR89n6Rf5W/w8AKf+1AY8IDw6fCSH94e8B8on7UfLp+Z8PDw2vCe8Ncf0h6+H3BQG/BbcFtfxV/W8DhwIh/PsChwTF/xH7GgCvA5H9x/5o/wX/HwGnBa8GPwRDAEL/AfgB78H2vwrfDR7/lwMvCbMDaf2h9NHyvQGfCvH9WfuVAb8IPwpnAzH6Ofsx+5HzTwNfCB//Wfs1/b3+nwRvCI8BpwW/AsD/afup+JH42fjx/h8HzwY0/2X/9wNvCVf+YfO5+/8GqwNz/k7/mAC5+sH2hwMPBWkBjwlHBsH5ufhp+rn6qflV/UQAqwNfDP8KbwJx9jn9bP9X/kH9QfmrAc8Gq/5x9zj/lwavCR8IDwSh9mHzYf1XBUAAsfhrAU8N/wd5/XoAAf7B9QMAVwdF/SH4Nf3/AsT/2gBnAtsAaQHLAo8EFwbR+OH0hQAp/Hn6GwNPCP8ITwsXBIn7Efth+YH2ofiLAm8GPfzp+n8IPwp/CA8EAfQh65H17wUrAon8/wpfEn8IifnR9gH04e4B/acFLwf/Bt8DuwMBAZX9Gf4x+vn9fwgvBo38kfbh+j0BbwM/Ap8Jbw3DAzv+QflR9vH2AftDA4cEhwUfCxcGyfzh+iH3Wfx3B+cDIf7PBdH+SflL/mH7Lv8PClcFE/
+14:50:48.160  CLIENT audio chunk len=4268
+14:50:48.259  CLIENT audio chunk len=4268
+14:50:48.360  CLIENT audio chunk len=4268
+14:50:48.460  CLIENT audio chunk len=4268
+14:50:48.560  CLIENT audio chunk len=4268
+14:50:48.659  CLIENT audio chunk len=4268
+14:50:48.759  CLIENT audio chunk len=4268
+14:50:48.860  CLIENT audio chunk len=4268
+14:50:48.959  CLIENT audio chunk len=4268
+14:50:49.060  CLIENT audio chunk len=4268
+14:50:49.159  CLIENT audio chunk len=4268
+14:50:49.260  CLIENT audio chunk len=4268
+14:50:49.359  CLIENT audio chunk len=4268
+14:50:49.459  CLIENT audio chunk len=4268
+14:50:49.559  CLIENT audio chunk len=4268
+14:50:49.659  CLIENT audio chunk len=4268
+14:50:49.759  CLIENT audio chunk len=4268
+14:50:49.783  {"event_id":"event_YIIekixsSdIgsyKow1CIg","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"7v/w//L/9f/5//z///8DAAEABAAEAAIAAAD7//v/9//2//X/9//8/wAACAAJABAAEwAYAB4AIAAgAB0AGgAVABYADwAIAAEA/P/9//r/BAAJAA4AFgAdACUAKQAvADIANQAxACoAKQAeABkAEgAOAAgABwACAAAAAgAAAAEAAwAFAAgACgANAA4ADwATABAAEgAPAAwADwASABIADgAMAAoACAAKAAoACAAJAAcADAANAA8ADwAOAA0ACwAIAAQAAAD9//b/9f/1//P/9f/y//L/8f/y//H/8f/u/+z/7f/r//D/8f/1//P/8f/y//L/7//u/+z/6//q/+n/6P/p/+j/6//t//H/7v/u//D/7f/s/+f/4v/h/+L/5P/n/+r/9P/6/wAABgALAA4ADAALAAcABgACAP3//P/0//b/+f/6//z/AQACAAIABQAAAAAAAAAAAP3/+//+/wIABgAMABUAFwAbABsAGwAZABQADQAJAAEA/f/3//L/8v/x//L/8v/1//X/9v/5//3//f/9//3//P/7//3/+//9//3/+//4//X/9v/z/+//7f/n/+f/5f/l/+f/5//o/+f/6P/r/+v/7v/v/+z/7P/n/+n/5//k/+L/3//d/93/3P/g/+H/5v/s//T/+/8FAAsAEQARAAwABwABAAAA/f/3/+7/6v/n/+f/5v/p/+r/6P/s/+v/7v/x//H/9f/4//7/BQALABUAGAAZABYAEgAKAAQA+//u/+T/3f/Z/9j/3v/l//P//v8LABcAIAAmACcAIgAaABQACgAFAP3/+v/6//3/AAADAAUAAwABAAEAAAD4//X/7f/s/+//8//6/wYAEgAdACgALgAzADAAKQAfAA8AAADv/+f/4P/h/+L/5//z/wAADwAdACgALAAvACsAKAAdABMABwD9//j/8//x//H/9P/1//n/AAAEAAkABwAJAAsADgAYACAAKwAyADoAPgA+AD4ANgAtACIAEQAIAP7/8v/s/+n/7f/x//r/CQAXACgANgBEAEsARwBBADcALQAhAA8A/v/v/+H/2v/W/9P/1f/X/+D/6v/2/wQAEAAaAB8AIAAdACAAHgAYABAABgD7//j/9v/4//f/9v///wcAFwAiAC8AOwBAAEMAQAA1ACsAHwAQAAAA8f/l/9//3v/k/+v/9P/8/wMADwASAA4ABwAAAPf/8f/s/+z/7v/5/wMAEAAiAC0AOgBAADwAMAAXAAEA5//Q/7//tv+x/7j/w//Q/+T/8f8CAA8AFAATABMAEQAQABEADwASABMAHAApADAANAAuACcAHAAQAAEA7//c/8z/wP+6/7n/vv/L/93/9P8OACkAPgBVAGcAdQB1AGgAVgA8ACAAAADZ/7b/mf+G/3n/b/9v/3r/kf+x/9L/7/8PAC0ARwBaAGEAYABcAFQATgBEADMAHwAHAPH/2//E/7D/ov+Y/5X/lP+a/6T/sv/C/9D/3P/r//j/CAAaACAAJwAwADcAQgBNAEwARQA4ACUAFAADAPf/5f/V/8j/wv/D/8v/zf/L/8P/u/+5/8H/yP/F/8H/yf/V/+r///8LABQAFgAcAB8AIQAdABYADgAGAAIAAAAGAAwADAAHAAMA+P/w/+H/z/+9/7L/rf+0/7v/yP/W/+T/8P/6/wAA/v/3/+v/3v/X/9j/2v/m//T/CAAiADsAVABnAG8AbQBhAE8APwAxACIAEwAIAAQABAAOABgAHgAkACYAJAAfABcADAD8/+7/3f/Q/9H/1P/k//X/CgAeAC0AOQA+ADwANQAvACMAHA
+14:50:49.859  CLIENT audio chunk len=4268
+14:50:49.960  CLIENT audio chunk len=4268
+14:50:50.059  CLIENT audio chunk len=4268
+14:50:50.159  CLIENT audio chunk len=4268
+14:50:50.220  {"event_id":"event_XEEpYbDwNwlXFFFGFTfiS","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"4/+z/5L/vf8FACcAKQBFAIUAwACaAEkAKgALAOP/5f8UAEoAZQA5AMj/f/96/6L/wP/K/9r/uv+n//f/RAATAOn/9f8KABYANgB0AHoAMwAQABgA9//Z/9L/yP/N/+j/+P8RAEgAmgC0AI0AggB0ADgAEQAEAAoAPQBSAB0A5//r/x4ALwD6/6H/W/9F/2z/qv8aAIAAYwD2/8j/9/8qAEkAQAAtACQANgBlAG8ANgD9/9v/z/+5/7n/+/85AC8AAwDU/6L/jf96/4P/rP/b//b/5//m/+//2P/O/xQAOwDk/3//f/+f/7X/4P8aAEcAMgAUADEAWQBRACkA9P/M/67/v/8lAGUAKQDs//X/8P/C/8L/8P/6/9//zv/H/8T/8/8fAPP/pP+T/9v/VACzAOgA1QBsABwA+v/v/w4AIwDz/7X/oP+m/8T/6f/k/8X/rP+8/+n/GABAABEAkv8x/zP/if/e/wsALwBSAFAAMAA5ADwAIgAAAOX/xf+v/7z/6P8EAPb/6//x//7/EwDs/7//vP+8/6n/uf8EADYAKAAdAF0AhgBjADQAIQA6AEsAQAA3ADUAHADr/9n/6P/Y/+//QQB7AHcARAD7/9P/1P/U/8D/tf/t/yEAGQAkACsADQDp/8//p/+C/5j/3/8LAPz/4f/P/8P/w/+t/5b/s//U//T/MQBfAEMACgDS/6n/if+I/wMAngDXAMoAqQCEAHcARgD7/9f/7P8OAP7/2f/w/wQA1/+6/8L/2v/o/93/xv/A/8n/+v8sAEQAjwDMAMYAsACIACIAxv+v/9//IQBjAJ8AjAAmAAEADgD0/8v/qv9y/0L/fv8DAEgAHQDS/7b/3P8BACEASABaADAA/f/d/8j/uP+q/8n/xf+s/7H/3P8LABAA3P+m/7n/5//+/yAAYACMAGYA7/+H/2T/df+l/9b/7/8ZACsADQAPAB8A8f94/zr/mf8OADkAOQBGAEMAGQD9//7/HQBCAEUAIgAqAF4AYAAxAAcA9P/s/+b/CQBCADMABQAGAC0AQAAmAPP//f8lABgA9f/1/xQAIwAKAPr/IwAxABMA8f+3/4L/ef+o/+H//P8bAGIAnACTAGIAMAAMAPP/CgA9ABgAu/9//2P/d/+f/63/vf+r/3n/c/+l/9r/9//4/wIAIQAZAAAA9f/x//n/6P/g/0EAtgDOAJ4AZwBWAFsAOwD0/6L/mv8KAGEATwAtAEQAWgA6ABsAKAAZANz/zP/8/z4AYgBdAFYAMgAHAP//CAAQAAIAzv/J/0QAvADMAJgAPgAEAPj/7f/i/9f/tP+Q/7//IwBaACAAt/9//5D/s//k/xQA5f9z/zv/SP+F//b/PQBGAEgAVABdAHQAPwDh/+z/MABPAIAArQCSAFgACgDI/7H/y//e/+j/AQAvADIAGQAdABMA2v+//9f/5f/m/wAALAApACQALQACAMH/uv/U//T/CADq/5j/Xv+m/xkAPgA6AEcALgALAA4AGgAFANL/pv+T/73/MwCWAJ4AXgAiABkAIwAdADMASwBFAAkA3P8WAHIAbgAyABIACQDm/5//rv/g//T/8P/x//n/EQBWAI0AkACEAIIATQD1/7X/qP+c/4f/l/+g/3f/gv/Z/yUANgAQAO7/xv+t/8r//v8oACsA2f+V/6j/vP+3/6r/j/9R/yn/N/9v/4j/iP+a/6H/tP/R/+L/7//5/+f/7f8rAGsAfQCFAIcATgD//93//v8kAPr/1/8QAF0AaQBaAFsAQgANANz/0v/s/+7/yP+k/7T/8v8KAPH/1/
+14:50:50.259  CLIENT audio chunk len=4268
+14:50:50.360  CLIENT audio chunk len=4268
+14:50:50.459  CLIENT audio chunk len=4268
+14:50:50.559  CLIENT audio chunk len=4268
+14:50:50.660  CLIENT audio chunk len=4268
+14:50:50.760  CLIENT audio chunk len=4268
+14:50:50.860  CLIENT audio chunk len=4268
+14:50:50.960  CLIENT audio chunk len=4268
+14:50:51.060  CLIENT audio chunk len=4268
+14:50:51.160  CLIENT audio chunk len=4268
+14:50:51.260  CLIENT audio chunk len=4268
+14:50:51.359  CLIENT audio chunk len=4268
+14:50:51.461  CLIENT audio chunk len=4268
+14:50:51.559  CLIENT audio chunk len=4268
+14:50:51.660  CLIENT audio chunk len=4268
+14:50:51.759  CLIENT audio chunk len=4268
+14:50:51.860  CLIENT audio chunk len=4268
+14:50:51.959  CLIENT audio chunk len=4268
+14:50:52.059  CLIENT audio chunk len=4268
+14:50:52.160  CLIENT audio chunk len=4268
+14:50:52.259  CLIENT audio chunk len=4268
+14:50:52.360  CLIENT audio chunk len=4268
+14:50:52.460  CLIENT audio chunk len=4268
+14:50:52.560  CLIENT audio chunk len=4268
+14:50:52.659  CLIENT audio chunk len=4268
+14:50:52.759  CLIENT audio chunk len=4268
+14:50:52.859  CLIENT audio chunk len=4268
+14:50:52.960  CLIENT audio chunk len=4268
+14:50:53.061  CLIENT audio chunk len=4268
+14:50:53.160  CLIENT audio chunk len=4268
+14:50:53.260  CLIENT audio chunk len=4268
+14:50:53.359  CLIENT audio chunk len=4268
+14:50:53.459  CLIENT audio chunk len=4268
+14:50:53.559  CLIENT audio chunk len=4268
+14:50:53.660  CLIENT audio chunk len=4268
+14:50:53.759  CLIENT audio chunk len=4268
+14:50:53.860  CLIENT audio chunk len=4268
+14:50:53.959  CLIENT audio chunk len=4268
+14:50:54.059  CLIENT audio chunk len=4268
+14:50:54.160  CLIENT audio chunk len=4268
+14:50:54.259  CLIENT audio chunk len=4268
+14:50:54.359  CLIENT audio chunk len=4268
+14:50:54.459  CLIENT audio chunk len=4268
+14:50:54.560  CLIENT audio chunk len=4268
+14:50:54.639  {"event_id":"event_LqD4lvUxY5PLLo9OSzYZO","type":"response.audio.delta","response_id":"resp_I4nEcOl2KAQBAPxerRpNz","item_id":"item_VzhuuhFe69U4HvhVczSa1","output_index":0,"content_index":0,"delta":"geYB6sHu8fEB9HH1Ifdp+kn6wfn5+6f+9AC3AmcFHwzfEl8YPx9/Jn8t/zS/OD8/f0T/Q389/zE/KH8nfyJ/FT8LlgCJ/aH2kfBB8bHyge0B6OHmoe/B+GH14fRZ+Tr/dwQvBu8JXw3HB/cEpwPHAKH7IfJB6gHnweDB3MHcgdtB2kHXwdcB3cHewd5B4OHhoeXh6AHs4e9B8pHy4fSx9jH56foJ+5n9MgBTAp8GzwxfE78Xfxx/JP8qfzC/NL84/z0/P786vzS/Kz8p/ye/HH8TzwlHBEL/AfeB9IH1IfJB7cHpge1J+DH4sfZB+aX92wK3AkcEPwiXBAEBw/5N/BH7YfOh6yHpoeRB4EHfQd2B3IHZQdcB24HeAd/B32HhAeXB6AHqgeyB8LHwQfFR86H2Ofpx+gn8NP8zArcFfwu/Ed8Wnxo/Ib8oPzC/NP83Pz2/Pn85/zI/K78qfynfHJ8ULwxPCZ8E5fzh+dH5cfUB8YHtsfG5+gH4MfYx98H8SwIXAjMCvwRzAU3/Rf1B+gn5gfGh6iHnIePh4cHfQd1B3MHYQdkB3EHdQd7B3cHfweRh50Hq4ewB7oHwwfGh89H2mfjZ+bH7Qf4TAz8I7w2/E38W/xs/JP8pfy//Mn82Pzt/Oj83fzI/K/8r/ya/HB8Wzw7fC88FGv9h/Dn7cfdR9FHxIfbZ+3H4cfaR+In9sgCf/7r/kQH5/Yn8Mfvh9zH1Ie1h54Hm4eKB30HeQd2B28HZgdqB32Hhgd9h4IHjwefh6AHpYeuB7iHu4e4h8xH3ifkB+uX8EwEfBd8KHxB/Ex8Z/x6/JT8tfzF/Nj87/zt/OP8zPy3/LX8qPyBfGb8Sfw6PCT8EnQE9AXH7cfaB8wH4Cf6x+vH1wfZB+on9i/69/H/+0fuh99H4Wfgh96HxAepB5wHmweKh4cHeQdqB2IHXAdzB3kHdAd3B3gHjQeeB6OHqge3h7MHtcfGB9kn5Wfmx++wAvwafDH8RnxSfGd8dvyI/Kn8wfzN/Nb83vzU/NP8sfyy/Kz8j/xtfFX8UHxH/BycCywLL/5H6YfVx95n+Cfxx9YH2ifxOAL39Cfql/f39+fmR91H1ofTh7iHngeWh5MHhwd7B3EHbgdqB2gHdwd7B3UHegeEh5WHnoeYB6KHrIe3B79HxQfZZ+Wn6Ef3BAV8GLwuPDp8S/xk/H38lPyz/MD81/zi/Nj81PzB/Kz8uPyh/IV8b/xZ/Fr8R3wnfCPcFBwFx+9H2sfw9/qH3cfNR9rH74f6p+qn7hf1p+mH34fNB82HxoekB5OHioeFh4cHewd3B2wHawdpB3YHdQd1B3QHggeMh5AHnYeqh7MHtwe8h9DH46fgJ+7P+bwSvCX8NHxG/Fx8dvyG/KL8ufzO/Nf81vzX/M78tPy//K78lPyBfGh8ZnxWPDp8LHwovBIr/Wfp1/bb/cfpx9XH3qfmx+/n44fZp+uH30fQh9OHyAfAh7IHlQeXh4iHgIeAB3sHbwdtB3MHdwd4B3AHdwd8B4SHiQeQB5mHqgetB7iH0OfjZ+tn7i/6fBe8Lfw6/Eh8Xnxz/Iv8ofy5/M781PzV/M38wPy2/Lr8q/yT/H98bvxtfFv8Qfw1/Cw8HQwJF/TwA6gBh+uH2MfcB+5n7YffR9dH4Afex9LHxAe/B7oHpYeSB5CHjgeDB3cHaAdwB3YHbAdxB20Hbwd2B3uHg4eLh44Hm4elB7RHy8fQ5+IH7K/7nAm8H7wtfEL8UfxnfH78mfyw/ML8zvzN/Mf8vfys/LH8rfyU/It8enx2/G58Vnx
+14:50:54.660  CLIENT audio chunk len=4268

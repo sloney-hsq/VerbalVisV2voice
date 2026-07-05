@@ -1,0 +1,52 @@
+
+> verbalvis-frontend@1.0.0 dev
+> vite --host 127.0.0.1 --port 5173
+
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m353[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
+[2m15:33:09[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue?vue&type=style&index=0&scoped=fedac4b6&lang.css[22m
+[2m15:36:41[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:39:54[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/ChartSlot.vue[22m
+[2m09:40:05[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:40:53[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:41:24[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/Dashboard.vue?vue&type=style&index=0&scoped=fedac4b6&lang.css[22m
+[2m09:42:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/Dashboard.vue?vue&type=style&index=0&scoped=fedac4b6&lang.css[22m
+[2m09:44:46[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue?vue&type=style&index=0&scoped=fedac4b6&lang.css[22m
+[2m09:51:47[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChartSlot.vue[22m
+[2m09:51:59[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/ChartSlot.vue[22m
+[2m09:52:36[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:53:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:53:45[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:55:08[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue?vue&type=style&index=0&scoped=fedac4b6&lang.css[22m
+[2m09:56:31[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue?vue&type=style&index=0&lang.css[22m
+[2m10:38:41[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChartSlot.vue[22m
+[2m10:38:41[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChartSlot.vue, /src/components/ChartSlot.vue?vue&type=style&index=0&scoped=23e19070&lang.css[22m
+[2m10:38:41[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/Dashboard.vue?vue&type=style&index=0&scoped=fedac4b6&lang.css[22m
+[2m10:49:28[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChartSlot.vue[22m
+[2m10:49:50[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChartSlot.vue[22m
+[2m10:50:11[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m11:03:54[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m17:21:02[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChartSlot.vue[22m
+[2m09:43:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:43:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/ChartSlot.vue[22m
+[2m09:43:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:43:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue?vue&type=style&index=0&lang.css, /src/App.vue[22m
+[2m09:43:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChartSlot.vue, /src/components/ChartSlot.vue?vue&type=style&index=0&scoped=23e19070&lang.css[22m
+[2m09:43:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/Dashboard.vue?vue&type=style&index=0&scoped=fedac4b6&lang.css[22m
+[2m09:47:45[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:47:45[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/ChartSlot.vue[22m
+[2m09:47:45[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:47:45[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue?vue&type=style&index=0&lang.css[22m
+[2m09:47:45[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChartSlot.vue, /src/components/ChartSlot.vue?vue&type=style&index=0&scoped=23e19070&lang.css[22m
+[2m09:47:45[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/Dashboard.vue?vue&type=style&index=0&scoped=fedac4b6&lang.css[22m
+[2m09:47:59[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:47:59[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/ChartSlot.vue[22m
+[2m09:47:59[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:47:59[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.vue?vue&type=style&index=0&lang.css[22m
+[2m09:47:59[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/ChartSlot.vue, /src/components/ChartSlot.vue?vue&type=style&index=0&scoped=23e19070&lang.css[22m
+[2m09:47:59[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/Dashboard.vue?vue&type=style&index=0&scoped=fedac4b6&lang.css[22m
+[2m09:50:56[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m
+[2m09:50:56[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue, /src/components/ChartSlot.vue[22m
+[2m09:50:56[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Dashboard.vue[22m

@@ -1,0 +1,1193 @@
+16:11:00.443  CLIENT => {"type":"start_session"}
+16:11:20.663  CLIENT audio chunk len=4268
+16:11:20.663  CLIENT audio ignored: qwen not ready
+16:11:20.761  CLIENT audio chunk len=4268
+16:11:20.761  CLIENT audio ignored: qwen not ready
+16:11:20.861  CLIENT audio chunk len=4268
+16:11:20.861  CLIENT audio ignored: qwen not ready
+16:11:20.965  CLIENT audio chunk len=4268
+16:11:20.966  CLIENT audio ignored: qwen not ready
+16:11:21.082  CLIENT audio chunk len=4268
+16:11:21.082  CLIENT audio ignored: qwen not ready
+16:11:21.162  CLIENT audio chunk len=4268
+16:11:21.163  CLIENT audio ignored: qwen not ready
+16:11:21.262  CLIENT audio chunk len=4268
+16:11:21.262  CLIENT audio ignored: qwen not ready
+16:11:21.366  CLIENT audio chunk len=4268
+16:11:21.366  CLIENT audio ignored: qwen not ready
+16:11:21.462  CLIENT audio chunk len=4268
+16:11:21.463  CLIENT audio ignored: qwen not ready
+16:11:21.561  CLIENT audio chunk len=4268
+16:11:21.561  CLIENT audio ignored: qwen not ready
+16:11:21.661  CLIENT audio chunk len=4268
+16:11:21.662  CLIENT audio ignored: qwen not ready
+16:11:21.764  CLIENT audio chunk len=4268
+16:11:21.765  CLIENT audio ignored: qwen not ready
+16:11:21.862  CLIENT audio chunk len=4268
+16:11:21.862  CLIENT audio ignored: qwen not ready
+16:11:21.962  CLIENT audio chunk len=4268
+16:11:21.962  CLIENT audio ignored: qwen not ready
+16:11:22.061  CLIENT audio chunk len=4268
+16:11:22.061  CLIENT audio ignored: qwen not ready
+16:11:22.166  CLIENT audio chunk len=4268
+16:11:22.166  CLIENT audio ignored: qwen not ready
+16:11:22.266  CLIENT audio chunk len=4268
+16:11:22.266  CLIENT audio ignored: qwen not ready
+16:11:22.367  CLIENT audio chunk len=4268
+16:11:22.367  CLIENT audio ignored: qwen not ready
+16:11:22.462  CLIENT audio chunk len=4268
+16:11:22.462  CLIENT audio ignored: qwen not ready
+16:11:22.566  CLIENT audio chunk len=4268
+16:11:22.567  CLIENT audio ignored: qwen not ready
+16:11:22.662  CLIENT audio chunk len=4268
+16:11:22.662  CLIENT audio ignored: qwen not ready
+16:11:22.761  CLIENT audio chunk len=4268
+16:11:22.761  CLIENT audio ignored: qwen not ready
+16:11:22.865  CLIENT audio chunk len=4268
+16:11:22.865  CLIENT audio ignored: qwen not ready
+16:11:22.962  CLIENT audio chunk len=4268
+16:11:22.962  CLIENT audio ignored: qwen not ready
+16:11:23.061  CLIENT audio chunk len=4268
+16:11:23.061  CLIENT audio ignored: qwen not ready
+16:11:23.162  CLIENT audio chunk len=4268
+16:11:23.162  CLIENT audio ignored: qwen not ready
+16:11:23.261  CLIENT audio chunk len=4268
+16:11:23.261  CLIENT audio ignored: qwen not ready
+16:11:23.361  CLIENT audio chunk len=4268
+16:11:23.362  CLIENT audio ignored: qwen not ready
+16:11:23.461  CLIENT audio chunk len=4268
+16:11:23.461  CLIENT audio ignored: qwen not ready
+16:11:23.561  CLIENT audio chunk len=4268
+16:11:23.561  CLIENT audio ignored: qwen not ready
+16:11:23.662  CLIENT audio chunk len=4268
+16:11:23.662  CLIENT audio ignored: qwen not ready
+16:11:23.762  CLIENT audio chunk len=4268
+16:11:23.762  CLIENT audio ignored: qwen not ready
+16:11:23.864  CLIENT audio chunk len=4268
+16:11:23.864  CLIENT audio ignored: qwen not ready
+16:11:23.961  CLIENT audio chunk len=4268
+16:11:23.961  CLIENT audio ignored: qwen not ready
+16:11:24.063  CLIENT audio chunk len=4268
+16:11:24.063  CLIENT audio ignored: qwen not ready
+16:11:24.163  CLIENT audio chunk len=4268
+16:11:24.163  CLIENT audio ignored: qwen not ready
+16:11:24.263  CLIENT audio chunk len=4268
+16:11:24.263  CLIENT audio ignored: qwen not ready
+16:11:24.361  CLIENT audio chunk len=4268
+16:11:24.361  CLIENT audio ignored: qwen not ready
+16:11:24.466  CLIENT audio chunk len=4268
+16:11:24.467  CLIENT audio ignored: qwen not ready
+16:11:24.561  CLIENT audio chunk len=4268
+16:11:24.561  CLIENT audio ignored: qwen not ready
+16:11:24.664  CLIENT audio chunk len=4268
+16:11:24.664  CLIENT audio ignored: qwen not ready
+16:11:24.761  CLIENT audio chunk len=4268
+16:11:24.762  CLIENT audio ignored: qwen not ready
+16:11:24.861  CLIENT audio chunk len=4268
+16:11:24.861  CLIENT audio ignored: qwen not ready
+16:11:24.961  CLIENT audio chunk len=4268
+16:11:24.961  CLIENT audio ignored: qwen not ready
+16:11:25.062  CLIENT audio chunk len=4268
+16:11:25.062  CLIENT audio ignored: qwen not ready
+16:11:25.163  CLIENT audio chunk len=4268
+16:11:25.163  CLIENT audio ignored: qwen not ready
+16:11:25.261  CLIENT audio chunk len=4268
+16:11:25.261  CLIENT audio ignored: qwen not ready
+16:11:25.374  CLIENT audio chunk len=4268
+16:11:25.374  CLIENT audio ignored: qwen not ready
+16:11:25.462  CLIENT audio chunk len=4268
+16:11:25.462  CLIENT audio ignored: qwen not ready
+16:11:25.561  CLIENT audio chunk len=4268
+16:11:25.561  CLIENT audio ignored: qwen not ready
+16:11:25.661  CLIENT audio chunk len=4268
+16:11:25.661  CLIENT audio ignored: qwen not ready
+16:11:25.763  CLIENT audio chunk len=4268
+16:11:25.763  CLIENT audio ignored: qwen not ready
+16:11:25.862  CLIENT audio chunk len=4268
+16:11:25.862  CLIENT audio ignored: qwen not ready
+16:11:25.962  CLIENT audio chunk len=4268
+16:11:25.962  CLIENT audio ignored: qwen not ready
+16:11:26.061  CLIENT audio chunk len=4268
+16:11:26.062  CLIENT audio ignored: qwen not ready
+16:11:26.161  CLIENT audio chunk len=4268
+16:11:26.161  CLIENT audio ignored: qwen not ready
+16:11:26.261  CLIENT audio chunk len=4268
+16:11:26.261  CLIENT audio ignored: qwen not ready
+16:11:26.364  CLIENT audio chunk len=4268
+16:11:26.364  CLIENT audio ignored: qwen not ready
+16:11:26.461  CLIENT audio chunk len=4268
+16:11:26.461  CLIENT audio ignored: qwen not ready
+16:11:26.562  CLIENT audio chunk len=4268
+16:11:26.562  CLIENT audio ignored: qwen not ready
+16:11:26.661  CLIENT audio chunk len=4268
+16:11:26.662  CLIENT audio ignored: qwen not ready
+16:11:26.763  CLIENT audio chunk len=4268
+16:11:26.763  CLIENT audio ignored: qwen not ready
+16:11:26.861  CLIENT audio chunk len=4268
+16:11:26.861  CLIENT audio ignored: qwen not ready
+16:11:26.963  CLIENT audio chunk len=4268
+16:11:26.963  CLIENT audio ignored: qwen not ready
+16:11:27.061  CLIENT audio chunk len=4268
+16:11:27.061  CLIENT audio ignored: qwen not ready
+16:11:27.161  CLIENT audio chunk len=4268
+16:11:27.161  CLIENT audio ignored: qwen not ready
+16:11:27.261  CLIENT audio chunk len=4268
+16:11:27.261  CLIENT audio ignored: qwen not ready
+16:11:27.362  CLIENT audio chunk len=4268
+16:11:27.362  CLIENT audio ignored: qwen not ready
+16:11:27.461  CLIENT audio chunk len=4268
+16:11:27.462  CLIENT audio ignored: qwen not ready
+16:11:27.562  CLIENT audio chunk len=4268
+16:11:27.562  CLIENT audio ignored: qwen not ready
+16:11:27.662  CLIENT audio chunk len=4268
+16:11:27.662  CLIENT audio ignored: qwen not ready
+16:11:27.762  CLIENT audio chunk len=4268
+16:11:27.762  CLIENT audio ignored: qwen not ready
+16:11:27.864  CLIENT audio chunk len=4268
+16:11:27.864  CLIENT audio ignored: qwen not ready
+16:11:27.961  CLIENT audio chunk len=4268
+16:11:27.961  CLIENT audio ignored: qwen not ready
+16:11:28.061  CLIENT audio chunk len=4268
+16:11:28.061  CLIENT audio ignored: qwen not ready
+16:11:28.168  CLIENT audio chunk len=4268
+16:11:28.169  CLIENT audio ignored: qwen not ready
+16:11:28.269  CLIENT audio chunk len=4268
+16:11:28.269  CLIENT audio ignored: qwen not ready
+16:11:28.362  CLIENT audio chunk len=4268
+16:11:28.362  CLIENT audio ignored: qwen not ready
+16:11:28.462  CLIENT audio chunk len=4268
+16:11:28.462  CLIENT audio ignored: qwen not ready
+16:11:28.561  CLIENT audio chunk len=4268
+16:11:28.562  CLIENT audio ignored: qwen not ready
+16:11:28.665  CLIENT audio chunk len=4268
+16:11:28.665  CLIENT audio ignored: qwen not ready
+16:11:28.761  CLIENT audio chunk len=4268
+16:11:28.761  CLIENT audio ignored: qwen not ready
+16:11:28.862  CLIENT audio chunk len=4268
+16:11:28.862  CLIENT audio ignored: qwen not ready
+16:11:28.962  CLIENT audio chunk len=4268
+16:11:28.962  CLIENT audio ignored: qwen not ready
+16:11:29.061  CLIENT audio chunk len=4268
+16:11:29.061  CLIENT audio ignored: qwen not ready
+16:11:29.161  CLIENT audio chunk len=4268
+16:11:29.161  CLIENT audio ignored: qwen not ready
+16:11:29.262  CLIENT audio chunk len=4268
+16:11:29.262  CLIENT audio ignored: qwen not ready
+16:11:29.361  CLIENT audio chunk len=4268
+16:11:29.361  CLIENT audio ignored: qwen not ready
+16:11:29.461  CLIENT audio chunk len=4268
+16:11:29.461  CLIENT audio ignored: qwen not ready
+16:11:29.563  CLIENT audio chunk len=4268
+16:11:29.563  CLIENT audio ignored: qwen not ready
+16:11:29.662  CLIENT audio chunk len=4268
+16:11:29.662  CLIENT audio ignored: qwen not ready
+16:11:29.762  CLIENT audio chunk len=4268
+16:11:29.762  CLIENT audio ignored: qwen not ready
+16:11:29.861  CLIENT audio chunk len=4268
+16:11:29.861  CLIENT audio ignored: qwen not ready
+16:11:29.963  CLIENT audio chunk len=4268
+16:11:29.963  CLIENT audio ignored: qwen not ready
+16:11:30.061  CLIENT audio chunk len=4268
+16:11:30.061  CLIENT audio ignored: qwen not ready
+16:11:30.162  CLIENT audio chunk len=4268
+16:11:30.162  CLIENT audio ignored: qwen not ready
+16:11:30.267  CLIENT audio chunk len=4268
+16:11:30.267  CLIENT audio ignored: qwen not ready
+16:11:30.361  CLIENT audio chunk len=4268
+16:11:30.361  CLIENT audio ignored: qwen not ready
+16:11:30.461  CLIENT audio chunk len=4268
+16:11:30.461  CLIENT audio ignored: qwen not ready
+16:11:30.564  CLIENT audio chunk len=4268
+16:11:30.564  CLIENT audio ignored: qwen not ready
+16:11:30.662  CLIENT audio chunk len=4268
+16:11:30.662  CLIENT audio ignored: qwen not ready
+16:11:30.761  CLIENT audio chunk len=4268
+16:11:30.761  CLIENT audio ignored: qwen not ready
+16:11:30.863  CLIENT audio chunk len=4268
+16:11:30.863  CLIENT audio ignored: qwen not ready
+16:11:30.963  CLIENT audio chunk len=4268
+16:11:30.963  CLIENT audio ignored: qwen not ready
+16:11:31.061  CLIENT audio chunk len=4268
+16:11:31.061  CLIENT audio ignored: qwen not ready
+16:11:31.161  CLIENT audio chunk len=4268
+16:11:31.161  CLIENT audio ignored: qwen not ready
+16:11:31.261  CLIENT audio chunk len=4268
+16:11:31.261  CLIENT audio ignored: qwen not ready
+16:11:31.361  CLIENT audio chunk len=4268
+16:11:31.361  CLIENT audio ignored: qwen not ready
+16:11:31.462  CLIENT audio chunk len=4268
+16:11:31.462  CLIENT audio ignored: qwen not ready
+16:11:31.561  CLIENT audio chunk len=4268
+16:11:31.561  CLIENT audio ignored: qwen not ready
+16:11:31.660  CLIENT audio chunk len=4268
+16:11:31.660  CLIENT audio ignored: qwen not ready
+16:11:31.762  CLIENT audio chunk len=4268
+16:11:31.762  CLIENT audio ignored: qwen not ready
+16:11:31.861  CLIENT audio chunk len=4268
+16:11:31.861  CLIENT audio ignored: qwen not ready
+16:11:31.969  CLIENT audio chunk len=4268
+16:11:31.969  CLIENT audio ignored: qwen not ready
+16:11:32.066  CLIENT audio chunk len=4268
+16:11:32.066  CLIENT audio ignored: qwen not ready
+16:11:32.162  CLIENT audio chunk len=4268
+16:11:32.162  CLIENT audio ignored: qwen not ready
+16:11:32.261  CLIENT audio chunk len=4268
+16:11:32.261  CLIENT audio ignored: qwen not ready
+16:11:32.361  CLIENT audio chunk len=4268
+16:11:32.361  CLIENT audio ignored: qwen not ready
+16:11:32.462  CLIENT audio chunk len=4268
+16:11:32.462  CLIENT audio ignored: qwen not ready
+16:11:32.560  CLIENT audio chunk len=4268
+16:11:32.560  CLIENT audio ignored: qwen not ready
+16:11:32.661  CLIENT audio chunk len=4268
+16:11:32.661  CLIENT audio ignored: qwen not ready
+16:11:32.763  CLIENT audio chunk len=4268
+16:11:32.763  CLIENT audio ignored: qwen not ready
+16:11:32.862  CLIENT audio chunk len=4268
+16:11:32.862  CLIENT audio ignored: qwen not ready
+16:11:32.962  CLIENT audio chunk len=4268
+16:11:32.962  CLIENT audio ignored: qwen not ready
+16:11:33.062  CLIENT audio chunk len=4268
+16:11:33.062  CLIENT audio ignored: qwen not ready
+16:11:33.162  CLIENT audio chunk len=4268
+16:11:33.162  CLIENT audio ignored: qwen not ready
+16:11:33.261  CLIENT audio chunk len=4268
+16:11:33.261  CLIENT audio ignored: qwen not ready
+16:11:33.362  CLIENT audio chunk len=4268
+16:11:33.362  CLIENT audio ignored: qwen not ready
+16:11:33.466  CLIENT audio chunk len=4268
+16:11:33.466  CLIENT audio ignored: qwen not ready
+16:11:33.561  CLIENT audio chunk len=4268
+16:11:33.561  CLIENT audio ignored: qwen not ready
+16:11:33.660  CLIENT audio chunk len=4268
+16:11:33.660  CLIENT audio ignored: qwen not ready
+16:11:33.762  CLIENT audio chunk len=4268
+16:11:33.762  CLIENT audio ignored: qwen not ready
+16:11:33.862  CLIENT audio chunk len=4268
+16:11:33.862  CLIENT audio ignored: qwen not ready
+16:11:33.981  CLIENT audio chunk len=4268
+16:11:33.981  CLIENT audio ignored: qwen not ready
+16:11:34.061  CLIENT audio chunk len=4268
+16:11:34.061  CLIENT audio ignored: qwen not ready
+16:11:34.162  CLIENT audio chunk len=4268
+16:11:34.162  CLIENT audio ignored: qwen not ready
+16:11:34.262  CLIENT audio chunk len=4268
+16:11:34.262  CLIENT audio ignored: qwen not ready
+16:11:34.365  CLIENT audio chunk len=4268
+16:11:34.365  CLIENT audio ignored: qwen not ready
+16:11:34.460  CLIENT audio chunk len=4268
+16:11:34.460  CLIENT audio ignored: qwen not ready
+16:11:34.562  CLIENT audio chunk len=4268
+16:11:34.562  CLIENT audio ignored: qwen not ready
+16:11:34.661  CLIENT audio chunk len=4268
+16:11:34.661  CLIENT audio ignored: qwen not ready
+16:11:34.763  CLIENT audio chunk len=4268
+16:11:34.763  CLIENT audio ignored: qwen not ready
+16:11:34.862  CLIENT audio chunk len=4268
+16:11:34.862  CLIENT audio ignored: qwen not ready
+16:11:34.961  CLIENT audio chunk len=4268
+16:11:34.961  CLIENT audio ignored: qwen not ready
+16:11:35.061  CLIENT audio chunk len=4268
+16:11:35.061  CLIENT audio ignored: qwen not ready
+16:11:35.162  CLIENT audio chunk len=4268
+16:11:35.162  CLIENT audio ignored: qwen not ready
+16:11:35.261  CLIENT audio chunk len=4268
+16:11:35.261  CLIENT audio ignored: qwen not ready
+16:11:35.396  CLIENT audio chunk len=4268
+16:11:35.396  CLIENT audio ignored: qwen not ready
+16:11:35.461  CLIENT audio chunk len=4268
+16:11:35.461  CLIENT audio ignored: qwen not ready
+16:11:35.561  CLIENT audio chunk len=4268
+16:11:35.561  CLIENT audio ignored: qwen not ready
+16:11:35.663  CLIENT audio chunk len=4268
+16:11:35.663  CLIENT audio ignored: qwen not ready
+16:11:35.760  CLIENT audio chunk len=4268
+16:11:35.760  CLIENT audio ignored: qwen not ready
+16:11:35.861  CLIENT audio chunk len=4268
+16:11:35.861  CLIENT audio ignored: qwen not ready
+16:11:35.961  CLIENT audio chunk len=4268
+16:11:35.961  CLIENT audio ignored: qwen not ready
+16:11:36.060  CLIENT audio chunk len=4268
+16:11:36.060  CLIENT audio ignored: qwen not ready
+16:11:36.161  CLIENT audio chunk len=4268
+16:11:36.161  CLIENT audio ignored: qwen not ready
+16:11:36.262  CLIENT audio chunk len=4268
+16:11:36.262  CLIENT audio ignored: qwen not ready
+16:11:36.361  CLIENT audio chunk len=4268
+16:11:36.362  CLIENT audio ignored: qwen not ready
+16:11:36.462  CLIENT audio chunk len=4268
+16:11:36.462  CLIENT audio ignored: qwen not ready
+16:11:36.563  CLIENT audio chunk len=4268
+16:11:36.563  CLIENT audio ignored: qwen not ready
+16:11:36.684  CLIENT audio chunk len=4268
+16:11:36.684  CLIENT audio ignored: qwen not ready
+16:11:36.761  CLIENT audio chunk len=4268
+16:11:36.761  CLIENT audio ignored: qwen not ready
+16:11:36.864  CLIENT audio chunk len=4268
+16:11:36.864  CLIENT audio ignored: qwen not ready
+16:11:36.962  CLIENT audio chunk len=4268
+16:11:36.962  CLIENT audio ignored: qwen not ready
+16:11:37.062  CLIENT audio chunk len=4268
+16:11:37.062  CLIENT audio ignored: qwen not ready
+16:11:37.161  CLIENT audio chunk len=4268
+16:11:37.162  CLIENT audio ignored: qwen not ready
+16:11:37.267  CLIENT audio chunk len=4268
+16:11:37.267  CLIENT audio ignored: qwen not ready
+16:11:37.362  CLIENT audio chunk len=4268
+16:11:37.362  CLIENT audio ignored: qwen not ready
+16:11:37.462  CLIENT audio chunk len=4268
+16:11:37.462  CLIENT audio ignored: qwen not ready
+16:11:37.564  CLIENT audio chunk len=4268
+16:11:37.564  CLIENT audio ignored: qwen not ready
+16:11:37.667  CLIENT audio chunk len=4268
+16:11:37.667  CLIENT audio ignored: qwen not ready
+16:11:37.771  CLIENT audio chunk len=4268
+16:11:37.771  CLIENT audio ignored: qwen not ready
+16:11:37.886  CLIENT audio chunk len=4268
+16:11:37.886  CLIENT audio ignored: qwen not ready
+16:11:37.961  CLIENT audio chunk len=4268
+16:11:37.962  CLIENT audio ignored: qwen not ready
+16:11:38.063  CLIENT audio chunk len=4268
+16:11:38.063  CLIENT audio ignored: qwen not ready
+16:11:38.162  CLIENT audio chunk len=4268
+16:11:38.162  CLIENT audio ignored: qwen not ready
+16:11:38.265  CLIENT audio chunk len=4268
+16:11:38.265  CLIENT audio ignored: qwen not ready
+16:11:38.362  CLIENT audio chunk len=4268
+16:11:38.362  CLIENT audio ignored: qwen not ready
+16:11:38.463  CLIENT audio chunk len=4268
+16:11:38.463  CLIENT audio ignored: qwen not ready
+16:11:38.562  CLIENT audio chunk len=4268
+16:11:38.562  CLIENT audio ignored: qwen not ready
+16:11:38.661  CLIENT audio chunk len=4268
+16:11:38.661  CLIENT audio ignored: qwen not ready
+16:11:38.765  CLIENT audio chunk len=4268
+16:11:38.765  CLIENT audio ignored: qwen not ready
+16:11:38.872  CLIENT audio chunk len=4268
+16:11:38.872  CLIENT audio ignored: qwen not ready
+16:11:38.962  CLIENT audio chunk len=4268
+16:11:38.962  CLIENT audio ignored: qwen not ready
+16:11:39.062  CLIENT audio chunk len=4268
+16:11:39.062  CLIENT audio ignored: qwen not ready
+16:11:39.161  CLIENT audio chunk len=4268
+16:11:39.161  CLIENT audio ignored: qwen not ready
+16:11:39.261  CLIENT audio chunk len=4268
+16:11:39.261  CLIENT audio ignored: qwen not ready
+16:11:39.360  CLIENT audio chunk len=4268
+16:11:39.362  CLIENT audio ignored: qwen not ready
+16:11:39.462  CLIENT audio chunk len=4268
+16:11:39.462  CLIENT audio ignored: qwen not ready
+16:11:39.565  CLIENT audio chunk len=4268
+16:11:39.565  CLIENT audio ignored: qwen not ready
+16:11:39.661  CLIENT audio chunk len=4268
+16:11:39.662  CLIENT audio ignored: qwen not ready
+16:11:39.764  CLIENT audio chunk len=4268
+16:11:39.764  CLIENT audio ignored: qwen not ready
+16:11:39.862  CLIENT audio chunk len=4268
+16:11:39.862  CLIENT audio ignored: qwen not ready
+16:11:39.965  CLIENT audio chunk len=4268
+16:11:39.965  CLIENT audio ignored: qwen not ready
+16:11:40.063  CLIENT audio chunk len=4268
+16:11:40.063  CLIENT audio ignored: qwen not ready
+16:11:40.162  CLIENT audio chunk len=4268
+16:11:40.162  CLIENT audio ignored: qwen not ready
+16:11:40.262  CLIENT audio chunk len=4268
+16:11:40.262  CLIENT audio ignored: qwen not ready
+16:11:40.362  CLIENT audio chunk len=4268
+16:11:40.362  CLIENT audio ignored: qwen not ready
+16:11:40.463  CLIENT audio chunk len=4268
+16:11:40.463  CLIENT audio ignored: qwen not ready
+16:11:40.562  CLIENT audio chunk len=4268
+16:11:40.562  CLIENT audio ignored: qwen not ready
+16:11:40.662  CLIENT audio chunk len=4268
+16:11:40.662  CLIENT audio ignored: qwen not ready
+16:11:40.762  CLIENT audio chunk len=4268
+16:11:40.762  CLIENT audio ignored: qwen not ready
+16:11:40.863  CLIENT audio chunk len=4268
+16:11:40.863  CLIENT audio ignored: qwen not ready
+16:11:40.963  CLIENT audio chunk len=4268
+16:11:40.963  CLIENT audio ignored: qwen not ready
+16:11:41.062  CLIENT audio chunk len=4268
+16:11:41.063  CLIENT audio ignored: qwen not ready
+16:11:41.162  CLIENT audio chunk len=4268
+16:11:41.162  CLIENT audio ignored: qwen not ready
+16:11:41.262  CLIENT audio chunk len=4268
+16:11:41.262  CLIENT audio ignored: qwen not ready
+16:11:41.362  CLIENT audio chunk len=4268
+16:11:41.362  CLIENT audio ignored: qwen not ready
+16:11:41.461  CLIENT audio chunk len=4268
+16:11:41.461  CLIENT audio ignored: qwen not ready
+16:11:41.562  CLIENT audio chunk len=4268
+16:11:41.562  CLIENT audio ignored: qwen not ready
+16:11:41.671  CLIENT audio chunk len=4268
+16:11:41.671  CLIENT audio ignored: qwen not ready
+16:11:41.762  CLIENT audio chunk len=4268
+16:11:41.763  CLIENT audio ignored: qwen not ready
+16:11:41.860  CLIENT audio chunk len=4268
+16:11:41.860  CLIENT audio ignored: qwen not ready
+16:11:41.968  CLIENT audio chunk len=4268
+16:11:41.968  CLIENT audio ignored: qwen not ready
+16:11:42.061  CLIENT audio chunk len=4268
+16:11:42.061  CLIENT audio ignored: qwen not ready
+16:11:42.160  CLIENT audio chunk len=4268
+16:11:42.160  CLIENT audio ignored: qwen not ready
+16:11:42.261  CLIENT audio chunk len=4268
+16:11:42.261  CLIENT audio ignored: qwen not ready
+16:11:42.364  CLIENT audio chunk len=4268
+16:11:42.364  CLIENT audio ignored: qwen not ready
+16:11:42.462  CLIENT audio chunk len=4268
+16:11:42.462  CLIENT audio ignored: qwen not ready
+16:11:42.561  CLIENT audio chunk len=4268
+16:11:42.561  CLIENT audio ignored: qwen not ready
+16:11:42.662  CLIENT audio chunk len=4268
+16:11:42.662  CLIENT audio ignored: qwen not ready
+16:11:42.761  CLIENT audio chunk len=4268
+16:11:42.761  CLIENT audio ignored: qwen not ready
+16:11:42.864  CLIENT audio chunk len=4268
+16:11:42.864  CLIENT audio ignored: qwen not ready
+16:11:42.966  CLIENT audio chunk len=4268
+16:11:42.966  CLIENT audio ignored: qwen not ready
+16:11:43.069  CLIENT audio chunk len=4268
+16:11:43.070  CLIENT audio ignored: qwen not ready
+16:11:43.162  CLIENT audio chunk len=4268
+16:11:43.163  CLIENT audio ignored: qwen not ready
+16:11:43.262  CLIENT audio chunk len=4268
+16:11:43.263  CLIENT audio ignored: qwen not ready
+16:11:43.364  CLIENT audio chunk len=4268
+16:11:43.364  CLIENT audio ignored: qwen not ready
+16:11:43.464  CLIENT audio chunk len=4268
+16:11:43.464  CLIENT audio ignored: qwen not ready
+16:11:43.562  CLIENT audio chunk len=4268
+16:11:43.562  CLIENT audio ignored: qwen not ready
+16:11:43.662  CLIENT audio chunk len=4268
+16:11:43.663  CLIENT audio ignored: qwen not ready
+16:11:43.762  CLIENT audio chunk len=4268
+16:11:43.762  CLIENT audio ignored: qwen not ready
+16:11:43.862  CLIENT audio chunk len=4268
+16:11:43.862  CLIENT audio ignored: qwen not ready
+16:11:43.962  CLIENT audio chunk len=4268
+16:11:43.962  CLIENT audio ignored: qwen not ready
+16:11:44.063  CLIENT audio chunk len=4268
+16:11:44.063  CLIENT audio ignored: qwen not ready
+16:11:44.162  CLIENT audio chunk len=4268
+16:11:44.162  CLIENT audio ignored: qwen not ready
+16:11:44.264  CLIENT audio chunk len=4268
+16:11:44.264  CLIENT audio ignored: qwen not ready
+16:11:44.361  CLIENT audio chunk len=4268
+16:11:44.361  CLIENT audio ignored: qwen not ready
+16:11:44.463  CLIENT audio chunk len=4268
+16:11:44.464  CLIENT audio ignored: qwen not ready
+16:11:44.563  CLIENT audio chunk len=4268
+16:11:44.563  CLIENT audio ignored: qwen not ready
+16:11:44.661  CLIENT audio chunk len=4268
+16:11:44.661  CLIENT audio ignored: qwen not ready
+16:11:44.761  CLIENT audio chunk len=4268
+16:11:44.762  CLIENT audio ignored: qwen not ready
+16:11:44.862  CLIENT audio chunk len=4268
+16:11:44.863  CLIENT audio ignored: qwen not ready
+16:11:44.961  CLIENT audio chunk len=4268
+16:11:44.961  CLIENT audio ignored: qwen not ready
+16:11:45.060  CLIENT audio chunk len=4268
+16:11:45.060  CLIENT audio ignored: qwen not ready
+16:11:45.162  CLIENT audio chunk len=4268
+16:11:45.163  CLIENT audio ignored: qwen not ready
+16:11:45.263  CLIENT audio chunk len=4268
+16:11:45.263  CLIENT audio ignored: qwen not ready
+16:11:45.415  CLIENT audio chunk len=4268
+16:11:45.415  CLIENT audio ignored: qwen not ready
+16:11:45.462  CLIENT audio chunk len=4268
+16:11:45.462  CLIENT audio ignored: qwen not ready
+16:11:45.561  CLIENT audio chunk len=4268
+16:11:45.561  CLIENT audio ignored: qwen not ready
+16:11:45.660  CLIENT audio chunk len=4268
+16:11:45.660  CLIENT audio ignored: qwen not ready
+16:11:45.761  CLIENT audio chunk len=4268
+16:11:45.762  CLIENT audio ignored: qwen not ready
+16:11:45.863  CLIENT audio chunk len=4268
+16:11:45.863  CLIENT audio ignored: qwen not ready
+16:11:45.966  CLIENT audio chunk len=4268
+16:11:45.966  CLIENT audio ignored: qwen not ready
+16:11:46.068  CLIENT audio chunk len=4268
+16:11:46.068  CLIENT audio ignored: qwen not ready
+16:11:46.153  CLIENT audio chunk len=4268
+16:11:46.153  CLIENT audio ignored: qwen not ready
+16:11:46.254  CLIENT audio chunk len=4268
+16:11:46.254  CLIENT audio ignored: qwen not ready
+16:11:46.364  CLIENT audio chunk len=4268
+16:11:46.364  CLIENT audio ignored: qwen not ready
+16:11:46.480  CLIENT audio chunk len=4268
+16:11:46.480  CLIENT audio ignored: qwen not ready
+16:11:46.591  CLIENT audio chunk len=4268
+16:11:46.591  CLIENT audio ignored: qwen not ready
+16:11:46.710  CLIENT audio chunk len=4268
+16:11:46.710  CLIENT audio ignored: qwen not ready
+16:11:46.805  CLIENT audio chunk len=4268
+16:11:46.805  CLIENT audio ignored: qwen not ready
+16:11:46.909  CLIENT audio chunk len=4268
+16:11:46.909  CLIENT audio ignored: qwen not ready
+16:11:47.016  CLIENT audio chunk len=4268
+16:11:47.016  CLIENT audio ignored: qwen not ready
+16:11:47.122  CLIENT audio chunk len=4268
+16:11:47.122  CLIENT audio ignored: qwen not ready
+16:11:47.213  CLIENT audio chunk len=4268
+16:11:47.213  CLIENT audio ignored: qwen not ready
+16:11:47.321  CLIENT audio chunk len=4268
+16:11:47.321  CLIENT audio ignored: qwen not ready
+16:11:47.419  CLIENT audio chunk len=4268
+16:11:47.419  CLIENT audio ignored: qwen not ready
+16:11:47.681  CLIENT audio chunk len=4268
+16:11:47.681  CLIENT audio ignored: qwen not ready
+16:11:47.681  CLIENT audio chunk len=4268
+16:11:47.681  CLIENT audio ignored: qwen not ready
+16:11:47.748  CLIENT audio chunk len=4268
+16:11:47.748  CLIENT audio ignored: qwen not ready
+16:11:47.837  CLIENT audio chunk len=4268
+16:11:47.837  CLIENT audio ignored: qwen not ready
+16:11:47.937  CLIENT audio chunk len=4268
+16:11:47.937  CLIENT audio ignored: qwen not ready
+16:11:48.079  CLIENT audio chunk len=4268
+16:11:48.079  CLIENT audio ignored: qwen not ready
+16:11:48.144  CLIENT audio chunk len=4268
+16:11:48.145  CLIENT audio ignored: qwen not ready
+16:11:48.247  CLIENT audio chunk len=4268
+16:11:48.247  CLIENT audio ignored: qwen not ready
+16:11:48.352  CLIENT audio chunk len=4268
+16:11:48.352  CLIENT audio ignored: qwen not ready
+16:11:48.448  CLIENT audio chunk len=4268
+16:11:48.448  CLIENT audio ignored: qwen not ready
+16:11:48.561  CLIENT audio chunk len=4268
+16:11:48.561  CLIENT audio ignored: qwen not ready
+16:11:48.662  CLIENT audio chunk len=4268
+16:11:48.663  CLIENT audio ignored: qwen not ready
+16:11:48.759  CLIENT audio chunk len=4268
+16:11:48.759  CLIENT audio ignored: qwen not ready
+16:11:48.853  CLIENT audio chunk len=4268
+16:11:48.853  CLIENT audio ignored: qwen not ready
+16:11:48.959  CLIENT audio chunk len=4268
+16:11:48.960  CLIENT audio ignored: qwen not ready
+16:11:49.060  CLIENT audio chunk len=4268
+16:11:49.061  CLIENT audio ignored: qwen not ready
+16:11:49.163  CLIENT audio chunk len=4268
+16:11:49.163  CLIENT audio ignored: qwen not ready
+16:11:49.268  CLIENT audio chunk len=4268
+16:11:49.268  CLIENT audio ignored: qwen not ready
+16:11:49.372  CLIENT audio chunk len=4268
+16:11:49.372  CLIENT audio ignored: qwen not ready
+16:11:49.480  CLIENT audio chunk len=4268
+16:11:49.480  CLIENT audio ignored: qwen not ready
+16:11:49.578  CLIENT audio chunk len=4268
+16:11:49.578  CLIENT audio ignored: qwen not ready
+16:11:49.682  CLIENT audio chunk len=4268
+16:11:49.682  CLIENT audio ignored: qwen not ready
+16:11:49.779  CLIENT audio chunk len=4268
+16:11:49.779  CLIENT audio ignored: qwen not ready
+16:11:49.875  CLIENT audio chunk len=4268
+16:11:49.875  CLIENT audio ignored: qwen not ready
+16:11:49.980  CLIENT audio chunk len=4268
+16:11:49.980  CLIENT audio ignored: qwen not ready
+16:11:50.083  CLIENT audio chunk len=4268
+16:11:50.083  CLIENT audio ignored: qwen not ready
+16:11:50.191  CLIENT audio chunk len=4268
+16:11:50.191  CLIENT audio ignored: qwen not ready
+16:11:50.287  CLIENT audio chunk len=4268
+16:11:50.287  CLIENT audio ignored: qwen not ready
+16:11:50.386  CLIENT audio chunk len=4268
+16:11:50.386  CLIENT audio ignored: qwen not ready
+16:11:50.483  CLIENT audio chunk len=4268
+16:11:50.483  CLIENT audio ignored: qwen not ready
+16:11:50.603  CLIENT audio chunk len=4268
+16:11:50.603  CLIENT audio ignored: qwen not ready
+16:11:50.712  CLIENT audio chunk len=4268
+16:11:50.712  CLIENT audio ignored: qwen not ready
+16:11:50.813  CLIENT audio chunk len=4268
+16:11:50.813  CLIENT audio ignored: qwen not ready
+16:11:50.914  CLIENT audio chunk len=4268
+16:11:50.914  CLIENT audio ignored: qwen not ready
+16:11:51.016  CLIENT audio chunk len=4268
+16:11:51.016  CLIENT audio ignored: qwen not ready
+16:11:51.116  CLIENT audio chunk len=4268
+16:11:51.116  CLIENT audio ignored: qwen not ready
+16:11:51.220  CLIENT audio chunk len=4268
+16:11:51.220  CLIENT audio ignored: qwen not ready
+16:11:51.326  CLIENT audio chunk len=4268
+16:11:51.327  CLIENT audio ignored: qwen not ready
+16:11:51.427  CLIENT audio chunk len=4268
+16:11:51.427  CLIENT audio ignored: qwen not ready
+16:11:51.538  CLIENT audio chunk len=4268
+16:11:51.538  CLIENT audio ignored: qwen not ready
+16:11:51.641  CLIENT audio chunk len=4268
+16:11:51.641  CLIENT audio ignored: qwen not ready
+16:11:51.742  CLIENT audio chunk len=4268
+16:11:51.742  CLIENT audio ignored: qwen not ready
+16:11:51.850  CLIENT audio chunk len=4268
+16:11:51.851  CLIENT audio ignored: qwen not ready
+16:11:51.952  CLIENT audio chunk len=4268
+16:11:51.952  CLIENT audio ignored: qwen not ready
+16:11:52.163  CLIENT audio chunk len=4268
+16:11:52.163  CLIENT audio ignored: qwen not ready
+16:11:52.164  CLIENT audio chunk len=4268
+16:11:52.164  CLIENT audio ignored: qwen not ready
+16:11:52.252  CLIENT audio chunk len=4268
+16:11:52.252  CLIENT audio ignored: qwen not ready
+16:11:52.351  CLIENT audio chunk len=4268
+16:11:52.351  CLIENT audio ignored: qwen not ready
+16:11:52.452  CLIENT audio chunk len=4268
+16:11:52.453  CLIENT audio ignored: qwen not ready
+16:11:52.590  CLIENT audio chunk len=4268
+16:11:52.590  CLIENT audio ignored: qwen not ready
+16:11:52.683  CLIENT audio chunk len=4268
+16:11:52.683  CLIENT audio ignored: qwen not ready
+16:11:52.785  CLIENT audio chunk len=4268
+16:11:52.785  CLIENT audio ignored: qwen not ready
+16:11:52.885  CLIENT audio chunk len=4268
+16:11:52.885  CLIENT audio ignored: qwen not ready
+16:11:53.008  CLIENT audio chunk len=4268
+16:11:53.008  CLIENT audio ignored: qwen not ready
+16:11:53.109  CLIENT audio chunk len=4268
+16:11:53.109  CLIENT audio ignored: qwen not ready
+16:11:53.215  CLIENT audio chunk len=4268
+16:11:53.215  CLIENT audio ignored: qwen not ready
+16:11:53.313  CLIENT audio chunk len=4268
+16:11:53.313  CLIENT audio ignored: qwen not ready
+16:11:53.420  CLIENT audio chunk len=4268
+16:11:53.420  CLIENT audio ignored: qwen not ready
+16:11:53.527  CLIENT audio chunk len=4268
+16:11:53.527  CLIENT audio ignored: qwen not ready
+16:11:53.630  CLIENT audio chunk len=4268
+16:11:53.630  CLIENT audio ignored: qwen not ready
+16:11:53.726  CLIENT audio chunk len=4268
+16:11:53.726  CLIENT audio ignored: qwen not ready
+16:11:53.846  CLIENT audio chunk len=4268
+16:11:53.846  CLIENT audio ignored: qwen not ready
+16:11:53.960  CLIENT audio chunk len=4268
+16:11:53.960  CLIENT audio ignored: qwen not ready
+16:11:54.120  CLIENT audio chunk len=4268
+16:11:54.120  CLIENT audio ignored: qwen not ready
+16:11:54.159  CLIENT audio chunk len=4268
+16:11:54.159  CLIENT audio ignored: qwen not ready
+16:11:54.264  CLIENT audio chunk len=4268
+16:11:54.264  CLIENT audio ignored: qwen not ready
+16:11:54.367  CLIENT audio chunk len=4268
+16:11:54.368  CLIENT audio ignored: qwen not ready
+16:11:54.467  CLIENT audio chunk len=4268
+16:11:54.468  CLIENT audio ignored: qwen not ready
+16:11:54.568  CLIENT audio chunk len=4268
+16:11:54.568  CLIENT audio ignored: qwen not ready
+16:11:54.683  CLIENT audio chunk len=4268
+16:11:54.683  CLIENT audio ignored: qwen not ready
+16:11:54.806  CLIENT audio chunk len=4268
+16:11:54.806  CLIENT audio ignored: qwen not ready
+16:11:54.910  CLIENT audio chunk len=4268
+16:11:54.910  CLIENT audio ignored: qwen not ready
+16:11:55.004  CLIENT audio chunk len=4268
+16:11:55.004  CLIENT audio ignored: qwen not ready
+16:11:55.133  CLIENT audio chunk len=4268
+16:11:55.133  CLIENT audio ignored: qwen not ready
+16:11:55.239  CLIENT audio chunk len=4268
+16:11:55.239  CLIENT audio ignored: qwen not ready
+16:11:55.343  CLIENT audio chunk len=4268
+16:11:55.343  CLIENT audio ignored: qwen not ready
+16:11:55.468  CLIENT audio chunk len=4268
+16:11:55.468  CLIENT audio ignored: qwen not ready
+16:11:55.577  CLIENT audio chunk len=4268
+16:11:55.577  CLIENT audio ignored: qwen not ready
+16:11:55.688  CLIENT audio chunk len=4268
+16:11:55.689  CLIENT audio ignored: qwen not ready
+16:11:55.784  CLIENT audio chunk len=4268
+16:11:55.784  CLIENT audio ignored: qwen not ready
+16:11:55.891  CLIENT audio chunk len=4268
+16:11:55.891  CLIENT audio ignored: qwen not ready
+16:11:56.007  CLIENT audio chunk len=4268
+16:11:56.008  CLIENT audio ignored: qwen not ready
+16:11:56.120  CLIENT audio chunk len=4268
+16:11:56.121  CLIENT audio ignored: qwen not ready
+16:11:56.240  CLIENT audio chunk len=4268
+16:11:56.240  CLIENT audio ignored: qwen not ready
+16:11:56.333  CLIENT audio chunk len=4268
+16:11:56.333  CLIENT audio ignored: qwen not ready
+16:11:56.436  CLIENT audio chunk len=4268
+16:11:56.436  CLIENT audio ignored: qwen not ready
+16:11:56.534  CLIENT audio chunk len=4268
+16:11:56.534  CLIENT audio ignored: qwen not ready
+16:11:56.650  CLIENT audio chunk len=4268
+16:11:56.650  CLIENT audio ignored: qwen not ready
+16:11:56.747  CLIENT audio chunk len=4268
+16:11:56.748  CLIENT audio ignored: qwen not ready
+16:11:56.852  CLIENT audio chunk len=4268
+16:11:56.852  CLIENT audio ignored: qwen not ready
+16:11:56.943  CLIENT audio chunk len=4268
+16:11:56.943  CLIENT audio ignored: qwen not ready
+16:11:57.063  CLIENT audio chunk len=4268
+16:11:57.063  CLIENT audio ignored: qwen not ready
+16:11:57.167  CLIENT audio chunk len=4268
+16:11:57.167  CLIENT audio ignored: qwen not ready
+16:11:57.273  CLIENT audio chunk len=4268
+16:11:57.273  CLIENT audio ignored: qwen not ready
+16:11:57.378  CLIENT audio chunk len=4268
+16:11:57.378  CLIENT audio ignored: qwen not ready
+16:11:57.486  CLIENT audio chunk len=4268
+16:11:57.486  CLIENT audio ignored: qwen not ready
+16:11:57.590  CLIENT audio chunk len=4268
+16:11:57.590  CLIENT audio ignored: qwen not ready
+16:11:57.700  CLIENT audio chunk len=4268
+16:11:57.700  CLIENT audio ignored: qwen not ready
+16:11:57.795  CLIENT audio chunk len=4268
+16:11:57.795  CLIENT audio ignored: qwen not ready
+16:11:57.894  CLIENT audio chunk len=4268
+16:11:57.894  CLIENT audio ignored: qwen not ready
+16:11:58.001  CLIENT audio chunk len=4268
+16:11:58.002  CLIENT audio ignored: qwen not ready
+16:11:58.096  CLIENT audio chunk len=4268
+16:11:58.096  CLIENT audio ignored: qwen not ready
+16:11:58.198  CLIENT audio chunk len=4268
+16:11:58.198  CLIENT audio ignored: qwen not ready
+16:11:58.299  CLIENT audio chunk len=4268
+16:11:58.299  CLIENT audio ignored: qwen not ready
+16:11:58.393  CLIENT audio chunk len=4268
+16:11:58.393  CLIENT audio ignored: qwen not ready
+16:11:58.513  CLIENT audio chunk len=4268
+16:11:58.513  CLIENT audio ignored: qwen not ready
+16:11:58.613  CLIENT audio chunk len=4268
+16:11:58.613  CLIENT audio ignored: qwen not ready
+16:11:58.704  CLIENT audio chunk len=4268
+16:11:58.704  CLIENT audio ignored: qwen not ready
+16:11:58.804  CLIENT audio chunk len=4268
+16:11:58.805  CLIENT audio ignored: qwen not ready
+16:11:58.906  CLIENT audio chunk len=4268
+16:11:58.906  CLIENT audio ignored: qwen not ready
+16:11:59.007  CLIENT audio chunk len=4268
+16:11:59.007  CLIENT audio ignored: qwen not ready
+16:11:59.114  CLIENT audio chunk len=4268
+16:11:59.114  CLIENT audio ignored: qwen not ready
+16:11:59.238  CLIENT audio chunk len=4268
+16:11:59.238  CLIENT audio ignored: qwen not ready
+16:11:59.335  CLIENT audio chunk len=4268
+16:11:59.335  CLIENT audio ignored: qwen not ready
+16:11:59.451  CLIENT audio chunk len=4268
+16:11:59.451  CLIENT audio ignored: qwen not ready
+16:11:59.561  CLIENT audio chunk len=4268
+16:11:59.561  CLIENT audio ignored: qwen not ready
+16:11:59.667  CLIENT audio chunk len=4268
+16:11:59.667  CLIENT audio ignored: qwen not ready
+16:11:59.772  CLIENT audio chunk len=4268
+16:11:59.772  CLIENT audio ignored: qwen not ready
+16:11:59.881  CLIENT audio chunk len=4268
+16:11:59.881  CLIENT audio ignored: qwen not ready
+16:11:59.986  CLIENT audio chunk len=4268
+16:11:59.986  CLIENT audio ignored: qwen not ready
+16:12:00.090  CLIENT audio chunk len=4268
+16:12:00.090  CLIENT audio ignored: qwen not ready
+16:12:00.188  CLIENT audio chunk len=4268
+16:12:00.188  CLIENT audio ignored: qwen not ready
+16:12:00.292  CLIENT audio chunk len=4268
+16:12:00.293  CLIENT audio ignored: qwen not ready
+16:12:00.396  CLIENT audio chunk len=4268
+16:12:00.396  CLIENT audio ignored: qwen not ready
+16:12:00.496  CLIENT audio chunk len=4268
+16:12:00.496  CLIENT audio ignored: qwen not ready
+16:12:00.620  CLIENT audio chunk len=4268
+16:12:00.620  CLIENT audio ignored: qwen not ready
+16:12:00.727  CLIENT audio chunk len=4268
+16:12:00.728  CLIENT audio ignored: qwen not ready
+16:12:00.841  CLIENT audio chunk len=4268
+16:12:00.841  CLIENT audio ignored: qwen not ready
+16:12:00.943  CLIENT audio chunk len=4268
+16:12:00.943  CLIENT audio ignored: qwen not ready
+16:12:01.033  CLIENT audio chunk len=4268
+16:12:01.033  CLIENT audio ignored: qwen not ready
+16:12:01.143  CLIENT audio chunk len=4268
+16:12:01.143  CLIENT audio ignored: qwen not ready
+16:12:01.261  CLIENT audio chunk len=4268
+16:12:01.261  CLIENT audio ignored: qwen not ready
+16:12:01.380  CLIENT audio chunk len=4268
+16:12:01.380  CLIENT audio ignored: qwen not ready
+16:12:01.479  CLIENT audio chunk len=4268
+16:12:01.479  CLIENT audio ignored: qwen not ready
+16:12:01.578  CLIENT audio chunk len=4268
+16:12:01.578  CLIENT audio ignored: qwen not ready
+16:12:01.680  CLIENT audio chunk len=4268
+16:12:01.681  CLIENT audio ignored: qwen not ready
+16:12:01.788  CLIENT audio chunk len=4268
+16:12:01.788  CLIENT audio ignored: qwen not ready
+16:12:01.889  CLIENT audio chunk len=4268
+16:12:01.890  CLIENT audio ignored: qwen not ready
+16:12:01.989  CLIENT audio chunk len=4268
+16:12:01.990  CLIENT audio ignored: qwen not ready
+16:12:02.100  CLIENT audio chunk len=4268
+16:12:02.100  CLIENT audio ignored: qwen not ready
+16:12:02.196  CLIENT audio chunk len=4268
+16:12:02.196  CLIENT audio ignored: qwen not ready
+16:12:02.294  CLIENT audio chunk len=4268
+16:12:02.294  CLIENT audio ignored: qwen not ready
+16:12:02.394  CLIENT audio chunk len=4268
+16:12:02.394  CLIENT audio ignored: qwen not ready
+16:12:02.494  CLIENT audio chunk len=4268
+16:12:02.494  CLIENT audio ignored: qwen not ready
+16:12:02.601  CLIENT audio chunk len=4268
+16:12:02.601  CLIENT audio ignored: qwen not ready
+16:12:02.697  CLIENT audio chunk len=4268
+16:12:02.697  CLIENT audio ignored: qwen not ready
+16:12:02.801  CLIENT audio chunk len=4268
+16:12:02.801  CLIENT audio ignored: qwen not ready
+16:12:02.893  CLIENT audio chunk len=4268
+16:12:02.893  CLIENT audio ignored: qwen not ready
+16:12:03.001  CLIENT audio chunk len=4268
+16:12:03.001  CLIENT audio ignored: qwen not ready
+16:12:03.117  CLIENT audio chunk len=4268
+16:12:03.117  CLIENT audio ignored: qwen not ready
+16:12:03.227  CLIENT audio chunk len=4268
+16:12:03.227  CLIENT audio ignored: qwen not ready
+16:12:03.341  CLIENT audio chunk len=4268
+16:12:03.341  CLIENT audio ignored: qwen not ready
+16:12:03.431  CLIENT audio chunk len=4268
+16:12:03.431  CLIENT audio ignored: qwen not ready
+16:12:03.539  CLIENT audio chunk len=4268
+16:12:03.539  CLIENT audio ignored: qwen not ready
+16:12:03.638  CLIENT audio chunk len=4268
+16:12:03.638  CLIENT audio ignored: qwen not ready
+16:12:03.745  CLIENT audio chunk len=4268
+16:12:03.745  CLIENT audio ignored: qwen not ready
+16:12:03.870  CLIENT audio chunk len=4268
+16:12:03.870  CLIENT audio ignored: qwen not ready
+16:12:03.966  CLIENT audio chunk len=4268
+16:12:03.966  CLIENT audio ignored: qwen not ready
+16:12:04.066  CLIENT audio chunk len=4268
+16:12:04.066  CLIENT audio ignored: qwen not ready
+16:12:04.165  CLIENT audio chunk len=4268
+16:12:04.165  CLIENT audio ignored: qwen not ready
+16:12:04.272  CLIENT audio chunk len=4268
+16:12:04.272  CLIENT audio ignored: qwen not ready
+16:12:04.370  CLIENT audio chunk len=4268
+16:12:04.370  CLIENT audio ignored: qwen not ready
+16:12:04.468  CLIENT audio chunk len=4268
+16:12:04.468  CLIENT audio ignored: qwen not ready
+16:12:04.566  CLIENT audio chunk len=4268
+16:12:04.566  CLIENT audio ignored: qwen not ready
+16:12:04.685  CLIENT audio chunk len=4268
+16:12:04.685  CLIENT audio ignored: qwen not ready
+16:12:04.792  CLIENT audio chunk len=4268
+16:12:04.792  CLIENT audio ignored: qwen not ready
+16:12:04.891  CLIENT audio chunk len=4268
+16:12:04.891  CLIENT audio ignored: qwen not ready
+16:12:04.985  CLIENT audio chunk len=4268
+16:12:04.985  CLIENT audio ignored: qwen not ready
+16:12:05.088  CLIENT audio chunk len=4268
+16:12:05.088  CLIENT audio ignored: qwen not ready
+16:12:05.189  CLIENT audio chunk len=4268
+16:12:05.189  CLIENT audio ignored: qwen not ready
+16:12:05.294  CLIENT audio chunk len=4268
+16:12:05.294  CLIENT audio ignored: qwen not ready
+16:12:05.438  CLIENT audio chunk len=4268
+16:12:05.438  CLIENT audio ignored: qwen not ready
+16:12:05.535  CLIENT audio chunk len=4268
+16:12:05.536  CLIENT audio ignored: qwen not ready
+16:12:05.621  CLIENT audio chunk len=4268
+16:12:05.621  CLIENT audio ignored: qwen not ready
+16:12:05.712  CLIENT audio chunk len=4268
+16:12:05.713  CLIENT audio ignored: qwen not ready
+16:12:05.825  CLIENT audio chunk len=4268
+16:12:05.825  CLIENT audio ignored: qwen not ready
+16:12:05.941  CLIENT audio chunk len=4268
+16:12:05.941  CLIENT audio ignored: qwen not ready
+16:12:06.050  CLIENT audio chunk len=4268
+16:12:06.050  CLIENT audio ignored: qwen not ready
+16:12:06.152  CLIENT audio chunk len=4268
+16:12:06.152  CLIENT audio ignored: qwen not ready
+16:12:06.258  CLIENT audio chunk len=4268
+16:12:06.258  CLIENT audio ignored: qwen not ready
+16:12:06.360  CLIENT audio chunk len=4268
+16:12:06.361  CLIENT audio ignored: qwen not ready
+16:12:06.464  CLIENT audio chunk len=4268
+16:12:06.464  CLIENT audio ignored: qwen not ready
+16:12:06.564  CLIENT audio chunk len=4268
+16:12:06.564  CLIENT audio ignored: qwen not ready
+16:12:06.667  CLIENT audio chunk len=4268
+16:12:06.667  CLIENT audio ignored: qwen not ready
+16:12:06.769  CLIENT audio chunk len=4268
+16:12:06.769  CLIENT audio ignored: qwen not ready
+16:12:06.868  CLIENT audio chunk len=4268
+16:12:06.868  CLIENT audio ignored: qwen not ready
+16:12:06.967  CLIENT audio chunk len=4268
+16:12:06.967  CLIENT audio ignored: qwen not ready
+16:12:07.073  CLIENT audio chunk len=4268
+16:12:07.073  CLIENT audio ignored: qwen not ready
+16:12:07.191  CLIENT audio chunk len=4268
+16:12:07.191  CLIENT audio ignored: qwen not ready
+16:12:07.300  CLIENT audio chunk len=4268
+16:12:07.300  CLIENT audio ignored: qwen not ready
+16:12:07.404  CLIENT audio chunk len=4268
+16:12:07.404  CLIENT audio ignored: qwen not ready
+16:12:07.535  CLIENT audio chunk len=4268
+16:12:07.535  CLIENT audio ignored: qwen not ready
+16:12:07.623  CLIENT audio chunk len=4268
+16:12:07.623  CLIENT audio ignored: qwen not ready
+16:12:07.728  CLIENT audio chunk len=4268
+16:12:07.728  CLIENT audio ignored: qwen not ready
+16:12:07.839  CLIENT audio chunk len=4268
+16:12:07.839  CLIENT audio ignored: qwen not ready
+16:12:07.938  CLIENT audio chunk len=4268
+16:12:07.938  CLIENT audio ignored: qwen not ready
+16:12:08.047  CLIENT audio chunk len=4268
+16:12:08.047  CLIENT audio ignored: qwen not ready
+16:12:08.145  CLIENT audio chunk len=4268
+16:12:08.145  CLIENT audio ignored: qwen not ready
+16:12:08.248  CLIENT audio chunk len=4268
+16:12:08.248  CLIENT audio ignored: qwen not ready
+16:12:08.348  CLIENT audio chunk len=4268
+16:12:08.349  CLIENT audio ignored: qwen not ready
+16:12:08.446  CLIENT audio chunk len=4268
+16:12:08.447  CLIENT audio ignored: qwen not ready
+16:12:08.565  CLIENT audio chunk len=4268
+16:12:08.566  CLIENT audio ignored: qwen not ready
+16:12:08.660  CLIENT audio chunk len=4268
+16:12:08.660  CLIENT audio ignored: qwen not ready
+16:12:08.770  CLIENT audio chunk len=4268
+16:12:08.770  CLIENT audio ignored: qwen not ready
+16:12:08.868  CLIENT audio chunk len=4268
+16:12:08.868  CLIENT audio ignored: qwen not ready
+16:12:08.968  CLIENT audio chunk len=4268
+16:12:08.968  CLIENT audio ignored: qwen not ready
+16:12:09.077  CLIENT audio chunk len=4268
+16:12:09.077  CLIENT audio ignored: qwen not ready
+16:12:09.184  CLIENT audio chunk len=4268
+16:12:09.184  CLIENT audio ignored: qwen not ready
+16:12:09.280  CLIENT audio chunk len=4268
+16:12:09.280  CLIENT audio ignored: qwen not ready
+16:12:09.378  CLIENT audio chunk len=4268
+16:12:09.378  CLIENT audio ignored: qwen not ready
+16:12:09.494  CLIENT audio chunk len=4268
+16:12:09.494  CLIENT audio ignored: qwen not ready
+16:12:09.576  CLIENT audio chunk len=4268
+16:12:09.576  CLIENT audio ignored: qwen not ready
+16:12:09.686  CLIENT audio chunk len=4268
+16:12:09.686  CLIENT audio ignored: qwen not ready
+16:12:09.776  CLIENT audio chunk len=4268
+16:12:09.776  CLIENT audio ignored: qwen not ready
+16:12:09.876  CLIENT audio chunk len=4268
+16:12:09.876  CLIENT audio ignored: qwen not ready
+16:12:09.980  CLIENT audio chunk len=4268
+16:12:09.981  CLIENT audio ignored: qwen not ready
+16:12:10.088  CLIENT audio chunk len=4268
+16:12:10.088  CLIENT audio ignored: qwen not ready
+16:12:10.187  CLIENT audio chunk len=4268
+16:12:10.187  CLIENT audio ignored: qwen not ready
+16:12:10.293  CLIENT audio chunk len=4268
+16:12:10.293  CLIENT audio ignored: qwen not ready
+16:12:10.392  CLIENT audio chunk len=4268
+16:12:10.392  CLIENT audio ignored: qwen not ready
+16:12:10.496  CLIENT audio chunk len=4268
+16:12:10.496  CLIENT audio ignored: qwen not ready
+16:12:10.633  CLIENT audio chunk len=4268
+16:12:10.633  CLIENT audio ignored: qwen not ready
+16:12:10.749  CLIENT audio chunk len=4268
+16:12:10.749  CLIENT audio ignored: qwen not ready
+16:12:10.853  CLIENT audio chunk len=4268
+16:12:10.853  CLIENT audio ignored: qwen not ready
+16:12:10.949  CLIENT audio chunk len=4268
+16:12:10.949  CLIENT audio ignored: qwen not ready
+16:12:11.041  CLIENT audio chunk len=4268
+16:12:11.041  CLIENT audio ignored: qwen not ready
+16:12:11.137  CLIENT audio chunk len=4268
+16:12:11.138  CLIENT audio ignored: qwen not ready
+16:12:11.245  CLIENT audio chunk len=4268
+16:12:11.245  CLIENT audio ignored: qwen not ready
+16:12:11.354  CLIENT audio chunk len=4268
+16:12:11.354  CLIENT audio ignored: qwen not ready
+16:12:11.461  CLIENT audio chunk len=4268
+16:12:11.461  CLIENT audio ignored: qwen not ready
+16:12:11.563  CLIENT audio chunk len=4268
+16:12:11.563  CLIENT audio ignored: qwen not ready
+16:12:11.666  CLIENT audio chunk len=4268
+16:12:11.666  CLIENT audio ignored: qwen not ready
+16:12:11.783  CLIENT audio chunk len=4268
+16:12:11.783  CLIENT audio ignored: qwen not ready
+16:12:11.890  CLIENT audio chunk len=4268
+16:12:11.890  CLIENT audio ignored: qwen not ready
+16:12:11.985  CLIENT audio chunk len=4268
+16:12:11.985  CLIENT audio ignored: qwen not ready
+16:12:12.092  CLIENT audio chunk len=4268
+16:12:12.092  CLIENT audio ignored: qwen not ready
+16:12:12.192  CLIENT audio chunk len=4268
+16:12:12.193  CLIENT audio ignored: qwen not ready
+16:12:12.295  CLIENT audio chunk len=4268
+16:12:12.295  CLIENT audio ignored: qwen not ready
+16:12:12.399  CLIENT audio chunk len=4268
+16:12:12.399  CLIENT audio ignored: qwen not ready
+16:12:12.524  CLIENT audio chunk len=4268
+16:12:12.524  CLIENT audio ignored: qwen not ready
+16:12:12.610  CLIENT audio chunk len=4268
+16:12:12.610  CLIENT audio ignored: qwen not ready
+16:12:12.709  CLIENT audio chunk len=4268
+16:12:12.709  CLIENT audio ignored: qwen not ready
+16:12:12.805  CLIENT audio chunk len=4268
+16:12:12.806  CLIENT audio ignored: qwen not ready
+16:12:12.903  CLIENT audio chunk len=4268
+16:12:12.903  CLIENT audio ignored: qwen not ready
+16:12:13.015  CLIENT audio chunk len=4268
+16:12:13.015  CLIENT audio ignored: qwen not ready
+16:12:13.133  CLIENT audio chunk len=4268
+16:12:13.133  CLIENT audio ignored: qwen not ready
+16:12:13.213  CLIENT audio chunk len=4268
+16:12:13.214  CLIENT audio ignored: qwen not ready
+16:12:13.331  CLIENT audio chunk len=4268
+16:12:13.331  CLIENT audio ignored: qwen not ready
+16:12:13.424  CLIENT audio chunk len=4268
+16:12:13.424  CLIENT audio ignored: qwen not ready
+16:12:13.562  CLIENT audio chunk len=4268
+16:12:13.562  CLIENT audio ignored: qwen not ready
+16:12:13.637  CLIENT audio chunk len=4268
+16:12:13.637  CLIENT audio ignored: qwen not ready
+16:12:13.734  CLIENT audio chunk len=4268
+16:12:13.734  CLIENT audio ignored: qwen not ready
+16:12:13.841  CLIENT audio chunk len=4268
+16:12:13.841  CLIENT audio ignored: qwen not ready
+16:12:13.959  CLIENT audio chunk len=4268
+16:12:13.959  CLIENT audio ignored: qwen not ready
+16:12:14.044  CLIENT audio chunk len=4268
+16:12:14.044  CLIENT audio ignored: qwen not ready
+16:12:14.133  CLIENT audio chunk len=4268
+16:12:14.134  CLIENT audio ignored: qwen not ready
+16:12:14.239  CLIENT audio chunk len=4268
+16:12:14.239  CLIENT audio ignored: qwen not ready
+16:12:14.335  CLIENT audio chunk len=4268
+16:12:14.335  CLIENT audio ignored: qwen not ready
+16:12:14.443  CLIENT audio chunk len=4268
+16:12:14.443  CLIENT audio ignored: qwen not ready
+16:12:14.534  CLIENT audio chunk len=4268
+16:12:14.534  CLIENT audio ignored: qwen not ready
+16:12:14.641  CLIENT audio chunk len=4268
+16:12:14.642  CLIENT audio ignored: qwen not ready
+16:12:14.749  CLIENT audio chunk len=4268
+16:12:14.749  CLIENT audio ignored: qwen not ready
+16:12:14.861  CLIENT audio chunk len=4268
+16:12:14.861  CLIENT audio ignored: qwen not ready
+16:12:14.958  CLIENT audio chunk len=4268
+16:12:14.958  CLIENT audio ignored: qwen not ready
+16:12:15.062  CLIENT audio chunk len=4268
+16:12:15.062  CLIENT audio ignored: qwen not ready
+16:12:15.168  CLIENT audio chunk len=4268
+16:12:15.168  CLIENT audio ignored: qwen not ready
+16:12:15.260  CLIENT audio chunk len=4268
+16:12:15.261  CLIENT audio ignored: qwen not ready
+16:12:15.358  CLIENT audio chunk len=4268
+16:12:15.358  CLIENT audio ignored: qwen not ready
+16:12:15.484  CLIENT audio chunk len=4268
+16:12:15.484  CLIENT audio ignored: qwen not ready
+16:12:15.560  CLIENT audio chunk len=4268
+16:12:15.560  CLIENT audio ignored: qwen not ready
+16:12:15.682  CLIENT audio chunk len=4268
+16:12:15.682  CLIENT audio ignored: qwen not ready
+16:12:15.790  CLIENT audio chunk len=4268
+16:12:15.791  CLIENT audio ignored: qwen not ready
+16:12:15.893  CLIENT audio chunk len=4268
+16:12:15.893  CLIENT audio ignored: qwen not ready
+16:12:16.000  CLIENT audio chunk len=4268
+16:12:16.000  CLIENT audio ignored: qwen not ready
+16:12:16.101  CLIENT audio chunk len=4268
+16:12:16.101  CLIENT audio ignored: qwen not ready
+16:12:16.198  CLIENT audio chunk len=4268
+16:12:16.198  CLIENT audio ignored: qwen not ready
+16:12:16.297  CLIENT audio chunk len=4268
+16:12:16.297  CLIENT audio ignored: qwen not ready
+16:12:16.393  CLIENT audio chunk len=4268
+16:12:16.394  CLIENT audio ignored: qwen not ready
+16:12:16.494  CLIENT audio chunk len=4268
+16:12:16.495  CLIENT audio ignored: qwen not ready
+16:12:16.597  CLIENT audio chunk len=4268
+16:12:16.597  CLIENT audio ignored: qwen not ready
+16:12:16.708  CLIENT audio chunk len=4268
+16:12:16.709  CLIENT audio ignored: qwen not ready
+16:12:16.804  CLIENT audio chunk len=4268
+16:12:16.804  CLIENT audio ignored: qwen not ready
+16:12:16.904  CLIENT audio chunk len=4268
+16:12:16.904  CLIENT audio ignored: qwen not ready
+16:12:17.005  CLIENT audio chunk len=4268
+16:12:17.005  CLIENT audio ignored: qwen not ready
+16:12:17.110  CLIENT audio chunk len=4268
+16:12:17.110  CLIENT audio ignored: qwen not ready
+16:12:17.209  CLIENT audio chunk len=4268
+16:12:17.209  CLIENT audio ignored: qwen not ready
+16:12:17.320  CLIENT audio chunk len=4268
+16:12:17.321  CLIENT audio ignored: qwen not ready
+16:12:17.403  CLIENT audio chunk len=4268
+16:12:17.403  CLIENT audio ignored: qwen not ready
+16:12:17.505  CLIENT audio chunk len=4268
+16:12:17.505  CLIENT audio ignored: qwen not ready
+16:12:17.620  CLIENT audio chunk len=4268
+16:12:17.620  CLIENT audio ignored: qwen not ready
+16:12:17.711  CLIENT audio chunk len=4268
+16:12:17.711  CLIENT audio ignored: qwen not ready
+16:12:17.806  CLIENT audio chunk len=4268
+16:12:17.806  CLIENT audio ignored: qwen not ready
+16:12:17.916  CLIENT audio chunk len=4268
+16:12:17.916  CLIENT audio ignored: qwen not ready
+16:12:18.089  CLIENT audio chunk len=4268
+16:12:18.089  CLIENT audio ignored: qwen not ready
+16:12:18.128  CLIENT audio chunk len=4268
+16:12:18.128  CLIENT audio ignored: qwen not ready
+16:12:18.222  CLIENT audio chunk len=4268
+16:12:18.222  CLIENT audio ignored: qwen not ready
+16:12:18.333  CLIENT audio chunk len=4268
+16:12:18.333  CLIENT audio ignored: qwen not ready
+16:12:18.434  CLIENT audio chunk len=4268
+16:12:18.434  CLIENT audio ignored: qwen not ready
+16:12:18.540  CLIENT audio chunk len=4268
+16:12:18.540  CLIENT audio ignored: qwen not ready
+16:12:18.640  CLIENT audio chunk len=4268
+16:12:18.641  CLIENT audio ignored: qwen not ready
+16:12:18.741  CLIENT audio chunk len=4268
+16:12:18.741  CLIENT audio ignored: qwen not ready
+16:12:18.833  CLIENT audio chunk len=4268
+16:12:18.833  CLIENT audio ignored: qwen not ready
+16:12:18.941  CLIENT audio chunk len=4268
+16:12:18.942  CLIENT audio ignored: qwen not ready
+16:12:19.065  CLIENT audio chunk len=4268
+16:12:19.065  CLIENT audio ignored: qwen not ready
+16:12:19.160  CLIENT audio chunk len=4268
+16:12:19.160  CLIENT audio ignored: qwen not ready
+16:12:19.254  CLIENT audio chunk len=4268
+16:12:19.254  CLIENT audio ignored: qwen not ready
+16:12:19.354  CLIENT audio chunk len=4268
+16:12:19.354  CLIENT audio ignored: qwen not ready
+16:12:19.467  CLIENT audio chunk len=4268
+16:12:19.467  CLIENT audio ignored: qwen not ready
+16:12:19.662  CLIENT audio chunk len=4268
+16:12:19.662  CLIENT audio ignored: qwen not ready
+16:12:19.693  CLIENT audio chunk len=4268
+16:12:19.694  CLIENT audio ignored: qwen not ready
+16:12:19.800  CLIENT audio chunk len=4268
+16:12:19.800  CLIENT audio ignored: qwen not ready
+16:12:19.905  CLIENT audio chunk len=4268
+16:12:19.905  CLIENT audio ignored: qwen not ready
+16:12:20.005  CLIENT audio chunk len=4268
+16:12:20.006  CLIENT audio ignored: qwen not ready
+16:12:20.111  CLIENT audio chunk len=4268
+16:12:20.111  CLIENT audio ignored: qwen not ready
+16:12:20.207  CLIENT audio chunk len=4268
+16:12:20.207  CLIENT audio ignored: qwen not ready
+16:12:20.305  CLIENT audio chunk len=4268
+16:12:20.306  CLIENT audio ignored: qwen not ready
+16:12:20.405  CLIENT audio chunk len=4268
+16:12:20.405  CLIENT audio ignored: qwen not ready
+16:12:20.514  CLIENT audio chunk len=4268
+16:12:20.514  CLIENT audio ignored: qwen not ready
+16:12:20.627  CLIENT audio chunk len=4268
+16:12:20.627  CLIENT audio ignored: qwen not ready
+16:12:20.729  CLIENT audio chunk len=4268
+16:12:20.729  CLIENT audio ignored: qwen not ready
+16:12:20.827  CLIENT audio chunk len=4268
+16:12:20.827  CLIENT audio ignored: qwen not ready
+16:12:20.924  CLIENT audio chunk len=4268
+16:12:20.924  CLIENT audio ignored: qwen not ready
+16:12:21.038  CLIENT audio chunk len=4268
+16:12:21.038  CLIENT audio ignored: qwen not ready
+16:12:21.155  CLIENT audio chunk len=4268
+16:12:21.155  CLIENT audio ignored: qwen not ready
+16:12:21.232  CLIENT audio chunk len=4268
+16:12:21.232  CLIENT audio ignored: qwen not ready
+16:12:21.342  CLIENT audio chunk len=4268
+16:12:21.342  CLIENT audio ignored: qwen not ready
+16:12:21.435  CLIENT audio chunk len=4268
+16:12:21.435  CLIENT audio ignored: qwen not ready
+16:12:21.541  CLIENT audio chunk len=4268
+16:12:21.541  CLIENT audio ignored: qwen not ready

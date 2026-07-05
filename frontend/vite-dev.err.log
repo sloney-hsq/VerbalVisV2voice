@@ -1,0 +1,95 @@
+[2m15:30:54[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+[2m15:31:00[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+[2m15:31:47[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+[2m15:41:37[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: connect ECONNREFUSED 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1645:16)
+[2m09:41:24[22m [31m[1m[vite][22m[39m [31mInternal server error: F:/VerbalVis2/frontend/src/components/Dashboard.vue:19:3: Unknown word return[39m
+  Plugin: [35mvite:vue[39m
+  File: [36mF:/VerbalVis2/frontend/src/components/Dashboard.vue[39m:304:3
+[33m  304|  }
+  305|  
+  306|  function toolCallTitle(tool) {
+     |  ^
+  307|    const args = tool?.arguments ? ` ${tool.arguments}` : "";
+  308|    return `${formatToolName(tool?.name)}${args}`;[39m
+      at Input.error (F:\VerbalVis2\frontend\node_modules\postcss\lib\input.js:135:16)
+      at Parser.unknownWord (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:602:22)
+      at Parser.other (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:444:12)
+      at Parser.parse (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:479:16)
+      at parse (F:\VerbalVis2\frontend\node_modules\postcss\lib\parse.js:11:12)
+      at new LazyResult (F:\VerbalVis2\frontend\node_modules\postcss\lib\lazy-result.js:165:16)
+      at Processor.process (F:\VerbalVis2\frontend\node_modules\postcss\lib\processor.js:53:14)
+      at doCompileStyle (F:\VerbalVis2\frontend\node_modules\@vue\compiler-sfc\dist\compiler-sfc.cjs.js:19675:36)
+      at Object.compileStyleAsync (F:\VerbalVis2\frontend\node_modules\@vue\compiler-sfc\dist\compiler-sfc.cjs.js:19595:10)
+      at transformStyle (file:///F:/VerbalVis2/frontend/node_modules/@vitejs/plugin-vue/dist/index.mjs:2832:41)
+[2m09:41:24[22m [31m[1m[vite][22m[39m Pre-transform error: F:/VerbalVis2/frontend/src/components/Dashboard.vue:19:3: Unknown word return
+[2m09:41:25[22m [31m[1m[vite][22m[39m [31mInternal server error: F:/VerbalVis2/frontend/src/components/Dashboard.vue:19:3: Unknown word return[39m
+  Plugin: [35mvite:vue[39m
+  File: [36mF:/VerbalVis2/frontend/src/components/Dashboard.vue[39m:304:3
+[33m  304|  }
+  305|  
+  306|  function toolCallTitle(tool) {
+     |  ^
+  307|    const args = tool?.arguments ? ` ${tool.arguments}` : "";
+  308|    return `${formatToolName(tool?.name)}${args}`;[39m
+      at Input.error (F:\VerbalVis2\frontend\node_modules\postcss\lib\input.js:135:16)
+      at Parser.unknownWord (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:602:22)
+      at Parser.other (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:444:12)
+      at Parser.parse (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:479:16)
+      at parse (F:\VerbalVis2\frontend\node_modules\postcss\lib\parse.js:11:12)
+      at new LazyResult (F:\VerbalVis2\frontend\node_modules\postcss\lib\lazy-result.js:165:16)
+      at Processor.process (F:\VerbalVis2\frontend\node_modules\postcss\lib\processor.js:53:14)
+      at doCompileStyle (F:\VerbalVis2\frontend\node_modules\@vue\compiler-sfc\dist\compiler-sfc.cjs.js:19675:36)
+      at Object.compileStyleAsync (F:\VerbalVis2\frontend\node_modules\@vue\compiler-sfc\dist\compiler-sfc.cjs.js:19595:10)
+      at transformStyle (file:///F:/VerbalVis2/frontend/node_modules/@vitejs/plugin-vue/dist/index.mjs:2832:41)
+[2m09:41:59[22m [31m[1m[vite][22m[39m [31mInternal server error: F:/VerbalVis2/frontend/src/components/Dashboard.vue:19:3: Unknown word return[39m
+  Plugin: [35mvite:vue[39m
+  File: [36mF:/VerbalVis2/frontend/src/components/Dashboard.vue[39m:304:3
+[33m  304|  }
+  305|  
+  306|  function toolCallTitle(tool) {
+     |  ^
+  307|    const args = tool?.arguments ? ` ${tool.arguments}` : "";
+  308|    return `${formatToolName(tool?.name)}${args}`;[39m
+      at Input.error (F:\VerbalVis2\frontend\node_modules\postcss\lib\input.js:135:16)
+      at Parser.unknownWord (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:602:22)
+      at Parser.other (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:444:12)
+      at Parser.parse (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:479:16)
+      at parse (F:\VerbalVis2\frontend\node_modules\postcss\lib\parse.js:11:12)
+      at new LazyResult (F:\VerbalVis2\frontend\node_modules\postcss\lib\lazy-result.js:165:16)
+      at Processor.process (F:\VerbalVis2\frontend\node_modules\postcss\lib\processor.js:53:14)
+      at doCompileStyle (F:\VerbalVis2\frontend\node_modules\@vue\compiler-sfc\dist\compiler-sfc.cjs.js:19675:36)
+      at Object.compileStyleAsync (F:\VerbalVis2\frontend\node_modules\@vue\compiler-sfc\dist\compiler-sfc.cjs.js:19595:10)
+      at transformStyle (file:///F:/VerbalVis2/frontend/node_modules/@vitejs/plugin-vue/dist/index.mjs:2832:41)
+[2m09:42:04[22m [31m[1m[vite][22m[39m [31mInternal server error: F:/VerbalVis2/frontend/src/components/Dashboard.vue:19:3: Unknown word return[39m
+  Plugin: [35mvite:vue[39m
+  File: [36mF:/VerbalVis2/frontend/src/components/Dashboard.vue[39m:304:3
+[33m  304|  }
+  305|  
+  306|  function toolCallTitle(tool) {
+     |  ^
+  307|    const args = tool?.arguments ? ` ${tool.arguments}` : "";
+  308|    return `${formatToolName(tool?.name)}${args}`;[39m
+      at Input.error (F:\VerbalVis2\frontend\node_modules\postcss\lib\input.js:135:16)
+      at Parser.unknownWord (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:602:22)
+      at Parser.other (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:444:12)
+      at Parser.parse (F:\VerbalVis2\frontend\node_modules\postcss\lib\parser.js:479:16)
+      at parse (F:\VerbalVis2\frontend\node_modules\postcss\lib\parse.js:11:12)
+      at new LazyResult (F:\VerbalVis2\frontend\node_modules\postcss\lib\lazy-result.js:165:16)
+      at Processor.process (F:\VerbalVis2\frontend\node_modules\postcss\lib\processor.js:53:14)
+      at doCompileStyle (F:\VerbalVis2\frontend\node_modules\@vue\compiler-sfc\dist\compiler-sfc.cjs.js:19675:36)
+      at Object.compileStyleAsync (F:\VerbalVis2\frontend\node_modules\@vue\compiler-sfc\dist\compiler-sfc.cjs.js:19595:10)
+      at transformStyle (file:///F:/VerbalVis2/frontend/node_modules/@vitejs/plugin-vue/dist/index.mjs:2832:41)
+[2m11:14:49[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m11:14:49[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)

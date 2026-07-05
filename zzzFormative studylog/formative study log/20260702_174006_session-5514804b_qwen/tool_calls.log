@@ -1,0 +1,4 @@
+17:42:45.512  TOOL_EVENT {"event_id": "event_RaTfXG2FQIWngF3AjGQOi", "type": "response.function_call_arguments.done", "response_id": "resp_YQTNRqvkpiwnTMSHlgpDl", "item_id": "item_LvuswkLhuy3yCxXJrdbPp", "output_index": 0, "name": "highlight_visual", "call_id": "call_3875ed6a5488470284ad4b3d", "arguments": "{\"view_id\": \"view-trend\"}"}
+17:42:45.512  TOOL_CALL name=highlight_visual args={"view_id": "view-trend"}
+17:42:45.513  TOOL_START name=highlight_visual call_id=call_3875ed6a5488470284ad4b3d args={"view_id": "view-trend", "_user_transcript": "高亮第一个视图。"}
+17:42:45.532  TOOL_DONE name=highlight_visual call_id=call_3875ed6a5488470284ad4b3d dur=0.4ms success=True

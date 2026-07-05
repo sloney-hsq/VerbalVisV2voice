@@ -1,0 +1,280 @@
+17:41:50.725  RESTART_QWEN_SESSION reason=client.start_session generation=1
+17:41:50.725  CONNECTING_QWEN model=qwen3.5-omni-plus-realtime url=wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime
+17:41:51.566  QWEN_CONNECTED
+17:41:51.568  SESSION_UPDATE_SENT
+17:41:52.073  SESSION_UPDATED
+17:41:52.891  IMPORTANT_EVENT response.created
+17:41:58.450  IMPORTANT_EVENT response.audio_transcript.done
+17:41:58.451  IMPORTANT_EVENT response.done
+17:42:34.668  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:42:34.668  BARGE_IN source=speech_started invalidated=None
+17:42:35.807  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:42:35.999  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:42:36.048  IMPORTANT_EVENT response.created
+17:42:41.619  IMPORTANT_EVENT response.audio_transcript.done
+17:42:41.619  IMPORTANT_EVENT response.done
+17:42:43.297  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:42:43.297  BARGE_IN source=speech_started invalidated=None
+17:42:45.083  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:42:45.269  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:42:45.411  IMPORTANT_EVENT response.created
+17:42:45.512  IMPORTANT_EVENT response.function_call_arguments.done
+17:42:45.513  IMPORTANT_EVENT response.done
+17:42:46.166  IMPORTANT_EVENT response.created
+17:42:50.696  IMPORTANT_EVENT response.audio_transcript.done
+17:42:50.697  IMPORTANT_EVENT response.done
+17:42:51.200  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:42:51.200  BARGE_IN source=speech_started invalidated=None
+17:42:52.008  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:42:52.129  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:42:52.225  IMPORTANT_EVENT response.created
+17:42:54.008  IMPORTANT_EVENT response.audio_transcript.done
+17:42:54.010  IMPORTANT_EVENT response.done
+17:42:54.011  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:42:54.011  BARGE_IN source=speech_started invalidated=None
+17:42:55.000  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:42:55.132  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:42:55.207  IMPORTANT_EVENT response.created
+17:42:57.501  IMPORTANT_EVENT response.audio_transcript.done
+17:42:57.501  IMPORTANT_EVENT response.done
+17:42:57.503  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:42:57.503  BARGE_IN source=speech_started invalidated=None
+17:43:00.087  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:43:00.299  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:43:00.300  IMPORTANT_EVENT response.created
+17:43:00.461  IMPORTANT_EVENT response.audio_transcript.done
+17:43:00.461  IMPORTANT_EVENT response.done
+17:43:00.463  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:43:00.463  BARGE_IN source=speech_started invalidated=None
+17:43:01.382  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:43:01.515  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:43:01.609  IMPORTANT_EVENT response.audio_transcript.done
+17:43:01.610  IMPORTANT_EVENT response.done
+17:43:01.611  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:43:01.611  BARGE_IN source=speech_started invalidated=None
+17:43:04.002  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:43:04.200  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:43:04.223  IMPORTANT_EVENT response.created
+17:43:04.607  IMPORTANT_EVENT response.audio_transcript.done
+17:43:04.607  IMPORTANT_EVENT response.done
+17:43:04.609  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:43:04.609  BARGE_IN source=speech_started invalidated=None
+17:43:07.487  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:43:07.690  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:43:07.707  IMPORTANT_EVENT response.created
+17:43:08.494  IMPORTANT_EVENT response.audio_transcript.done
+17:43:08.497  IMPORTANT_EVENT response.done
+17:43:10.091  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:43:10.287  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:43:10.316  IMPORTANT_EVENT response.created
+17:43:11.816  IMPORTANT_EVENT response.audio_transcript.done
+17:43:11.816  IMPORTANT_EVENT response.done
+17:43:13.278  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:43:13.278  BARGE_IN source=speech_started invalidated=None
+17:43:13.997  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:43:14.079  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:43:14.221  IMPORTANT_EVENT response.created
+17:43:15.714  IMPORTANT_EVENT response.audio_transcript.done
+17:43:15.714  IMPORTANT_EVENT response.done
+17:43:22.896  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:43:22.896  BARGE_IN source=speech_started invalidated=None
+17:43:26.685  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:43:26.904  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:43:26.918  IMPORTANT_EVENT response.created
+17:43:27.893  IMPORTANT_EVENT response.audio_transcript.done
+17:43:27.894  IMPORTANT_EVENT response.done
+17:43:27.896  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:43:27.896  BARGE_IN source=speech_started invalidated=None
+17:43:30.743  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:43:30.804  IMPORTANT_EVENT response.audio_transcript.done
+17:43:30.805  IMPORTANT_EVENT response.done
+17:43:30.807  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:43:30.807  BARGE_IN source=speech_started invalidated=None
+17:43:30.986  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:43:33.687  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:43:33.909  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:43:33.924  IMPORTANT_EVENT response.created
+17:43:35.241  IMPORTANT_EVENT response.audio_transcript.done
+17:43:35.242  IMPORTANT_EVENT response.done
+17:43:35.244  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:43:35.245  BARGE_IN source=speech_started invalidated=None
+17:43:36.968  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:43:37.173  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:43:37.209  IMPORTANT_EVENT response.created
+17:43:39.265  IMPORTANT_EVENT response.audio_transcript.done
+17:43:39.266  IMPORTANT_EVENT response.done
+17:43:57.498  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:43:57.498  BARGE_IN source=speech_started invalidated=None
+17:43:58.053  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:43:58.217  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:43:58.294  IMPORTANT_EVENT response.created
+17:43:59.597  IMPORTANT_EVENT response.audio_transcript.done
+17:43:59.598  IMPORTANT_EVENT response.done
+17:43:59.599  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:43:59.599  BARGE_IN source=speech_started invalidated=None
+17:44:01.082  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:44:01.326  IMPORTANT_EVENT response.created
+17:44:01.328  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:44:01.486  IMPORTANT_EVENT response.audio_transcript.done
+17:44:01.487  IMPORTANT_EVENT response.done
+17:44:01.488  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:44:01.488  BARGE_IN source=speech_started invalidated=None
+17:44:04.386  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:44:04.562  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:44:04.638  IMPORTANT_EVENT response.created
+17:44:05.311  IMPORTANT_EVENT response.audio_transcript.done
+17:44:05.312  IMPORTANT_EVENT response.done
+17:44:05.313  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:44:05.313  BARGE_IN source=speech_started invalidated=None
+17:44:14.680  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:44:14.850  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:44:14.934  IMPORTANT_EVENT response.created
+17:44:15.402  IMPORTANT_EVENT response.audio_transcript.done
+17:44:15.403  IMPORTANT_EVENT response.done
+17:44:15.404  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:44:15.404  BARGE_IN source=speech_started invalidated=None
+17:44:28.876  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:44:29.037  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:44:29.155  IMPORTANT_EVENT response.created
+17:44:34.462  IMPORTANT_EVENT response.audio_transcript.done
+17:44:34.463  IMPORTANT_EVENT response.done
+17:44:50.884  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:44:50.884  BARGE_IN source=speech_started invalidated=None
+17:44:52.891  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:44:53.092  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:44:53.158  IMPORTANT_EVENT response.created
+17:44:54.091  IMPORTANT_EVENT response.audio_transcript.done
+17:44:54.092  IMPORTANT_EVENT response.done
+17:44:54.093  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:44:54.093  BARGE_IN source=speech_started invalidated=None
+17:44:55.195  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:44:55.329  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:44:55.463  IMPORTANT_EVENT response.created
+17:44:59.000  IMPORTANT_EVENT response.audio_transcript.done
+17:44:59.000  IMPORTANT_EVENT response.done
+17:45:08.593  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:45:08.593  BARGE_IN source=speech_started invalidated=None
+17:45:09.608  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:45:09.750  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:45:09.876  IMPORTANT_EVENT response.created
+17:45:11.150  IMPORTANT_EVENT response.audio_transcript.done
+17:45:11.150  IMPORTANT_EVENT response.done
+17:45:11.151  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:45:11.151  BARGE_IN source=speech_started invalidated=None
+17:45:13.207  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:45:13.389  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:45:13.484  IMPORTANT_EVENT response.created
+17:45:14.114  IMPORTANT_EVENT response.audio_transcript.done
+17:45:14.314  IMPORTANT_EVENT response.done
+17:45:14.315  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:45:14.315  BARGE_IN source=speech_started invalidated=None
+17:45:15.504  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:45:15.694  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:45:15.783  IMPORTANT_EVENT response.created
+17:45:15.817  IMPORTANT_EVENT response.audio_transcript.done
+17:45:15.817  IMPORTANT_EVENT response.done
+17:45:15.819  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:45:15.819  BARGE_IN source=speech_started invalidated=None
+17:45:17.496  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:45:18.084  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:45:18.085  IMPORTANT_EVENT response.audio_transcript.done
+17:45:18.085  IMPORTANT_EVENT response.done
+17:45:18.085  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:45:18.085  BARGE_IN source=speech_started invalidated=None
+17:45:18.413  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:45:18.518  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:45:18.693  IMPORTANT_EVENT response.created
+17:45:20.054  IMPORTANT_EVENT response.audio_transcript.done
+17:45:20.054  IMPORTANT_EVENT response.done
+17:45:20.055  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:45:20.055  BARGE_IN source=speech_started invalidated=None
+17:45:21.160  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:45:21.216  IMPORTANT_EVENT response.audio_transcript.done
+17:45:21.218  IMPORTANT_EVENT response.done
+17:45:21.219  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:45:21.219  BARGE_IN source=speech_started invalidated=None
+17:45:21.285  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:45:24.803  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:45:25.033  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:45:25.087  IMPORTANT_EVENT response.created
+17:45:28.536  IMPORTANT_EVENT response.audio_transcript.done
+17:45:28.539  IMPORTANT_EVENT response.done
+17:45:41.614  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:45:41.614  BARGE_IN source=speech_started invalidated=None
+17:45:51.369  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:45:51.369  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:45:51.370  IMPORTANT_EVENT response.created
+17:45:57.074  IMPORTANT_EVENT response.audio_transcript.done
+17:45:57.074  IMPORTANT_EVENT response.done
+17:46:04.609  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:46:04.609  BARGE_IN source=speech_started invalidated=None
+17:46:06.011  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:46:06.209  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:46:06.306  IMPORTANT_EVENT response.created
+17:46:08.100  IMPORTANT_EVENT response.audio_transcript.done
+17:46:08.100  IMPORTANT_EVENT response.done
+17:46:08.101  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:46:08.101  BARGE_IN source=speech_started invalidated=None
+17:46:09.213  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:46:09.361  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:46:09.516  IMPORTANT_EVENT response.created
+17:46:12.013  IMPORTANT_EVENT response.audio_transcript.done
+17:46:12.022  IMPORTANT_EVENT response.done
+17:46:12.022  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:46:12.022  BARGE_IN source=speech_started invalidated=None
+17:46:12.803  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:46:12.966  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:46:13.267  IMPORTANT_EVENT response.created
+17:46:14.414  IMPORTANT_EVENT response.audio_transcript.done
+17:46:14.415  IMPORTANT_EVENT response.done
+17:46:14.416  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:46:14.416  BARGE_IN source=speech_started invalidated=None
+17:46:15.605  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:46:15.765  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:46:15.810  IMPORTANT_EVENT response.audio_transcript.done
+17:46:16.014  IMPORTANT_EVENT response.done
+17:46:16.014  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:46:16.014  BARGE_IN source=speech_started invalidated=None
+17:46:18.897  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:46:19.127  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:46:19.516  IMPORTANT_EVENT response.created
+17:46:20.216  IMPORTANT_EVENT response.audio_transcript.done
+17:46:20.217  IMPORTANT_EVENT response.done
+17:46:20.218  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:46:20.218  BARGE_IN source=speech_started invalidated=None
+17:46:21.607  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:46:21.809  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:46:21.897  IMPORTANT_EVENT response.created
+17:46:22.930  IMPORTANT_EVENT response.audio_transcript.done
+17:46:22.930  IMPORTANT_EVENT response.done
+17:46:22.930  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:46:22.930  BARGE_IN source=speech_started invalidated=None
+17:46:23.694  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:46:23.855  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:46:23.985  IMPORTANT_EVENT response.created
+17:46:24.502  IMPORTANT_EVENT response.audio_transcript.done
+17:46:24.502  IMPORTANT_EVENT response.done
+17:46:24.503  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:46:24.503  BARGE_IN source=speech_started invalidated=None
+17:46:30.803  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:46:31.021  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:46:31.141  IMPORTANT_EVENT response.created
+17:46:34.721  IMPORTANT_EVENT response.audio_transcript.done
+17:46:34.721  IMPORTANT_EVENT response.done
+17:46:41.492  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:46:41.492  BARGE_IN source=speech_started invalidated=None
+17:46:42.025  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:46:42.183  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:46:42.485  IMPORTANT_EVENT response.created
+17:46:44.237  IMPORTANT_EVENT response.audio_transcript.done
+17:46:44.238  IMPORTANT_EVENT response.done
+17:46:48.613  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:46:48.613  BARGE_IN source=speech_started invalidated=None
+17:46:51.609  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+17:46:51.866  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+17:46:51.921  IMPORTANT_EVENT response.created
+17:46:52.024  IMPORTANT_EVENT response.audio_transcript.done
+17:46:52.024  IMPORTANT_EVENT response.done
+17:46:52.025  IMPORTANT_EVENT input_audio_buffer.speech_started
+17:46:52.025  BARGE_IN source=speech_started invalidated=None
+17:46:52.777  CLIENT_DISCONNECTED

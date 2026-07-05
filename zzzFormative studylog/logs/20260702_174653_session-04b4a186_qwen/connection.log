@@ -1,0 +1,8 @@
+17:46:55.376  RESTART_QWEN_SESSION reason=client.start_session generation=1
+17:46:55.376  CONNECTING_QWEN model=qwen3.5-omni-plus-realtime url=wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime
+17:46:56.341  QWEN_CONNECTED
+17:46:56.344  SESSION_UPDATE_SENT
+17:46:56.955  SESSION_UPDATED
+17:46:57.405  IMPORTANT_EVENT error
+17:46:58.406  QWEN_RELAY_STOPPED error=sent 1002 (protocol error) control frame too long; no close frame received
+17:47:13.783  CLIENT_DISCONNECTED

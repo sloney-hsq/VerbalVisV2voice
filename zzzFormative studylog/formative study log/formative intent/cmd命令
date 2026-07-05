@@ -1,0 +1,1 @@
+Get-ChildItem -Recurse -File -Filter conversation.jsonl | Select-Object -ExpandProperty FullName

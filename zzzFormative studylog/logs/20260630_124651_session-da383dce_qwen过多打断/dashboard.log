@@ -1,0 +1,7 @@
+12:47:44.883  VIEWS_UPDATE tool=filter_data args={"field": "order_month", "operator": "eq", "value": "2017-11"}
+12:48:31.426  VIEWS_UPDATE tool=filter_data args={"field": "order_month", "operator": "between", "value": "[\"2017-10\", \"2017-12\"]"}
+12:48:39.855  VIEWS_UPDATE tool=filter_data args={"field": ""}
+12:48:41.322  VIEWS_UPDATE tool=filter_data args={"field": "order_month", "operator": "eq", "value": ""}
+12:48:44.888  VIEWS_UPDATE tool=remove_filter args={"field": "order_month"}
+12:48:46.519  VIEWS_UPDATE tool=append_visual args={}
+12:48:50.081  VIEWS_UPDATE tool=append_visual args={"chart_type": "line", "title": "Weekly Orders Trend", "x": "order_week", "y": "order_count"}

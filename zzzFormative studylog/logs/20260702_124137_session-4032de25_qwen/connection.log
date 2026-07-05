@@ -1,0 +1,38 @@
+12:41:41.381  RESTART_QWEN_SESSION reason=client.start_session generation=1
+12:41:41.381  CONNECTING_QWEN model=qwen3.5-omni-plus-realtime url=wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime
+12:41:42.409  QWEN_CONNECTED
+12:41:42.411  SESSION_UPDATE_SENT
+12:41:43.045  SESSION_UPDATED
+12:41:43.941  IMPORTANT_EVENT response.created
+12:41:47.667  IMPORTANT_EVENT response.audio_transcript.done
+12:41:47.667  IMPORTANT_EVENT response.done
+12:41:52.255  IMPORTANT_EVENT input_audio_buffer.speech_started
+12:41:52.255  BARGE_IN source=speech_started invalidated=None
+12:41:53.556  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+12:41:53.764  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:41:53.906  IMPORTANT_EVENT response.created
+12:41:53.965  IMPORTANT_EVENT response.audio_transcript.done
+12:41:53.966  IMPORTANT_EVENT response.done
+12:41:53.968  IMPORTANT_EVENT input_audio_buffer.speech_started
+12:41:53.968  BARGE_IN source=speech_started invalidated=None
+12:42:09.956  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+12:42:10.158  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:42:10.224  IMPORTANT_EVENT response.created
+12:42:11.265  IMPORTANT_EVENT response.created
+12:42:13.874  IMPORTANT_EVENT response.function_call_arguments.done
+12:42:13.874  IMPORTANT_EVENT response.done
+12:42:14.781  IMPORTANT_EVENT response.created
+12:42:20.782  IMPORTANT_EVENT response.audio_transcript.done
+12:42:20.783  IMPORTANT_EVENT response.done
+12:42:56.337  IMPORTANT_EVENT input_audio_buffer.speech_started
+12:42:56.337  BARGE_IN source=speech_started invalidated=None
+12:43:02.729  IMPORTANT_EVENT input_audio_buffer.speech_stopped
+12:43:02.903  IMPORTANT_EVENT conversation.item.input_audio_transcription.completed
+12:43:03.016  IMPORTANT_EVENT response.created
+12:43:03.710  IMPORTANT_EVENT response.created
+12:43:04.435  IMPORTANT_EVENT response.function_call_arguments.done
+12:43:04.436  IMPORTANT_EVENT response.done
+12:43:05.191  IMPORTANT_EVENT response.created
+12:43:13.269  IMPORTANT_EVENT response.audio_transcript.done
+12:43:13.270  IMPORTANT_EVENT response.done
+12:44:00.544  CLIENT_DISCONNECTED

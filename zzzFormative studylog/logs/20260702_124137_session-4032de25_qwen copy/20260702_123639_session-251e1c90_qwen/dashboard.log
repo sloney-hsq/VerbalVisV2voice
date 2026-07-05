@@ -1,0 +1,10 @@
+12:37:15.555  VIEWS_UPDATE tool=append_visual args={"chart_type": "line", "x": "order_week", "y": "order_count", "title": "每周订单量趋势", "_user_transcript": "绘制一，绘制一个图形给我看一下嘛。", "sort_by": "order_count"}
+12:37:54.561  VIEWS_UPDATE tool=append_visual args={"chart_type": "bar", "x": "customer_state", "y": "low_score_ratio", "title": "各州低分订单比例", "sort_by": "low_score_ratio", "sort_order": "desc", "_user_transcript": "呃，按周的，呃，客户满意度分布。"}
+12:38:25.797  VIEWS_UPDATE tool=filter_data args={"field": "customer_state", "operator": "eq", "value": "AP", "append": false, "_user_transcript": "告诉我 AP 周的为什么是最低的？探索一下。"}
+12:38:33.381  VIEWS_UPDATE tool=append_visual args={"chart_type": "bar", "x": "product_category", "y": "order_count", "title": "AP州订单品类分布", "limit": 10, "sort_by": "order_count", "sort_order": "desc", "_user_transcript": "告诉我 AP 周的为什么是最低的？探索一下。"}
+12:39:30.021  VIEWS_UPDATE tool=append_visual args={"chart_type": "bar", "x": "product_category", "y": "order_count", "title": "各州订单量Top 3品类", "color": "customer_state", "limit": 3, "sort_by": "order_count", "sort_order": "desc", "_user_transcript": "每个州的呃，最高的一个，就是，呃，订单品类分布是，什么都是多少？就比如说前三个，呃，最大最高的订单品类。"}
+12:39:37.483  VIEWS_UPDATE tool=filter_data args={"field": "__all__", "operator": "eq", "value": "none", "append": false, "_user_transcript": "每个州的呃，最高的一个，就是，呃，订单品类分布是，什么都是多少？就比如说前三个，呃，最大最高的订单品类。"}
+12:40:27.249  VIEWS_UPDATE tool=delete_visual args={"view_id": "workspace-4", "_user_transcript": "是的。"}
+12:40:29.860  VIEWS_UPDATE tool=delete_visual args={"view_id": "workspace-4", "_user_transcript": "因为这个不好，然后。"}
+12:40:32.517  VIEWS_UPDATE tool=delete_visual args={"view_id": "workspace-5", "_user_transcript": "因为这个不好，然后。"}
+12:40:36.638  VIEWS_UPDATE tool=append_visual args={"chart_type": "bar", "x": "product_category", "y": "order_count", "title": "各州订单量Top 3品类", "color": "customer_state", "limit": 3, "sort_by": "order_count", "sort_order": "desc", "inherit_global_filters": false, "_user_transcript": "因为这个不好，然后。"}

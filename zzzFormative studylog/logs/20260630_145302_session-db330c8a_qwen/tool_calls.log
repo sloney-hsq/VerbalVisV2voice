@@ -1,0 +1,16 @@
+14:53:51.751  TOOL_EVENT {"event_id": "event_SDgVTnsynrAE3axa7SeFO", "type": "response.function_call_arguments.done", "response_id": "resp_NzjpToLoETwFblCaAk5f3", "item_id": "item_Ro3rVZSa75td6QRdWQRfE", "output_index": 0, "name": "highlight_visual", "call_id": "call_a409aa1a67354fd0809462f2", "arguments": "{\"view_id\": \"view-trend\"}"}
+14:53:51.751  TOOL_CALL name=highlight_visual args={"view_id": "view-trend"}
+14:53:51.752  TOOL_START name=highlight_visual call_id=call_a409aa1a67354fd0809462f2 args={"view_id": "view-trend"}
+14:53:51.777  TOOL_DONE name=highlight_visual call_id=call_a409aa1a67354fd0809462f2 dur=0.2ms success=True
+14:54:23.747  TOOL_EVENT {"event_id": "event_NrRgwARa5RjDwdBDETEUK", "type": "response.function_call_arguments.done", "response_id": "resp_WGHstaOzJuRIEa1RRlnGx", "item_id": "item_BoNtZJURMYKLI7CkU7b23", "output_index": 0, "name": "filter_data", "call_id": "call_4bfbbf645a71415298afb45e", "arguments": "{\"field\": \"order_month\", \"operator\": \"eq\", \"value\": \"2017-11\", \"append\": false}"}
+14:54:23.748  TOOL_CALL name=filter_data args={"field": "order_month", "operator": "eq", "value": "2017-11", "append": false}
+14:54:23.748  TOOL_START name=filter_data call_id=call_4bfbbf645a71415298afb45e args={"field": "order_month", "operator": "eq", "value": "2017-11", "append": false}
+14:54:23.774  TOOL_DONE name=filter_data call_id=call_4bfbbf645a71415298afb45e dur=16.5ms success=True
+14:54:57.828  TOOL_EVENT {"event_id": "event_IC8AJXIiDdymIf5d2YGGM", "type": "response.function_call_arguments.done", "response_id": "resp_KbJOVL7DowwcymCyu5lsY", "item_id": "item_PeyyIXRriAOhAPmULS574", "output_index": 0, "name": "highlight_visual", "call_id": "call_fc14fdeb6dd54092951e655e", "arguments": "{\"view_id\": \"view-map\"}"}
+14:54:57.828  TOOL_CALL name=highlight_visual args={"view_id": "view-map"}
+14:54:57.829  TOOL_START name=highlight_visual call_id=call_fc14fdeb6dd54092951e655e args={"view_id": "view-map"}
+14:54:57.837  TOOL_DONE name=highlight_visual call_id=call_fc14fdeb6dd54092951e655e dur=0.2ms success=True
+14:55:31.490  TOOL_EVENT {"event_id": "event_JYue5AoVX42VOU4jrosdr", "type": "response.function_call_arguments.done", "response_id": "resp_MVijQSGUQbBg3HkNWhr7d", "item_id": "item_P9sAcYCxSZSjohp3WZweg", "output_index": 0, "name": "highlight_visual", "call_id": "call_ce725de6509f46a888c5ce36", "arguments": "{\"view_id\": \"view-review\"}"}
+14:55:31.490  TOOL_CALL name=highlight_visual args={"view_id": "view-review"}
+14:55:31.491  TOOL_START name=highlight_visual call_id=call_ce725de6509f46a888c5ce36 args={"view_id": "view-review"}
+14:55:31.500  TOOL_DONE name=highlight_visual call_id=call_ce725de6509f46a888c5ce36 dur=0.2ms success=True
