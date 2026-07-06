@@ -7,7 +7,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
   // ---- state ----
   const views = ref([]);
   const activeFilters = ref([]);
-  const highlightedViewId = ref(null);
+  const highlightedViewIds = ref([]);
+  const highlightedViewId = computed(() => highlightedViewIds.value[0] || null);
   const highlightElement = ref(null);
   const transcripts = ref([]); // {role, text}
   const sessionSummaries = ref([]);
@@ -15,7 +16,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const connectionStatus = ref("disconnected"); // disconnected | connecting | connected
   const sessionReady = ref(false);
   const sessionMode = ref("barge_in"); // barge_in | turn_based
-  const inputMode = ref("server_vad");
+  const inputMode = ref("semantic_vad");
   const provider = ref("qwen");
   const model = ref("qwen3.5-omni-plus-realtime");
   const inputAudioRate = ref(16000);
@@ -28,7 +29,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   // ---- actions ----
 
   function initViews(viewList) {
-    views.value = viewList.map((v) => ({ ...v, highlighted: false }));
+    highlightedViewIds.value = viewList.filter((v) => v.highlighted).map((v) => v.id);
+    const highlightedIds = new Set(highlightedViewIds.value);
+    views.value = viewList.map((v) => ({ ...v, highlighted: highlightedIds.has(v.id) }));
   }
 
   function setSessionInfo(info = {}) {
@@ -43,14 +46,17 @@ export const useDashboardStore = defineStore("dashboard", () => {
   function updateViews(viewList) {
     // Full replace: removes deleted views, updates/append the rest.
     const incomingIds = new Set(viewList.map((v) => v.id));
-    // Clear highlight if the highlighted view was removed (e.g. delete_visual).
-    if (highlightedViewId.value && !incomingIds.has(highlightedViewId.value)) {
-      highlightedViewId.value = null;
+    const incomingHighlightedIds = viewList.filter((v) => v.highlighted).map((v) => v.id);
+    highlightedViewIds.value = incomingHighlightedIds.length
+      ? incomingHighlightedIds
+      : highlightedViewIds.value.filter((id) => incomingIds.has(id));
+    if (!highlightedViewIds.value.length) {
       highlightElement.value = null;
     }
+    const highlightedIds = new Set(highlightedViewIds.value);
     const updated = viewList.map((v) => ({
       ...v,
-      highlighted: v.id === highlightedViewId.value,
+      highlighted: highlightedIds.has(v.id),
     }));
     views.value = updated;
   }
@@ -60,10 +66,16 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   function highlightView(viewId, element = null, dimOthers = true) {
-    highlightedViewId.value = viewId;
+    highlightViews([viewId], element, dimOthers);
+  }
+
+  function highlightViews(viewIdsToHighlight, element = null, dimOthers = true) {
+    const ids = normalizeViewIds(viewIdsToHighlight);
+    highlightedViewIds.value = ids;
     highlightElement.value = element;
+    const highlightedIds = new Set(ids);
     views.value.forEach((v) => {
-      if (v.id === viewId) {
+      if (highlightedIds.has(v.id)) {
         v.highlighted = true;
       } else if (dimOthers) {
         v.highlighted = false;
@@ -71,14 +83,26 @@ export const useDashboardStore = defineStore("dashboard", () => {
     });
   }
 
+  function clearHighlight() {
+    highlightedViewIds.value = [];
+    highlightElement.value = null;
+    views.value.forEach((v) => {
+      v.highlighted = false;
+    });
+  }
+
   function handleToolResult(msg) {
     const tool = msg.tool;
     if (tool === "highlight_visual" && msg.success && msg.payload) {
-      highlightView(
-        msg.payload.view_id,
-        msg.payload.highlight_element,
-        msg.payload.dim_others ?? true
-      );
+      if (msg.payload.action === "clear") {
+        clearHighlight();
+      } else {
+        highlightViews(
+          msg.payload.view_ids || msg.payload.highlighted_views || [msg.payload.view_id],
+          msg.payload.highlight_element,
+          msg.payload.dim_others ?? true
+        );
+      }
     } else if ((tool === "filter_data" || tool === "remove_filter") && msg.success && msg.payload) {
       activeFilters.value = msg.payload.active_filters || [];
     }
@@ -144,9 +168,22 @@ export const useDashboardStore = defineStore("dashboard", () => {
     return Date.now();
   }
 
+  function normalizeViewIds(value) {
+    const source = Array.isArray(value) ? value : [value];
+    const seen = new Set();
+    const ids = [];
+    for (const item of source) {
+      if (!item || seen.has(item)) continue;
+      seen.add(item);
+      ids.push(item);
+    }
+    return ids;
+  }
+
   return {
     views,
     activeFilters,
+    highlightedViewIds,
     highlightedViewId,
     highlightElement,
     transcripts,
@@ -167,6 +204,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
     updateViews,
     appendView,
     highlightView,
+    highlightViews,
+    clearHighlight,
     handleToolResult,
     recordToolCall,
     addTranscript,

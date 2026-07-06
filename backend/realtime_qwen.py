@@ -25,16 +25,16 @@ import websockets
 from dotenv import load_dotenv
 from fastapi import WebSocket, WebSocketDisconnect
 
+from logging_utils import resolve_session_log_dir, safe_log_token
 from prompts import build_system_prompt
-from session_summary import SessionSummaryTracker
 from tools import (
     TOOL_SCHEMAS,
-    context_text,
     execute_tool,
     get_views_for_frontend,
     init_views,
     log_tool_call,
     normalize_tool_arguments,
+    realtime_state,
 )
 
 load_dotenv()
@@ -59,6 +59,15 @@ IMPORTANT_EVENTS = {
     "response.output_audio_transcript.done",
     "response.done",
     "error",
+}
+
+MODEL_ONLY_TOOLS = {"inspect_visual"}
+MUTATING_TOOLS = {
+    "filter_data",
+    "remove_filter",
+    "append_visual",
+    "delete_visual",
+    "set_low_score_threshold",
 }
 
 # ---------------------------------------------------------------------------
@@ -121,16 +130,44 @@ QWEN_OPENING_ENABLED = os.getenv(
 ).lower() in {"1", "true", "yes", "on"}
 
 
-# VerbalVis uses Qwen's native server VAD flow:
+# VerbalVis streams audio through Qwen's native turn detection flow:
 # input_audio_buffer.append -> speech_started/stopped -> committed -> response.
-INPUT_MODE = "server_vad"
+QWEN_TURN_DETECTION = "semantic_vad"
+INPUT_MODE = "semantic_vad"
 QWEN_VAD_THRESHOLD = float(os.getenv("QWEN_REALTIME_VAD_THRESHOLD", "0.5"))
-QWEN_VAD_PREFIX_PADDING_MS = int(os.getenv("QWEN_REALTIME_VAD_PREFIX_PADDING_MS", "300"))
 QWEN_VAD_SILENCE_DURATION_MS = int(os.getenv("QWEN_REALTIME_VAD_SILENCE_DURATION_MS", "800"))
 
 BARGE_IN_ENABLED = os.getenv(
     "VERBALVIS_BARGE_IN_ENABLED", "true"
 ).lower() not in {"0", "false", "no", "off"}
+
+
+NON_SUPERSEDING_UTTERANCES = {
+    "嗯",
+    "嗯嗯",
+    "好",
+    "好的",
+    "对",
+    "对的",
+    "明白",
+    "明白了",
+    "你继续",
+    "继续",
+    "继续说",
+    "ok",
+    "okay",
+    "right",
+    "go on",
+}
+
+
+def _normalize_utterance(text: str) -> str:
+    text = " ".join((text or "").strip().lower().split())
+    return text.strip("。！？.!?")
+
+
+def _is_non_superseding_utterance(text: str) -> bool:
+    return _normalize_utterance(text) in NON_SUPERSEDING_UTTERANCES
 
 
 def _build_qwen_url(model: str) -> str:
@@ -141,21 +178,10 @@ def _qwen_tool_schemas() -> list[dict[str, Any]]:
     """Convert the working OpenAI realtime2 flat tools to Qwen's function shape."""
     qwen_tools: list[dict[str, Any]] = []
     for tool in TOOL_SCHEMAS:
-        function = tool.get("function") if "function" in tool else tool
+        nested_function = tool.get("function")
+        function = nested_function if isinstance(nested_function, dict) else tool
         description = function.get("description", "")
-        if function.get("name") == "append_visual":
-            description = (
-                f"{description} IMPORTANT: for Top N / 前N个 / 保留N项 requests, "
-                "row-level Top N uses limit=N. Multi-series line Top N uses "
-                "series_limit=N with series_sort_by and series_sort_order instead of "
-                "limit. Do not encode Top N only in the chart title. Non-scatter charts are automatically "
-                "aggregated by the backend from x/y. Use chart_type=pie for pie/"
-                "占比/构成/share requests instead of silently falling back to bar. "
-                "Use chart_type=table for 表格/列表/detail requests; for 5-10 states "
-                "with each state's top 3 product categories, use x=customer_state, "
-                "y=revenue, color=product_category, limit=5..10, series_limit=3."
-            )
-        if "function" in tool:
+        if isinstance(nested_function, dict):
             qwen_tools.append({
                 "type": "function",
                 "function": {
@@ -209,19 +235,30 @@ def _qwen_json_schema(value: Any) -> Any:
 class QwenRealtimeSession:
     """One session = one frontend client + one Qwen-Omni-Realtime connection."""
 
-    def __init__(self, client_ws: WebSocket, session_id: str = "default", model: str | None = None):
+    def __init__(
+        self,
+        client_ws: WebSocket,
+        session_id: str = "default",
+        model: str | None = None,
+        analysis_id: str | None = None,
+    ):
         self.client_ws = client_ws
         self.session_id = session_id
+        self.analysis_id = safe_log_token(analysis_id) or None
+        self.log_scope_id = self.analysis_id or safe_log_token(session_id, "session")
         self.model = QWEN_MODEL
         self.qwen_ws: Any = None
         self.current_response_id: str | None = None
+        self.latest_response_id: str | None = None
+        self._playback_response_id: str | None = None
 
         self._running = False
         self._upstream_send_lock = asyncio.Lock()
         self._tool_state_lock = asyncio.Lock()
         self._tool_tasks: set[asyncio.Task] = set()
         self._invalidated_response_ids: set[str] = set()
-        self._turn_epoch = 0
+        self._interruption_pending = False
+        self._interrupted_response_id: str | None = None
 
         self._pending_tool_calls: dict[str, int] = {}
         self._pending_should_respond: dict[str, bool] = {}
@@ -239,8 +276,6 @@ class QwenRealtimeSession:
         self._current_assistant_audio_generated_ms = 0
         self._assistant_transcript_buffer = ""
         self._last_user_transcript = ""
-        self._dashboard_context = ""
-        self._summary_tracker = SessionSummaryTracker(self.session_id, "qwen")
 
         self._log_dir: Path | None = None
         self._event_logger: logging.Logger | None = None
@@ -255,13 +290,19 @@ class QwenRealtimeSession:
     # ------------------------------------------------------------------
 
     def _init_session_loggers(self) -> None:
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_dir = _LOG_ROOT / f"{ts}_{self.session_id}_qwen"
-        log_dir.mkdir(parents=True, exist_ok=True)
+        if self._log_dir:
+            return
+        log_dir, log_scope_id = resolve_session_log_dir(
+            _LOG_ROOT,
+            session_id=self.session_id,
+            mode="qwen",
+            analysis_id=self.analysis_id,
+        )
         self._log_dir = log_dir
+        self.log_scope_id = log_scope_id
 
         def _make(name: str) -> logging.Logger:
-            logger = logging.getLogger(f"realtime_qwen.{name}.{self.session_id}.{ts}")
+            logger = logging.getLogger(f"realtime_qwen.{name}.{self.session_id}.{self.log_scope_id}")
             logger.setLevel(logging.DEBUG)
             logger.propagate = False
             logger.handlers.clear()
@@ -276,29 +317,35 @@ class QwenRealtimeSession:
         self._bargein_logger = _make("bargein")
         self._connection_logger = _make("connection")
         self._conversation_logger = _make("conversation")
-        self._summary_tracker.set_log_dir(log_dir)
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        self._init_session_loggers()
         init_views()
-        self._dashboard_context = context_text()
         self._running = True
 
         await self._send_client({
             "type": "init",
+            "session_id": self.session_id,
+            "analysis_id": self.log_scope_id,
             "views": get_views_for_frontend(),
             "mode": "barge_in" if BARGE_IN_ENABLED else "turn_based",
             "input_mode": INPUT_MODE,
+            "turn_detection": QWEN_TURN_DETECTION,
             "provider": "qwen",
             "model": self.model,
             "input_audio_rate": QWEN_INPUT_SAMPLE_RATE,
             "output_audio_rate": QWEN_OUTPUT_SAMPLE_RATE,
             "audio_format": QWEN_AUDIO_FORMAT,
         })
+        self._log_connection(
+            "CLIENT_INIT mode=%s input_mode=%s turn_detection=%s",
+            "barge_in" if BARGE_IN_ENABLED else "turn_based",
+            INPUT_MODE,
+            QWEN_TURN_DETECTION,
+        )
 
         try:
             client_task = asyncio.create_task(
@@ -361,21 +408,23 @@ class QwenRealtimeSession:
         self._qwen_generation += 1
         self._qwen_ready = False
         self.current_response_id = None
+        self.latest_response_id = None
+        self._playback_response_id = None
         self._assistant_transcript_buffer = ""
         self._pending_tool_calls.clear()
         self._pending_should_respond.clear()
         self._responses_with_tool_calls.clear()
         self._invalidated_response_ids.clear()
+        self._interruption_pending = False
+        self._interrupted_response_id = None
         for task in list(self._tool_tasks):
             task.cancel()
         if self._tool_tasks:
             await asyncio.gather(*self._tool_tasks, return_exceptions=True)
         await self._close_qwen()
-        self._dashboard_context = context_text()
         self._log_connection("RESTART_QWEN_SESSION reason=%s generation=%s", reason, self._qwen_generation)
         try:
             await self._connect_and_configure_qwen()
-            await self._inject_context(self._dashboard_context)
         except Exception:
             self._qwen_ready = False
             await self._close_qwen()
@@ -446,62 +495,25 @@ class QwenRealtimeSession:
                 "SESSION_UPDATE_SENT\n%s",
                 json.dumps(payload, indent=2, ensure_ascii=False),
             )
-        self._log_connection("SESSION_UPDATE_SENT")
+        self._log_connection(
+            "SESSION_UPDATE_SENT turn_detection=%s",
+            QWEN_TURN_DETECTION,
+        )
 
         await self._send_qwen(payload)
 
     def _build_instructions(self) -> str:
-        qwen_tool_rules = (
-            "\n\nQWEN TOOL CALL RULES (high priority):\n"
-            "- For append_visual row-level Top N requests, use a real limit "
-            "argument, not only text in title.\n"
-            "- Multi-series line charts: use color as the series dimension. "
-            "For 收入前十品类按月评分趋势, pass color=product_category, "
-            "series_limit=10, series_sort_by=revenue, series_sort_order=desc. "
-            "Do not use limit for Top N series; limit only limits rows.\n"
-            "- Table visuals: for 表格/列表/detail requests, use chart_type=table. "
-            "For 显示五到十个州的前三名商品类别, pass x=customer_state, "
-            "y=revenue, color=product_category, limit=5..10, series_limit=3, "
-            "sort_by=revenue, sort_order=desc, series_sort_by=revenue, "
-            "series_sort_order=desc. The backend formats integer revenue and "
-            "integer state-revenue share.\n"
-            "- append_visual already performs backend aggregation for bar, line, "
-            "histogram, pie, and table visuals. Use x/y fields; do not claim aggregation is "
-            "unsupported.\n"
-            "- For pie/饼图/占比/构成 requests, call append_visual with "
-            "chart_type=pie. For delivery-speed pie charts, use "
-            "x=delivery_speed_bucket and y=order_count unless the user asks for "
-            "revenue.\n"
-            "- Natural-language metric mapping: 延迟率/超时率 -> y=late_ratio; "
-            "准时率/按时率 -> y=on_time_ratio; 高评分占比/好评占比 -> "
-            "y=high_score_ratio; 运费占比 -> y=avg_freight_ratio. "
-            "配送状态饼图 -> x=delivery_status_bucket, y=order_count; "
-            "支付方式 -> x=primary_payment_type; 订单规模 -> x=order_size_bucket.\n"
-            "- For explicit sorting, pass sort_by and sort_order. Examples: "
-            "按配送时间从短到长 -> sort_by=delivery_days, sort_order=asc; "
-            "评分最差Top N -> sort_by=review_score, sort_order=asc; "
-            "低分占比最差Top N -> sort_by=low_score_ratio, sort_order=desc; "
-            "延迟率最高Top N -> sort_by=late_ratio, sort_order=desc; "
-            "准时率最低Top N -> sort_by=on_time_ratio, sort_order=asc.\n"
-            "- If the user changes the definition of low score globally, call "
-            "set_low_score_threshold instead of saying low_score_ratio is fixed.\n"
-            "- ASR correction handling: 同音字/误解/听错 means the user is correcting "
-            "recognition. Treat 试图 as 视图 when followed by dashboard actions; "
-            "resolve 州/周 by context (state vs week); 低于三分 means <=2, while "
-            "三分及以下 means <=3; 折线/多条线 means line or multi-series line.\n"
-            "- Preserve filter scope: 跟随全局 -> inherit_global_filters=true; "
-            "固定条件/独立比较/不要跟全局变 -> chart-local filters with "
-            "inherit_global_filters=false; 固定当前结果 -> freeze=true.\n"
-            "- After append_visual tool output, verify limit/data_points/statistics "
-            "before saying the chart satisfies the user request.\n"
+        state = json.dumps(
+            realtime_state(),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
         )
-        if not self._dashboard_context:
-            return f"{build_system_prompt()}{qwen_tool_rules}"
         return (
             f"{build_system_prompt()}\n\n"
-            "CURRENT DASHBOARD CONTEXT (authoritative, refreshes after each tool call):\n"
-            f"{self._dashboard_context}"
-            f"{qwen_tool_rules}"
+            "CURRENT DASHBOARD METADATA (use this only to choose a relevant view; "
+            "chart values require inspect_visual):\n"
+            f"{state}"
         )
 
     def _build_session_config(self) -> dict[str, Any]:
@@ -521,12 +533,9 @@ class QwenRealtimeSession:
         }
 
         session["turn_detection"] = {
-            "type": "server_vad",
+            "type": "semantic_vad",
             "threshold": QWEN_VAD_THRESHOLD,
-            "prefix_padding_ms": QWEN_VAD_PREFIX_PADDING_MS,
             "silence_duration_ms": QWEN_VAD_SILENCE_DURATION_MS,
-            "create_response": True,
-            "interrupt_response": BARGE_IN_ENABLED,
         }
 
         if ENABLE_INPUT_TRANSCRIPTION and SEND_INPUT_TRANSCRIPTION_CONFIG:
@@ -552,11 +561,14 @@ class QwenRealtimeSession:
                 self._session_updated.set()
                 await self._send_client({
                     "type": "session_updated",
+                    "session_id": self.session_id,
+                    "analysis_id": self.log_scope_id,
                     "provider": "qwen",
                     "model": self.model,
                     "voice": QWEN_VOICE,
                     "mode": "barge_in" if BARGE_IN_ENABLED else "turn_based",
                     "input_mode": INPUT_MODE,
+                    "turn_detection": QWEN_TURN_DETECTION,
                     "input_audio_rate": QWEN_INPUT_SAMPLE_RATE,
                     "output_audio_rate": QWEN_OUTPUT_SAMPLE_RATE,
                     "audio_format": QWEN_AUDIO_FORMAT,
@@ -597,9 +609,8 @@ class QwenRealtimeSession:
                     if not self._qwen_ready:
                         continue
                     await self._truncate_assistant_audio(msg.get("assistant_audio") or msg)
-                elif msg_type == "local_speech_started":
-                    await self._handle_speech_started()
                 elif msg_type == "start_session":
+                    self._update_analysis_id_from_message(msg)
                     try:
                         await self._restart_qwen_session("client.start_session")
                     except Exception as exc:
@@ -636,11 +647,14 @@ class QwenRealtimeSession:
                 self._session_updated.set()
                 await self._send_client({
                     "type": "session_updated",
+                    "session_id": self.session_id,
+                    "analysis_id": self.log_scope_id,
                     "provider": "qwen",
                     "model": self.model,
                     "voice": QWEN_VOICE,
                     "mode": "barge_in" if BARGE_IN_ENABLED else "turn_based",
                     "input_mode": INPUT_MODE,
+                    "turn_detection": QWEN_TURN_DETECTION,
                     "input_audio_rate": QWEN_INPUT_SAMPLE_RATE,
                     "output_audio_rate": QWEN_OUTPUT_SAMPLE_RATE,
                     "audio_format": QWEN_AUDIO_FORMAT,
@@ -648,33 +662,67 @@ class QwenRealtimeSession:
 
             elif etype == "response.created":
                 resp = event.get("response", {})
-                self.current_response_id = resp.get("id")
-                self._start_response_metrics(self.current_response_id)
+                new_response_id = resp.get("id")
+                if not new_response_id:
+                    continue
+                self.latest_response_id = new_response_id
+                self.current_response_id = new_response_id
+                self._playback_response_id = new_response_id
+                self._invalidated_response_ids.discard(new_response_id)
+                self._start_response_metrics(new_response_id)
+                await self._send_client({
+                    "type": "assistant_response_started",
+                    "response_id": new_response_id,
+                })
 
             # Qwen uses response.audio.delta. Also accept OpenAI GA's renamed
             # response.output_audio.delta defensively in case of upstream changes.
             elif etype in ("response.audio.delta", "response.output_audio.delta"):
+                audio_response_id = self._event_explicit_response_id(event)
+                if not audio_response_id:
+                    self._record_timeline("audio.delta.dropped_missing_response_id")
+                    continue
+                if audio_response_id != self.latest_response_id:
+                    self._record_timeline(
+                        "audio.delta.dropped_not_latest",
+                        response_id=audio_response_id,
+                        latest_response_id=self.latest_response_id,
+                    )
+                    continue
                 self._track_assistant_audio(event)
-                self._mark_first_audio(response_id)
+                self._playback_response_id = audio_response_id
+                self._mark_first_audio(audio_response_id)
                 await self._send_client({
                     "type": "audio",
                     "data": event.get("delta", ""),
-                    "response_id": response_id,
+                    "response_id": audio_response_id,
                     "item_id": event.get("item_id"),
                     "content_index": event.get("content_index", 0),
                     "sample_rate": QWEN_OUTPUT_SAMPLE_RATE,
                 })
 
             elif etype in ("response.audio_transcript.delta", "response.output_audio_transcript.delta"):
+                transcript_response_id = self._event_explicit_response_id(event)
+                if not transcript_response_id:
+                    self._record_timeline("audio_transcript.delta.dropped_missing_response_id")
+                    continue
+                if transcript_response_id != self.latest_response_id:
+                    self._record_timeline(
+                        "audio_transcript.delta.dropped_not_latest",
+                        response_id=transcript_response_id,
+                        latest_response_id=self.latest_response_id,
+                    )
+                    continue
                 self._assistant_transcript_buffer += event.get("delta", "")
                 await self._send_client({
                     "type": "transcript",
                     "role": "assistant",
                     "delta": event.get("delta", ""),
+                    "response_id": transcript_response_id,
                 })
 
             elif etype == "input_audio_buffer.speech_started":
-                await self._handle_speech_started()
+                await self._handle_qwen_speech_started()
 
             elif etype == "input_audio_buffer.speech_stopped":
                 self._last_user_speech_stopped_at = time.perf_counter()
@@ -691,9 +739,9 @@ class QwenRealtimeSession:
                         "role": "user",
                         "text": clean_transcript,
                     })
-                    await self._send_session_summary(
-                        self._summary_tracker.record_user_transcript(clean_transcript)
-                    )
+                    await self._handle_completed_interrupt_transcript(clean_transcript)
+                elif self._interruption_pending:
+                    await self._handle_completed_interrupt_transcript("")
                 elif self._event_logger:
                     self._event_logger.info("EMPTY_TRANSCRIPT_IGNORED")
 
@@ -716,12 +764,6 @@ class QwenRealtimeSession:
                     "name": _tool_name,
                     "arguments": _tool_args,
                 })
-                self._summary_tracker.record_tool_call(
-                    name=_tool_name,
-                    arguments=_tool_args,
-                    response_id=response_id,
-                    call_id=event.get("call_id"),
-                )
 
                 if response_id:
                     self._responses_with_tool_calls.add(response_id)
@@ -730,7 +772,7 @@ class QwenRealtimeSession:
                     )
 
                 task = asyncio.create_task(
-                    self._handle_tool_call(event, response_id=response_id, turn_epoch=self._turn_epoch),
+                    self._handle_tool_call(event, response_id=response_id),
                     name=f"{self.session_id}:tool:{event.get('name', 'unknown')}",
                 )
                 self._tool_tasks.add(task)
@@ -741,13 +783,6 @@ class QwenRealtimeSession:
                 self._finish_response_metrics(response_id, response_payload)
                 has_tool_call = bool(response_id and response_id in self._responses_with_tool_calls)
                 assistant_text = self._assistant_transcript_buffer.strip()
-                if assistant_text:
-                    await self._send_session_summary(
-                        self._summary_tracker.record_assistant_transcript(
-                            assistant_text,
-                            suppressed=has_tool_call,
-                        )
-                    )
                 if assistant_text and not has_tool_call:
                     self._log_conversation("AI", assistant_text)
                 elif has_tool_call and self._event_logger:
@@ -759,10 +794,13 @@ class QwenRealtimeSession:
                 self._assistant_transcript_buffer = ""
                 if response_id:
                     self._responses_with_tool_calls.discard(response_id)
-                self.current_response_id = None
-                self._current_assistant_audio_item_id = None
-                self._current_assistant_audio_content_index = 0
-                self._current_assistant_audio_generated_ms = 0
+                if not response_id or self.current_response_id == response_id:
+                    self.current_response_id = None
+                    self._current_assistant_audio_item_id = None
+                    self._current_assistant_audio_content_index = 0
+                    self._current_assistant_audio_generated_ms = 0
+                if response_id and self.latest_response_id == response_id:
+                    self.latest_response_id = None
                 await self._send_client({
                     "type": "response_done",
                     "response_id": response_id,
@@ -864,8 +902,8 @@ class QwenRealtimeSession:
         #     "audio_end_ms": audio_end_ms,
         # })
         # Qwen native client events do not expose conversation.item.truncate.
-        # Playback is stopped on the frontend, and response.cancel is sent by
-        # _invalidate_current_response when an active response exists.
+        # Playback is stopped on the frontend. Explicit cancel gates can still
+        # call _invalidate_current_response when an active response exists.
         self._record_timeline(
             "conversation.item.truncate.skipped_for_qwen",
             item_id=item_id, content_index=content_index, audio_end_ms=audio_end_ms,
@@ -879,24 +917,86 @@ class QwenRealtimeSession:
         self._current_assistant_audio_content_index = 0
         self._current_assistant_audio_generated_ms = 0
 
-    async def _handle_speech_started(self) -> None:
-        # Qwen does not expose conversation.item.truncate, so stop local playback
-        # via the client event and cancel the active response on speech start.
-        await self._invalidate_current_response(source="speech_started", send_cancel=True)
+    async def _handle_qwen_speech_started(self) -> None:
+        interrupted_response_id = (
+            self.latest_response_id
+            or self.current_response_id
+            or self._playback_response_id
+        )
+        self._record_timeline(
+            "speech_started.observed",
+            source="qwen_semantic_vad",
+            response_id=interrupted_response_id,
+        )
+        if not BARGE_IN_ENABLED or not interrupted_response_id:
+            return
+        self._interruption_pending = True
+        self._interrupted_response_id = interrupted_response_id
+        self._log_connection(
+            "INTERRUPTION_PAUSE response_id=%s", interrupted_response_id
+        )
+        if self._bargein_logger:
+            self._bargein_logger.info(
+                "INTERRUPTION_PAUSE response_id=%s", interrupted_response_id
+            )
+        await self._send_client({
+            "type": "assistant_playback_pause",
+            "response_id": interrupted_response_id,
+            "reason": "qwen_semantic_vad_speech_started",
+        })
+
+    async def _handle_completed_interrupt_transcript(self, transcript: str) -> None:
+        if not self._interruption_pending:
+            return
+        clean_transcript = transcript.strip()
+        if not clean_transcript:
+            await self._resume_interrupted_response("empty_transcript")
+            return
+        if _is_non_superseding_utterance(clean_transcript):
+            await self._resume_interrupted_response("non_superseding_utterance")
+            return
+        await self._invalidate_current_response(
+            source="user_superseded_response",
+            send_cancel=True,
+        )
+
+    async def _resume_interrupted_response(self, source: str) -> None:
+        response_id = self._interrupted_response_id
+        self._interruption_pending = False
+        self._interrupted_response_id = None
+        self._record_timeline("barge_in.resume", source=source, response_id=response_id)
+        self._log_connection("INTERRUPTION_RESUME source=%s response_id=%s", source, response_id)
+        if self._bargein_logger:
+            self._bargein_logger.info(
+                "INTERRUPTION_RESUME source=%s response_id=%s", source, response_id
+            )
+        await self._send_client({
+            "type": "assistant_playback_resume",
+            "response_id": response_id,
+            "reason": source,
+        })
 
     async def _invalidate_current_response(self, source: str, send_cancel: bool) -> None:
-        self._turn_epoch += 1
-        invalidated_response_id = self.current_response_id
+        invalidated_response_id = (
+            self._interrupted_response_id
+            or self.latest_response_id
+            or self.current_response_id
+            or self._playback_response_id
+        )
         if invalidated_response_id:
             self._invalidated_response_ids.add(invalidated_response_id)
+        self.latest_response_id = None
+        self._playback_response_id = None
+        self._interruption_pending = False
+        self._interrupted_response_id = None
 
         self._log_connection(
             "BARGE_IN source=%s invalidated=%s", source, invalidated_response_id
         )
         if self._bargein_logger:
             self._bargein_logger.info(
-                "BARGE_IN source=%s invalidated=%s epoch=%d",
-                source, invalidated_response_id, self._turn_epoch,
+                "BARGE_IN source=%s invalidated=%s",
+                source, invalidated_response_id,
             )
         self._assistant_transcript_buffer = ""
         self._record_timeline("barge_in", source=source, response_id=invalidated_response_id)
@@ -908,15 +1008,18 @@ class QwenRealtimeSession:
             await self._send_qwen({"type": "response.cancel"})
 
         await self._send_client({
-            "type": "speech_started",
-            "invalidated_response_id": invalidated_response_id,
+            "type": "assistant_playback_stop",
+            "response_id": invalidated_response_id,
+            "reason": source,
+            "clear_queue": True,
         })
 
     # ------------------------------------------------------------------
     # Tool call handling
     # ------------------------------------------------------------------
 
-    async def _handle_tool_call(self, event: dict, response_id: str | None, turn_epoch: int) -> None:
+    async def _handle_tool_call(self, event: dict, response_id: str | None) -> None:
+        self._init_session_loggers()
         tool_name = event.get("name", "")
         call_id = event.get("call_id", "")
         args_str = event.get("arguments", "{}")
@@ -933,49 +1036,30 @@ class QwenRealtimeSession:
 
         should_respond = False
         try:
-            if self._is_stale_tool_call(response_id, turn_epoch):
-                if self._tool_logger:
-                    self._tool_logger.info(
-                        "TOOL_STALE_BEFORE_START name=%s args=%s",
-                        tool_name, json.dumps(arguments, ensure_ascii=False),
-                    )
-                return
-
             if self._tool_logger:
                 self._tool_logger.info(
                     "TOOL_START name=%s call_id=%s args=%s",
                     tool_name, call_id, json.dumps(arguments, ensure_ascii=False),
-                )
+            )
             tool_started_at = time.perf_counter()
-            stale_after_execution = False
 
             try:
                 async with self._tool_state_lock:
-                    if self._is_stale_tool_call(response_id, turn_epoch):
-                        if self._tool_logger:
-                            self._tool_logger.info(
-                                "TOOL_STALE_AFTER_LOCK name=%s args=%s",
-                                tool_name, json.dumps(arguments, ensure_ascii=False),
-                            )
-                        return
-
                     result = await asyncio.to_thread(execute_tool, tool_name, arguments)
                     tool_duration_ms = round((time.perf_counter() - tool_started_at) * 1000, 2)
-                    stale_after_execution = self._is_stale_tool_call(response_id, turn_epoch)
                     views = get_views_for_frontend()
-                    updated_context = context_text()
                     log_tool_call(
                         session_id=self.session_id,
+                        analysis_id=self.log_scope_id,
                         tool_name=tool_name,
                         params=arguments,
                         mode="barge_in" if BARGE_IN_ENABLED else "turn_based",
                         response_id=response_id,
                         call_id=call_id,
                         result_success=result.get("success"),
-                        cancelled=stale_after_execution,
+                        cancelled=False,
                         metrics={
                             "tool_duration_ms": tool_duration_ms,
-                            "turn_epoch": turn_epoch,
                             "timeline": self._timeline_snapshot(),
                         },
                         log_dir=self._log_dir,
@@ -985,29 +1069,22 @@ class QwenRealtimeSession:
                     self._tool_logger.info("TOOL_CANCELLED name=%s", tool_name)
                 raise
 
-            if stale_after_execution:
-                if self._tool_logger:
-                    self._tool_logger.info(
-                        "TOOL_STALE name=%s call_id=%s dur=%.1fms",
-                        tool_name, call_id, tool_duration_ms,
-                    )
-                return
-
             if self._tool_logger:
                 self._tool_logger.info(
                     "TOOL_DONE name=%s call_id=%s dur=%.1fms success=%s",
                     tool_name, call_id, tool_duration_ms, result.get("success"),
                 )
 
-            await self._send_client({
-                "type": "tool_result",
-                "response_id": response_id,
-                "call_id": call_id,
-                "duration_ms": tool_duration_ms,
-                **result,
-            })
+            if tool_name not in MODEL_ONLY_TOOLS:
+                await self._send_client({
+                    "type": "tool_result",
+                    "response_id": response_id,
+                    "call_id": call_id,
+                    "duration_ms": tool_duration_ms,
+                    **result,
+                })
 
-            if tool_name in ("filter_data", "remove_filter", "append_visual", "delete_visual", "set_low_score_threshold"):
+            if tool_name in MUTATING_TOOLS:
                 if self._dashboard_logger:
                     self._dashboard_logger.info(
                         "VIEWS_UPDATE tool=%s args=%s",
@@ -1015,31 +1092,15 @@ class QwenRealtimeSession:
                     )
                 await self._send_client({"type": "views_update", "views": views})
 
-            await self._send_session_summary(
-                self._summary_tracker.record_tool_result(
-                    name=tool_name,
-                    arguments=arguments,
-                    result=result,
-                    response_id=response_id,
-                    call_id=call_id,
-                    duration_ms=tool_duration_ms,
-                )
-            )
-
             await self._send_qwen({
                 "type": "conversation.item.create",
                 "item": {
                     "type": "function_call_output",
                     "call_id": call_id,
-                    "output": self._tool_result_text(
-                        result,
-                        tool_duration_ms,
-                        dashboard_context=updated_context,
-                    ),
+                    "output": self._tool_result_text(result),
                 },
             })
 
-            await self._inject_context(updated_context)
             should_respond = True
         finally:
             await self._finalize_tool_call(response_id, should_respond)
@@ -1065,103 +1126,100 @@ class QwenRealtimeSession:
         if fire:
             await self._create_response_if_idle("tool.finalize")
 
-    def _is_stale_tool_call(self, response_id: str | None, turn_epoch: int) -> bool:
-        return (
-            turn_epoch != self._turn_epoch
-            or (response_id is not None and response_id in self._invalidated_response_ids)
-            or not self._running
-        )
-
     def _tool_result_text(
         self,
         result: dict[str, Any],
-        duration_ms: float,
-        dashboard_context: str | None = None,
     ) -> str:
+        if result.get("tool") == "inspect_visual":
+            return json.dumps(
+                {
+                    "success": result.get("success", False),
+                    "tool": "inspect_visual",
+                    "visual": result.get("payload"),
+                    "error": result.get("error"),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            )
+
         payload = {
             "success": result.get("success", False),
-            "payload": self._compact_tool_payload(result),
-            "error": result.get("error"),
-            "warning": result.get("warning"),
-            "metrics": {"tool_duration_ms": duration_ms},
+            "tool": result.get("tool"),
+            "result": self._compact_tool_payload(result),
+            "state": realtime_state(),
         }
-        if dashboard_context:
-            payload["dashboard_context"] = dashboard_context
-        return json.dumps(payload, ensure_ascii=False, default=str)
+        if result.get("error"):
+            payload["error"] = result["error"]
+        if result.get("warning"):
+            payload["warning"] = result["warning"]
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )
 
     def _compact_tool_payload(self, result: dict[str, Any]) -> Any:
         payload = result.get("payload")
+        tool = result.get("tool")
         if not isinstance(payload, dict):
+            return {"tool": tool}
+
+        if tool == "inspect_visual":
             return payload
 
-        tool = result.get("tool")
         if tool == "append_visual":
-            compact = {
-                key: payload.get(key)
-                for key in (
-                    "view_id", "chart_type", "x", "y", "color", "title",
-                    "limit", "sort_by", "sort_order", "low_score_threshold",
-                    "series_limit", "series_sort_by", "series_sort_order",
-                    "filters", "inherit_global_filters", "freeze",
-                    "filter_scope", "effective_filters", "snapshot_filters",
-                    "statistics", "filtered_rows",
-                )
-                if key in payload
+            return {
+                "tool": "append_visual",
+                "view_id": payload.get("view_id"),
+                "title": payload.get("title"),
+                "chart_type": payload.get("chart_type"),
+                "x": payload.get("x"),
+                "y": payload.get("y"),
+                "color": payload.get("color"),
             }
-            data = payload.get("data")
-            if isinstance(data, list):
-                compact["data_points"] = len(data)
-                compact["data_omitted"] = True
-            return compact
 
         if tool == "filter_data":
             return {
-                "action": payload.get("action"),
-                "active_filters": payload.get("active_filters", []),
+                "tool": "filter_data",
                 "filtered_rows": payload.get("filtered_rows"),
+                "active_filters": payload.get("active_filters", []),
             }
 
         if tool == "set_low_score_threshold":
             return {
+                "tool": "set_low_score_threshold",
                 "low_score_threshold": payload.get("low_score_threshold"),
                 "definition": payload.get("definition"),
-                "filtered_rows": payload.get("filtered_rows"),
             }
 
         if tool == "remove_filter":
             return {
+                "tool": "remove_filter",
                 "removed_field": payload.get("removed_field"),
-                "removed_count": payload.get("removed_count"),
-                "active_filters": payload.get("active_filters", []),
                 "filtered_rows": payload.get("filtered_rows"),
             }
 
-        if tool in {"highlight_visual", "delete_visual"}:
-            return payload
+        if tool == "highlight_visual":
+            return {
+                "tool": "highlight_visual",
+                "view_ids": (
+                    payload.get("view_ids")
+                    or ([payload.get("view_id")] if payload.get("view_id") else [])
+                ),
+            }
 
-        return payload
+        if tool == "delete_visual":
+            return {
+                "tool": "delete_visual",
+                "deleted_view_id": (
+                    payload.get("deleted_view_id")
+                    or payload.get("view_id")
+                ),
+            }
 
-    # ------------------------------------------------------------------
-    # Context injection
-    # ------------------------------------------------------------------
-
-    async def _inject_context(self, text: str) -> None:
-        self._dashboard_context = text
-        self._record_timeline("dashboard_context.updated")
-        if self._event_logger:
-            self._event_logger.info("DASHBOARD_CONTEXT_UPDATED %s", text[:2000])
-        # OpenAI realtime2 original in realtime.py sends:
-        # {
-        #   "type": "conversation.item.create",
-        #   "item": {
-        #     "type": "message",
-        #     "role": "system",
-        #     "content": [{"type": "input_text", "text": text}],
-        #   },
-        # }
-        # Qwen native WebSocket currently documents conversation.item.create
-        # only for function_call_output, so dashboard context is placed in
-        # initial instructions and in each function_call_output instead.
+        return {"tool": tool}
 
     # ------------------------------------------------------------------
     # Metrics
@@ -1172,6 +1230,12 @@ class QwenRealtimeSession:
         if isinstance(response, dict):
             return response.get("id")
         return event.get("response_id") or self.current_response_id
+
+    def _event_explicit_response_id(self, event: dict[str, Any]) -> str | None:
+        response = event.get("response")
+        if isinstance(response, dict):
+            return response.get("id")
+        return event.get("response_id")
 
     def _start_response_metrics(self, response_id: str | None) -> None:
         if not response_id:
@@ -1248,6 +1312,8 @@ class QwenRealtimeSession:
 
     def _log_conversation(self, role: str, text: str) -> None:
         text = (text or "").strip()
+        if text and role.lower() in {"you", "user"}:
+            self._init_session_loggers()
         if not text or not self._conversation_logger:
             return
         self._conversation_logger.info("%s: %s", role, text)
@@ -1257,22 +1323,21 @@ class QwenRealtimeSession:
                 fh.write(json.dumps({
                     "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                     "session_id": self.session_id,
+                    "analysis_id": self.log_scope_id,
                     "role": role,
                     "text": text,
                 }, ensure_ascii=False) + "\n")
 
-    async def _send_session_summary(self, summary: dict[str, Any] | None) -> None:
-        if not summary:
+    def _update_analysis_id_from_message(self, msg: dict[str, Any]) -> None:
+        if self._log_dir:
             return
-        if self._event_logger:
-            self._event_logger.info(
-                "SESSION_SUMMARY %s",
-                json.dumps(summary, ensure_ascii=False)[:2000],
-            )
-        await self._send_client({
-            "type": "session_summary",
-            "summary": summary,
-        })
+        analysis_id = safe_log_token(
+            msg.get("analysis_id") or msg.get("analysisId")
+        )
+        if not analysis_id:
+            return
+        self.analysis_id = analysis_id
+        self.log_scope_id = analysis_id
 
     # ------------------------------------------------------------------
     # Transport helpers

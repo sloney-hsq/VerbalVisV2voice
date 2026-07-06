@@ -301,8 +301,12 @@ def initialize_db() -> None:
         LEFT JOIN translations t ON p.product_category_name = t.product_category_name
     """)
 
-    n_order = con.execute("SELECT COUNT(*) FROM fact_order").fetchone()[0]
-    n_item  = con.execute("SELECT COUNT(*) FROM fact_item").fetchone()[0]
+    n_order_row = con.execute("SELECT COUNT(*) FROM fact_order").fetchone()
+    n_item_row = con.execute("SELECT COUNT(*) FROM fact_item").fetchone()
+    if n_order_row is None or n_item_row is None:
+        raise RuntimeError("Unable to count prepared DuckDB fact tables")
+    n_order = n_order_row[0]
+    n_item = n_item_row[0]
     log.info("fact_order ready: %d rows | fact_item ready: %d rows", n_order, n_item)
 
 

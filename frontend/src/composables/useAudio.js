@@ -7,6 +7,7 @@ const PREFIX_CHUNKS = 3;
 const TRAILING_SILENCE_CHUNKS = 9;
 const SPEECH_RMS_THRESHOLD = 0.01;
 const SILENCE_RMS_THRESHOLD = 0.006;
+const SPEECH_CONFIRM_CHUNKS = 3;
 
 /**
  * Audio composable – handles microphone capture and PCM16 playback.
@@ -33,6 +34,9 @@ export function useAudio(options = {}) {
   let speechActive = false;
   let silenceChunks = 0;
   let prefixBuffer = [];
+  let speechCandidateChunks = 0;
+  let speechCandidateMaxRms = 0;
+  let speechCandidateMaxPeak = 0;
 
   // ---- Playback state ----
   let playbackCtx = null;
@@ -40,8 +44,10 @@ export function useAudio(options = {}) {
   const activeSources = new Set();
   const invalidatedResponseIds = new Set();
   let assistantAudioBlocked = false;
+  let currentPlaybackResponseId = null;
   let nextPlayTime = 0;
   let currentPlayback = null;
+  let onPlaybackIdle = null;
 
   // ------------------------------------------------------------------
   // Recording (mic → PCM16 base64 chunks)
@@ -194,8 +200,14 @@ export function useAudio(options = {}) {
 
   function enqueue(base64pcm, metadata = {}) {
     const responseId = metadata?.response_id || metadata?.responseId || null;
-    if (assistantAudioBlocked) return;
-    if (responseId && invalidatedResponseIds.has(responseId)) return;
+    if (assistantAudioBlocked) return false;
+    if (responseId && invalidatedResponseIds.has(responseId)) return false;
+    if (responseId && currentPlaybackResponseId && responseId !== currentPlaybackResponseId) {
+      stopAssistantAudio({ responseId: currentPlaybackResponseId });
+    }
+    if (responseId) {
+      currentPlaybackResponseId = responseId;
+    }
 
     const ctx = _ensurePlaybackCtx();
     const raw = atob(base64pcm);
@@ -226,14 +238,36 @@ export function useAudio(options = {}) {
     activeSources.add(sourceRecord);
     source.onended = () => {
       activeSources.delete(sourceRecord);
+      if (activeSources.size === 0) {
+        currentPlayback = null;
+        onPlaybackIdle?.();
+      }
     };
     source.start(scheduledStart);
     nextPlayTime += buffer.duration;
     _trackPlayback(metadata, scheduledStart, buffer.duration);
+    return true;
   }
 
-  function flush() {
-    currentPlayback = null;
+  function flush(metadata = {}) {
+    const responseId = metadata?.response_id || metadata?.responseId || null;
+    if (
+      !metadata ||
+      !responseId ||
+      currentPlayback?.responseId === responseId
+    ) {
+      currentPlayback = null;
+    }
+  }
+
+  function beginAssistantResponse(responseId) {
+    if (!responseId) return;
+    assistantAudioBlocked = false;
+    invalidatedResponseIds.delete(responseId);
+    currentPlaybackResponseId = responseId;
+    if (playbackCtx?.state === "suspended") {
+      playbackCtx.resume().catch(() => {});
+    }
   }
 
   function stop() {
@@ -242,8 +276,27 @@ export function useAudio(options = {}) {
     return cursor;
   }
 
+  async function pauseAssistantAudio({ responseId = null } = {}) {
+    if (responseId && currentPlaybackResponseId && responseId !== currentPlaybackResponseId) return;
+    if (playbackCtx && playbackCtx.state === "running") {
+      await playbackCtx.suspend();
+    }
+  }
+
+  async function resumeAssistantAudio({ responseId = null } = {}) {
+    if (responseId && currentPlaybackResponseId && responseId !== currentPlaybackResponseId) return;
+    assistantAudioBlocked = false;
+    if (playbackCtx && playbackCtx.state === "suspended") {
+      await playbackCtx.resume();
+    }
+  }
+
   function stopAssistantAudio({ responseId = null, blockNewAudio = false } = {}) {
     if (blockNewAudio) assistantAudioBlocked = true;
+    if (playbackCtx?.state === "suspended") {
+      playbackCtx.resume().catch(() => {});
+    }
+
     if (responseId) {
       invalidatedResponseIds.add(responseId);
     } else {
@@ -266,14 +319,24 @@ export function useAudio(options = {}) {
       }
     }
 
-    if (!responseId || currentPlayback?.responseId === responseId) {
+    if (
+      !responseId ||
+      currentPlayback?.responseId === responseId
+    ) {
       nextPlayTime = playbackCtx && playbackCtx.state !== "closed" ? playbackCtx.currentTime : 0;
       currentPlayback = null;
+    }
+    if (!responseId || currentPlaybackResponseId === responseId) {
+      currentPlaybackResponseId = null;
     }
   }
 
   function allowAssistantAudio() {
     assistantAudioBlocked = false;
+  }
+
+  function setPlaybackIdleHandler(callback) {
+    onPlaybackIdle = typeof callback === "function" ? callback : null;
   }
 
   // ------------------------------------------------------------------
@@ -363,14 +426,16 @@ export function useAudio(options = {}) {
       if (prefixBuffer.length > PREFIX_CHUNKS) {
         prefixBuffer.shift();
       }
-      if (rms >= SPEECH_RMS_THRESHOLD) {
-        if (shouldStartSpeech && !shouldStartSpeech({ rms, peak: chunk.peak ?? 0 })) {
+      const speechStart = _confirmedSpeechStart(rms, chunk.peak ?? 0);
+      if (speechStart) {
+        if (shouldStartSpeech && !shouldStartSpeech(speechStart)) {
           prefixBuffer = [];
+          _resetSpeechCandidate();
           return;
         }
         speechActive = true;
         silenceChunks = 0;
-        onSpeechStart?.();
+        onSpeechStart?.(speechStart);
         prefixBuffer.forEach((buf) => onAudioChunk?.(_arrayBufferToBase64(buf)));
         prefixBuffer = [];
       }
@@ -384,6 +449,7 @@ export function useAudio(options = {}) {
         speechActive = false;
         silenceChunks = 0;
         prefixBuffer = [];
+        _resetSpeechCandidate();
         onSpeechEnd?.();
       }
     } else {
@@ -395,15 +461,20 @@ export function useAudio(options = {}) {
     speechActive = false;
     silenceChunks = 0;
     prefixBuffer = [];
+    _resetSpeechCandidate();
   }
 
   function _updateUngatedSpeechActivity(rms, peak) {
     if (!speechActive) {
-      if (rms >= SPEECH_RMS_THRESHOLD) {
-        if (shouldStartSpeech && !shouldStartSpeech({ rms, peak })) return;
+      const speechStart = _confirmedSpeechStart(rms, peak);
+      if (speechStart) {
+        if (shouldStartSpeech && !shouldStartSpeech(speechStart)) {
+          _resetSpeechCandidate();
+          return;
+        }
         speechActive = true;
         silenceChunks = 0;
-        onSpeechStart?.();
+        onSpeechStart?.(speechStart);
       }
       return;
     }
@@ -413,11 +484,39 @@ export function useAudio(options = {}) {
       if (silenceChunks >= TRAILING_SILENCE_CHUNKS) {
         speechActive = false;
         silenceChunks = 0;
+        _resetSpeechCandidate();
         onSpeechEnd?.();
       }
     } else {
       silenceChunks = 0;
     }
+  }
+
+  function _confirmedSpeechStart(rms, peak) {
+    if (rms < SPEECH_RMS_THRESHOLD) {
+      _resetSpeechCandidate();
+      return null;
+    }
+
+    speechCandidateChunks += 1;
+    speechCandidateMaxRms = Math.max(speechCandidateMaxRms, rms);
+    speechCandidateMaxPeak = Math.max(speechCandidateMaxPeak, peak);
+
+    if (speechCandidateChunks < SPEECH_CONFIRM_CHUNKS) return null;
+
+    return {
+      rms: speechCandidateMaxRms,
+      peak: speechCandidateMaxPeak,
+      duration_ms: speechCandidateChunks * CHUNK_MS,
+      chunks: speechCandidateChunks,
+      threshold: SPEECH_RMS_THRESHOLD,
+    };
+  }
+
+  function _resetSpeechCandidate() {
+    speechCandidateChunks = 0;
+    speechCandidateMaxRms = 0;
+    speechCandidateMaxPeak = 0;
   }
 
   onBeforeUnmount(() => {
@@ -447,8 +546,12 @@ export function useAudio(options = {}) {
     // Playback interface (passed to useWebSocket)
     enqueue,
     flush,
+    beginAssistantResponse,
     stop,
+    pauseAssistantAudio,
+    resumeAssistantAudio,
     stopAssistantAudio,
     allowAssistantAudio,
+    setPlaybackIdleHandler,
   };
 }

@@ -14,23 +14,23 @@ const RATIO_FIELDS = new Set([
   "avg_freight_ratio",
 ]);
 const RATIO_COUNT_FIELDS = {
-  low_score_ratio: { field: "low_score_count", title: "低分订单" },
-  late_ratio: { field: "late_count", title: "延迟订单" },
-  on_time_ratio: { field: "on_time_count", title: "准时订单" },
-  high_score_ratio: { field: "high_score_count", title: "高分订单" },
+  low_score_ratio: { field: "low_score_count", title: "Low-score orders" },
+  late_ratio: { field: "late_count", title: "Late orders" },
+  on_time_ratio: { field: "on_time_count", title: "On-time orders" },
+  high_score_ratio: { field: "high_score_count", title: "High-score orders" },
 };
 
 export function createSpec(view) {
   const { id, chart_type, title, x_field, y_field, color } = view;
 
   switch (id) {
-    case "view-trend":
+    case "view-1":
       return trendSpec(title);
-    case "view-review":
+    case "view-2":
       return reviewSpec(title);
-    case "view-map":
+    case "view-3":
       return mapBarSpec(title);
-    case "view-category":
+    case "view-4":
       return categorySpec(title);
     default:
       return dynamicSpec(chart_type, x_field, y_field, color, title, view);
@@ -63,8 +63,8 @@ function reviewSpec(title) {
     height: CHART_HEIGHT,
     mark: { type: "bar", tooltip: true, cornerRadiusEnd: 3 },
     encoding: {
-      x: { field: "review_score", type: "ordinal", title: "Review Score" },
-      y: { field: "order_count", type: "quantitative", title: "Count" },
+      x: { field: "review_score", type: "ordinal", title: "Review score" },
+      y: { field: "order_count", type: "quantitative", title: "Orders" },
       color: {
         field: "review_score",
         type: "ordinal",
@@ -106,7 +106,7 @@ function categorySpec(title) {
 }
 
 // ------------------------------------------------------------------
-// Dynamic specs for workspace views
+// Dynamic specs for user-created views
 // ------------------------------------------------------------------
 
 function dynamicSpec(chart_type, x, y, color, title, view = {}) {
@@ -244,46 +244,46 @@ function timeXEncoding(field, title, extra = {}) {
 
 function fieldTitle(field) {
   const titles = {
-    order_month: "月份",
-    order_week: "周",
-    order_date: "日期",
-    order_dow: "星期",
-    order_hour: "小时",
-    review_score: "评分",
-    review_bucket: "评分分组",
-    default_is_low_score: "默认低分",
-    is_high_score: "高评分",
-    customer_state: "州",
-    product_category: "品类",
-    delivery_days: "配送天数",
-    estimated_delivery_days: "预计配送天数",
-    delivery_delay_days: "延迟天数",
-    delivery_speed_bucket: "配送速度",
-    is_late: "是否延迟",
-    delivery_status_bucket: "配送状态",
-    delay_bucket: "延迟程度",
-    revenue: "营收",
-    order_item_revenue: "商品收入",
-    revenue_bucket: "营收分组",
-    item_count: "商品件数",
-    product_count: "商品种数",
-    category_count: "品类数",
-    seller_count: "卖家数",
-    freight_total: "运费",
-    avg_item_price: "平均商品价格",
-    freight_ratio: "运费占比",
-    freight_bucket: "运费分组",
-    order_size_bucket: "订单规模",
-    primary_payment_type: "支付方式",
-    payment_method_count: "支付方式数",
-    max_payment_installments: "最大分期数",
-    primary_payment_installments: "主要支付分期数",
-    order_count: "订单量",
-    low_score_ratio: "低分占比",
-    late_ratio: "延迟率",
-    on_time_ratio: "准时率",
-    high_score_ratio: "高评分占比",
-    avg_freight_ratio: "平均运费占比",
+    order_month: "Month",
+    order_week: "Week",
+    order_date: "Date",
+    order_dow: "Day of week",
+    order_hour: "Hour",
+    review_score: "Review score",
+    review_bucket: "Review bucket",
+    default_is_low_score: "Default low score",
+    is_high_score: "High score",
+    customer_state: "State",
+    product_category: "Category",
+    delivery_days: "Delivery days",
+    estimated_delivery_days: "Estimated delivery days",
+    delivery_delay_days: "Delay days",
+    delivery_speed_bucket: "Delivery speed",
+    is_late: "Late delivery",
+    delivery_status_bucket: "Delivery status",
+    delay_bucket: "Delay bucket",
+    revenue: "Revenue",
+    order_item_revenue: "Item revenue",
+    revenue_bucket: "Revenue bucket",
+    item_count: "Item count",
+    product_count: "Product count",
+    category_count: "Category count",
+    seller_count: "Seller count",
+    freight_total: "Freight",
+    avg_item_price: "Avg item price",
+    freight_ratio: "Freight ratio",
+    freight_bucket: "Freight bucket",
+    order_size_bucket: "Order size",
+    primary_payment_type: "Payment type",
+    payment_method_count: "Payment methods",
+    max_payment_installments: "Max installments",
+    primary_payment_installments: "Primary installments",
+    order_count: "Orders",
+    low_score_ratio: "Low-score share",
+    late_ratio: "Late share",
+    on_time_ratio: "On-time share",
+    high_score_ratio: "High-score share",
+    avg_freight_ratio: "Avg freight ratio",
   };
   return titles[field] || field;
 }
@@ -301,7 +301,7 @@ function addRatioTooltip(spec, x, y) {
     ...(countField
       ? [
           { field: countField.field, type: "quantitative", title: countField.title },
-          { field: "order_count", type: "quantitative", title: "订单量" },
+          { field: "order_count", type: "quantitative", title: "Orders" },
         ]
       : []),
   ];
@@ -322,7 +322,7 @@ function tooltipFields(x, y, color) {
   if (countField) {
     fields.push(
       { field: countField.field, type: "quantitative", title: countField.title },
-      { field: "order_count", type: "quantitative", title: "璁㈠崟閲?" },
+      { field: "order_count", type: "quantitative", title: "Orders" },
     );
   }
   return fields.map(stripUndefined);

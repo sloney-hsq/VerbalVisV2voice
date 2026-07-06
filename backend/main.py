@@ -14,7 +14,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from db import initialize_db
-from realtime_qwen import QwenRealtimeSession
+from realtime_qwen import QWEN_TURN_DETECTION, QwenRealtimeSession
+from text_conversation import QWEN_TEXT_MODEL, QwenTextConversationSession
 
 QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime"
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
@@ -59,15 +60,29 @@ async def websocket_qwen_endpoint(websocket: WebSocket) -> None:
     await _run_qwen_session(websocket)
 
 
+@app.websocket("/ws/text")
+async def websocket_text_endpoint(websocket: WebSocket) -> None:
+    """Turn-based text baseline using the shared dashboard tool layer."""
+    await _run_text_session(websocket)
+
+
 async def _run_qwen_session(websocket: WebSocket) -> None:
     await websocket.accept()
     session_id = f"session-{uuid.uuid4().hex[:8]}"
-    log.info("Client connected (qwen): %s model=%s", session_id, QWEN_REALTIME_MODEL)
+    analysis_id = _analysis_id_from_query(websocket)
+    log.info(
+        "Client connected (qwen): %s analysis=%s model=%s turn_detection=%s",
+        session_id,
+        analysis_id or "-",
+        QWEN_REALTIME_MODEL,
+        QWEN_TURN_DETECTION,
+    )
 
     session = QwenRealtimeSession(
         client_ws=websocket,
         session_id=session_id,
         model=QWEN_REALTIME_MODEL,
+        analysis_id=analysis_id,
     )
     try:
         await session.start()
@@ -75,6 +90,40 @@ async def _run_qwen_session(websocket: WebSocket) -> None:
         log.info("Client disconnected: %s", session_id)
     except Exception as exc:
         log.exception("Qwen session error: %s", exc)
+
+
+async def _run_text_session(websocket: WebSocket) -> None:
+    await websocket.accept()
+    session_id = f"session-{uuid.uuid4().hex[:8]}"
+    analysis_id = _analysis_id_from_query(websocket)
+    log.info(
+        "Client connected (text): %s analysis=%s model=%s",
+        session_id,
+        analysis_id or "-",
+        QWEN_TEXT_MODEL,
+    )
+
+    session = QwenTextConversationSession(
+        client_ws=websocket,
+        session_id=session_id,
+        model=QWEN_TEXT_MODEL,
+        analysis_id=analysis_id,
+    )
+    try:
+        await session.start()
+    except WebSocketDisconnect:
+        log.info("Text client disconnected: %s", session_id)
+    except Exception as exc:
+        log.exception("Text session error: %s", exc)
+
+
+def _analysis_id_from_query(websocket: WebSocket) -> str | None:
+    value = (
+        websocket.query_params.get("analysis_id")
+        or websocket.query_params.get("analysisId")
+        or ""
+    ).strip()
+    return value or None
 
 
 if FRONTEND_DIST.exists():

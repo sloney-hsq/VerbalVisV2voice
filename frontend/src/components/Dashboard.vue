@@ -20,6 +20,13 @@
         <span class="model-status__model">{{ displayModelName }}</span>
         <span class="model-status__state">{{ connectionLabel }}</span>
 
+        <div v-if="store.activeFilters.length" class="status-filters" aria-label="Global filters">
+          <span class="status-filters__label">Global filters</span>
+          <span class="status-filter" v-for="(f, i) in store.activeFilters" :key="i">
+            {{ filterLabel(f) }}
+          </span>
+        </div>
+
         <div v-if="store.recentToolCalls.length" class="tool-call-strip" aria-label="Recent tool calls">
           <span
             v-for="tool in store.recentToolCalls"
@@ -35,8 +42,29 @@
         </div>
       </div>
 
-      <div class="voice-control">
+      <div class="interaction-control">
+        <div class="mode-switch" aria-label="Interaction mode">
+          <button
+            class="mode-switch__button"
+            :class="{ 'mode-switch__button--active': interactionMode === 'voice' }"
+            type="button"
+            title="Voice mode"
+            @click="setInteractionMode('voice')"
+          >
+            Voice
+          </button>
+          <button
+            class="mode-switch__button"
+            :class="{ 'mode-switch__button--active': interactionMode === 'text' }"
+            type="button"
+            title="Text mode"
+            @click="setInteractionMode('text')"
+          >
+            Text
+          </button>
+        </div>
         <button
+          v-if="interactionMode === 'voice'"
           class="mic-pill"
           :class="{ 'mic-pill--recording': audio.isRecording.value }"
           :disabled="recordButtonDisabled"
@@ -53,44 +81,26 @@
           </span>
           <span>{{ voiceStatusLabel }}</span>
         </button>
+        <div
+          v-else
+          class="text-status"
+          :class="{ 'text-status--busy': store.isTextTurnProcessing }"
+        >
+          {{ textTurnLabel }}
+        </div>
       </div>
     </header>
-
-    <section v-if="store.activeFilters.length" class="filter-row" aria-label="Active filters">
-      <span class="filter-row__icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24">
-          <path d="M4 6h16l-6 7v4l-4 2v-6L4 6Z" />
-        </svg>
-      </span>
-      <div class="filter-badges">
-        <span class="filter-badge" v-for="(f, i) in store.activeFilters" :key="i">
-          {{ filterLabel(f) }}
-        </span>
-      </div>
-    </section>
 
     <!-- Chart Grid -->
     <section class="dashboard__grid">
       <ChartSlot v-for="view in store.views" :key="view.id" :view="view" />
     </section>
 
-    <section v-if="summaryRows.length" class="dashboard__summaries" aria-label="阶段纪要">
-      <div class="summary-header">
-        <h3>阶段纪要</h3>
-        <button class="summary-clear" type="button" @click="clearSummaries">
-          清空
-        </button>
-      </div>
-      <div class="summary-stream">
-        <article v-for="summary in summaryRows" :key="summary.id" class="summary-item">
-          <span class="summary-item__phase">{{ summaryPhaseText(summary) }}</span>
-          <span class="summary-item__time">{{ formatTranscriptTime(summary.ts) }}</span>
-          <span class="summary-item__text">{{ summaryLine(summary) }}</span>
-        </article>
-      </div>
-    </section>
-
-    <section v-if="transcriptRows.length" class="dashboard__transcript" aria-label="Session transcript">
+    <section
+      v-if="interactionMode === 'voice'"
+      class="dashboard__transcript"
+      aria-label="Session transcript"
+    >
       <div class="transcript-header">
         <h3>Session Transcript</h3>
         <div class="transcript-actions">
@@ -107,16 +117,136 @@
 
       <div ref="transcriptList" class="transcript-list" aria-live="polite">
         <div
-          v-for="row in transcriptRows"
-          :key="row.id"
-          class="transcript-row"
-          :class="`transcript-row--${row.role}`"
+          v-for="exchange in transcriptRows"
+          :key="exchange.id"
+          class="transcript-exchange"
+          :class="{ 'transcript-exchange--inline': canDisplayInline(exchange) }"
         >
-          <span class="transcript-speaker">{{ speakerLabel(row) }}</span>
-          <span class="transcript-text">{{ row.text }}</span>
-          <span class="transcript-time">{{ formatTranscriptTime(row.ts) }}</span>
+          <div
+            v-for="message in exchangeMessages(exchange)"
+            :key="message.id"
+            class="transcript-message"
+            :class="transcriptMessageClass(message)"
+            :title="message.text"
+            @click="toggleTranscriptMessage(message)"
+          >
+            <span class="transcript-time">{{ transcriptMessageTime(exchange, message) }}</span>
+            <span class="transcript-role">{{ transcriptRoleLabel(message) }}</span>
+            <span class="transcript-content">
+              <span
+                class="transcript-text"
+                :class="{ 'transcript-text--collapsed': !message.expanded }"
+              >
+                {{ transcriptDisplayText(message) }}
+              </span>
+              <span
+                v-if="message.toolActionsExpanded"
+                class="transcript-tool-list"
+              >
+                <span
+                  v-for="(action, index) in message.toolActions"
+                  :key="`${message.id}-action-${index}`"
+                  class="transcript-tool-item"
+                >
+                  {{ action.summary }}
+                </span>
+              </span>
+            </span>
+            <span class="transcript-meta">
+              <button
+                v-if="message.toolActions?.length"
+                class="transcript-action-count"
+                type="button"
+                :title="toolActionsTitle(message)"
+                @click.stop="toggleTranscriptActions(message)"
+              >
+                {{ toolActionsLabel(message) }}
+              </button>
+              <span
+                v-if="message.status === 'interrupted'"
+                class="message-status message-status--interrupted"
+                title="Assistant response interrupted by the user"
+              >
+                x
+              </span>
+            </span>
+          </div>
         </div>
       </div>
+    </section>
+
+    <section v-else class="dashboard__text-entry" aria-label="Text interaction">
+      <div ref="textHistoryList" class="text-history" aria-live="polite">
+        <div
+          v-for="exchange in transcriptRows"
+          :key="`text-${exchange.id}`"
+          class="text-history__exchange"
+        >
+          <div
+            v-for="message in exchangeMessages(exchange)"
+            :key="`text-${message.id}`"
+            class="text-history__message"
+            :class="`text-history__message--${message.role}`"
+            :title="message.text"
+          >
+            <span class="text-history__role">{{ transcriptRoleLabel(message) }}</span>
+            <span class="text-history__content">
+              {{ transcriptDisplayText(message) }}
+              <span
+                v-if="message.toolActionsExpanded"
+                class="text-history__tools"
+              >
+                <span
+                  v-for="(action, index) in message.toolActions"
+                  :key="`${message.id}-text-tool-${index}`"
+                  class="transcript-tool-item"
+                >
+                  {{ action.summary }}
+                </span>
+              </span>
+            </span>
+            <button
+              v-if="message.toolActions?.length"
+              class="transcript-action-count"
+              type="button"
+              :title="toolActionsTitle(message)"
+              @click.stop="toggleTranscriptActions(message)"
+            >
+              {{ toolActionsLabel(message) }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div v-if="pendingText" class="text-pending" aria-live="polite">
+        <span class="text-pending__role">YOU</span>
+        <span class="text-pending__content">{{ pendingText }}</span>
+      </div>
+      <form
+        class="text-composer"
+        @submit.prevent="submitText"
+      >
+        <textarea
+          ref="textInput"
+          v-model="inputText"
+          class="text-composer__input"
+          rows="2"
+          spellcheck="false"
+          placeholder="Type a message"
+          @keydown.enter.exact="handleTextEnter"
+        ></textarea>
+        <button
+          class="text-composer__send"
+          type="submit"
+          :disabled="textSendDisabled"
+          :title="textSendLabel"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 12h14" />
+            <path d="m13 6 6 6-6 6" />
+          </svg>
+          <span>{{ textSendLabel }}</span>
+        </button>
+      </form>
     </section>
   </main>
 </template>
@@ -130,6 +260,8 @@ import { useWebSocket } from "../composables/useWebSocket";
 
 const store = useDashboardStore();
 const QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime";
+const ANALYSIS_ID_STORAGE_KEY = "verbalvis.analysisId";
+const analysisId = getOrCreateAnalysisId();
 const realtimeInputSampleRate = getNumericOption(
   "inputRate",
   "VITE_REALTIME_INPUT_SAMPLE_RATE",
@@ -147,14 +279,28 @@ const audio = useAudio({
 const ws = useWebSocket({
   enqueue: audio.enqueue,
   flush: audio.flush,
+  beginAssistantResponse: audio.beginAssistantResponse,
   stop: audio.stop,
+  pauseAssistantAudio: audio.pauseAssistantAudio,
+  resumeAssistantAudio: audio.resumeAssistantAudio,
   stopAssistantAudio: audio.stopAssistantAudio,
 });
 
 let sessionPromise = null;
 const isStartingListening = ref(false);
+const interactionMode = ref(getInitialInteractionMode());
+const inputText = ref("");
+const pendingText = ref("");
 const autoScrollTranscripts = ref(true);
 const transcriptList = ref(null);
+const textHistoryList = ref(null);
+const textInput = ref(null);
+const transcriptPanelWidth = ref(0);
+let transcriptResizeObserver = null;
+
+audio.setPlaybackIdleHandler?.(() => {
+  store.isAssistantSpeaking = false;
+});
 
 const statusClass = computed(() => ({
   "status-dot--connected": store.connectionStatus === "connected",
@@ -163,6 +309,7 @@ const statusClass = computed(() => ({
 }));
 
 const recordButtonDisabled = computed(() => (
+  interactionMode.value !== "voice" ||
   store.connectionStatus !== "connected" ||
   (store.sessionMode === "turn_based" && store.isAssistantSpeaking)
 ));
@@ -189,27 +336,46 @@ const voiceStatusLabel = computed(() => {
   return "Start mic";
 });
 
+const textTurnLabel = computed(() => {
+  if (store.connectionStatus === "connecting") return "Connecting...";
+  if (store.connectionStatus !== "connected") return "Offline";
+  return store.isTextTurnProcessing ? "Assistant is analyzing..." : "Your turn";
+});
+
+const textSendDisabled = computed(() => (
+  interactionMode.value !== "text" ||
+  store.connectionStatus !== "connected" ||
+  (!inputText.value.trim() && !pendingText.value.trim())
+));
+
+const textSendLabel = computed(() => (
+  pendingText.value.trim() ? "Submit" :
+  store.isTextTurnProcessing ? "Interrupt" : "Send"
+));
+
 const transcriptRows = computed(() => {
-  return store.transcripts.map((item, index) => ({
-    ...item,
-    id: `${item.ts || index}-${index}`,
+  return store.transcriptExchanges.map((exchange, index) => ({
+    ...exchange,
+    id: exchange.id || `exchange-${index}`,
   }));
 });
 
-const summaryRows = computed(() => (
-  store.sessionSummaries.map((item, index) => ({
-    ...item,
-    id: item.id || `${item.ts || index}-${index}`,
-  }))
+const transcriptScrollKey = computed(() => (
+  store.transcripts
+    .map((message) => `${message.id}:${message.text.length}:${message.status}:${message.expanded}`)
+    .join("|")
 ));
 
 watch(
-  () => [store.transcripts.length, audio.isRecording.value, isStartingListening.value],
+  () => [transcriptScrollKey.value, audio.isRecording.value, isStartingListening.value],
   () => {
     if (!autoScrollTranscripts.value) return;
     nextTick(() => {
       if (transcriptList.value) {
         transcriptList.value.scrollTop = transcriptList.value.scrollHeight;
+      }
+      if (textHistoryList.value) {
+        textHistoryList.value.scrollTop = textHistoryList.value.scrollHeight;
       }
     });
   }
@@ -217,13 +383,47 @@ watch(
 
 // Connect backend WS on mount → get views immediately
 onMounted(() => {
-  ws.connect(buildRealtimeWsUrl());
+  ws.connect(buildWsUrl());
   window.addEventListener("keydown", handleKeyDown);
+  updateTranscriptPanelWidth();
+  if (typeof ResizeObserver !== "undefined" && transcriptList.value) {
+    transcriptResizeObserver = new ResizeObserver(updateTranscriptPanelWidth);
+    transcriptResizeObserver.observe(transcriptList.value);
+  }
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", handleKeyDown);
+  transcriptResizeObserver?.disconnect();
 });
+
+watch(
+  interactionMode,
+  async () => {
+    stopListeningMic();
+    audio.stopAssistantAudio?.({ blockNewAudio: true });
+    store.isAssistantSpeaking = false;
+    store.setTextTurnProcessing(false);
+    store.clearTranscripts();
+    pendingText.value = "";
+    sessionPromise = null;
+    ws.disconnect();
+    await nextTick();
+    ws.connect(buildWsUrl());
+    if (interactionMode.value === "text") {
+      focusTextInput();
+    }
+  }
+);
+
+watch(
+  () => store.isTextTurnProcessing,
+  (isProcessing, wasProcessing) => {
+    if (!isProcessing && wasProcessing && interactionMode.value === "text") {
+      nextTick(focusTextInput);
+    }
+  }
+);
 
 async function ensureSessionReady({ fresh = false } = {}) {
   if (fresh) {
@@ -271,7 +471,7 @@ async function startListeningMic() {
   }
 
   isStartingListening.value = true;
-  await ensureSessionReady({ fresh: true });
+  await ensureSessionReady();
   if (recordButtonDisabled.value) {
     isStartingListening.value = false;
     return;
@@ -280,23 +480,14 @@ async function startListeningMic() {
   try {
     await audio.startRecording({
       gateSilence: false,
-      onSpeechStart: () => {
-        if (audio.stopAssistantAudio) {
-          audio.stopAssistantAudio({ blockNewAudio: true });
-        } else {
-          audio.stop();
-        }
-        store.isAssistantSpeaking = false;
-        ws.notifyLocalSpeechStarted();
-      },
-      onSpeechEnd: () => {
-        audio.allowAssistantAudio?.();
-      },
       onChunk: (base64pcm) => {
         if (store.isAssistantSpeaking && store.sessionMode === "turn_based") {
           return;
         }
         ws.sendAudio(base64pcm);
+      },
+      onSpeechStart: () => {
+        audio.pauseAssistantAudio?.();
       },
     });
   } catch (error) {
@@ -321,6 +512,7 @@ function handleRecordClick() {
 }
 
 function handleKeyDown(event) {
+  if (interactionMode.value !== "voice") return;
   if (event.code !== "Space" || event.repeat || shouldIgnoreShortcut(event.target)) return;
   event.preventDefault();
   handleRecordClick();
@@ -346,10 +538,6 @@ function toolCallTitle(tool) {
   return `${formatToolName(tool?.name)}${args}`;
 }
 
-function speakerLabel(row) {
-  return row.role === "assistant" ? "VerbalVis" : "You";
-}
-
 function formatTranscriptTime(ts) {
   return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
@@ -359,59 +547,70 @@ function formatTranscriptTime(ts) {
   }).format(new Date(ts || Date.now()));
 }
 
-function summaryLine(summary) {
-  const phase = summary.phase_index ?? summary.phase ?? summary.phase_id;
-  const prefix = phase === undefined || phase === null || phase === "" ? "Phase" : `Phase ${phase}`;
-  const text = summary.title || summary.current_focus || summary.text || "阶段纪要";
-  return `${prefix}: ${text}`;
+function exchangeMessages(exchange) {
+  return [exchange.user, exchange.assistant].filter(Boolean);
 }
 
-function summaryPhaseText(summary) {
-  const phase = summary.phase_index ?? summary.phase ?? summary.phase_id;
-  return phase === undefined || phase === null || phase === "" ? "阶段" : `阶段 ${phase}`;
+function canDisplayInline(exchange) {
+  if (transcriptPanelWidth.value < 420 || !exchange.user || !exchange.assistant) return false;
+  return (
+    exchange.user.status === "completed" &&
+    exchange.assistant.status === "completed" &&
+    exchange.assistant.status !== "interrupted" &&
+    exchange.assistant.status !== "error" &&
+    visibleLength(exchange.user.text) <= 18 &&
+    visibleLength(exchange.assistant.text) <= 32
+  );
 }
 
-function summaryTitle(summary) {
-  return summary.title || summary.current_focus || summary.text || "阶段纪要";
+function visibleLength(value) {
+  return Array.from(String(value || "").trim()).length;
 }
 
-function summaryPhaseLabel(summary) {
-  const phase = summary.phase_index ?? summary.phase ?? summary.phase_id;
-  return phase === undefined || phase === null || phase === "" ? "阶段" : `阶段 ${phase}`;
+function transcriptMessageClass(message) {
+  return {
+    [`transcript-message--${message.role}`]: true,
+    "transcript-message--interrupted": message.status === "interrupted",
+    "transcript-message--streaming": message.status === "streaming",
+  };
 }
 
-function summaryBullets(summary) {
-  return normalizeSummaryList(
-    summary.bullets ?? summary.actions ?? summary.key_points ?? summary.notes
-  ).slice(0, 4);
+function transcriptMessageTime(exchange, message) {
+  if (message.role === "assistant" && exchange.user) return "";
+  return formatTranscriptTime(message.startedAt || message.ts);
 }
 
-function summaryCorrections(summary) {
-  return [
-    ...normalizeSummaryList(summary.possible_mishearings),
-    ...normalizeSummaryList(summary.corrections),
-    ...normalizeSummaryList(summary.corrected_phrases),
-    ...normalizeSummaryList(summary.mishearings),
-  ].slice(0, 4);
+function transcriptRoleLabel(message) {
+  return message.role === "assistant" ? "AI" : "YOU";
 }
 
-function normalizeSummaryList(values) {
-  if (Array.isArray(values)) return values.map(formatSummaryItem).filter(Boolean);
-  const item = formatSummaryItem(values);
-  return item ? [item] : [];
+function transcriptDisplayText(message) {
+  if (message.text) return message.text;
+  if (message.status === "listening") return "Listening...";
+  if (message.status === "streaming") return "...";
+  return "";
 }
 
-function formatSummaryItem(value) {
-  if (!value) return "";
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "object") {
-    const heard = value.heard || value.original || value.misheard || value.from;
-    const corrected = value.corrected || value.correction || value.to;
-    if (heard && corrected) return `${heard} -> ${corrected}`;
-    if (value.text) return String(value.text).trim();
-    if (value.note) return String(value.note).trim();
-  }
-  return String(value).trim();
+function toggleTranscriptMessage(message) {
+  if (!message?.text) return;
+  store.toggleTranscriptMessage(message.id);
+}
+
+function toggleTranscriptActions(message) {
+  store.toggleTranscriptActions(message.id);
+}
+
+function toolActionsLabel(message) {
+  const count = message.toolActions?.length || 0;
+  return `${count} action${count === 1 ? "" : "s"}`;
+}
+
+function toolActionsTitle(message) {
+  return (message.toolActions || []).map((action) => action.summary).join("\n");
+}
+
+function updateTranscriptPanelWidth() {
+  transcriptPanelWidth.value = transcriptList.value?.clientWidth || 0;
 }
 
 function filterLabel(filter) {
@@ -420,47 +619,47 @@ function filterLabel(filter) {
 
 function fieldLabel(field) {
   const labels = {
-    order_month: "月份",
-    order_week: "周",
-    order_date: "日期",
-    order_dow: "星期",
-    order_hour: "小时",
-    review_score: "评分",
-    review_bucket: "评分分组",
-    default_is_low_score: "默认低分",
-    is_high_score: "高评分",
-    customer_state: "州",
-    product_category: "品类",
-    delivery_days: "配送天数",
-    estimated_delivery_days: "预计配送天数",
-    delivery_delay_days: "延迟天数",
-    delivery_speed_bucket: "配送速度",
-    is_late: "是否延迟",
-    delivery_status_bucket: "配送状态",
-    delay_bucket: "延迟程度",
-    revenue: "营收",
-    order_item_revenue: "商品收入",
-    revenue_bucket: "营收分组",
-    item_count: "商品件数",
-    product_count: "商品种数",
-    category_count: "品类数",
-    seller_count: "卖家数",
-    freight_total: "运费",
-    avg_item_price: "平均商品价格",
-    freight_ratio: "运费占比",
-    freight_bucket: "运费分组",
-    order_size_bucket: "订单规模",
-    primary_payment_type: "支付方式",
-    payment_method_count: "支付方式数",
-    max_payment_installments: "最大分期数",
-    primary_payment_installments: "主要支付分期数",
-    order_count: "订单量",
-    low_score_ratio: "低分占比",
-    late_ratio: "延迟率",
-    on_time_ratio: "准时率",
-    high_score_ratio: "高评分占比",
-    avg_freight_ratio: "平均运费占比",
-    state_revenue: "州销售额",
+    order_month: "Month",
+    order_week: "Week",
+    order_date: "Date",
+    order_dow: "Day of week",
+    order_hour: "Hour",
+    review_score: "Review score",
+    review_bucket: "Review bucket",
+    default_is_low_score: "Default low score",
+    is_high_score: "High score",
+    customer_state: "State",
+    product_category: "Category",
+    delivery_days: "Delivery days",
+    estimated_delivery_days: "Estimated delivery days",
+    delivery_delay_days: "Delay days",
+    delivery_speed_bucket: "Delivery speed",
+    is_late: "Late",
+    delivery_status_bucket: "Delivery status",
+    delay_bucket: "Delay bucket",
+    revenue: "Revenue",
+    order_item_revenue: "Item revenue",
+    revenue_bucket: "Revenue bucket",
+    item_count: "Item count",
+    product_count: "Product count",
+    category_count: "Category count",
+    seller_count: "Seller count",
+    freight_total: "Freight",
+    avg_item_price: "Avg item price",
+    freight_ratio: "Freight ratio",
+    freight_bucket: "Freight bucket",
+    order_size_bucket: "Order size",
+    primary_payment_type: "Payment type",
+    payment_method_count: "Payment method count",
+    max_payment_installments: "Max installments",
+    primary_payment_installments: "Primary installments",
+    order_count: "Orders",
+    low_score_ratio: "Low score ratio",
+    late_ratio: "Late ratio",
+    on_time_ratio: "On-time ratio",
+    high_score_ratio: "High score ratio",
+    avg_freight_ratio: "Avg freight ratio",
+    state_revenue: "State revenue",
   };
   return labels[field] || field;
 }
@@ -486,25 +685,157 @@ function clearTranscript() {
   store.clearTranscripts();
 }
 
-function clearSummaries() {
-  store.clearSessionSummaries();
+function submitText() {
+  const text = inputText.value.trim();
+  if (textSendDisabled.value) return;
+
+  if (pendingText.value.trim() && !text) {
+    submitPendingText();
+    return;
+  }
+
+  if (store.isTextTurnProcessing) {
+    if (text) {
+      stagePendingText(text);
+      return;
+    }
+    return;
+  }
+
+  const textToSend = text || pendingText.value.trim();
+  if (!textToSend) return;
+  pendingText.value = "";
+  sendTextToAssistant(textToSend);
 }
 
-function buildRealtimeWsUrl() {
+function stagePendingText(text) {
+  pendingText.value = text;
+  inputText.value = "";
+  nextTick(focusTextInput);
+}
+
+function submitPendingText() {
+  const text = pendingText.value.trim();
+  if (!text) return;
+  pendingText.value = "";
+  sendTextToAssistant(text);
+}
+
+function sendTextToAssistant(text) {
+  if (store.isTextTurnProcessing) {
+    ws.interruptActiveResponse?.("user_superseded_response");
+  }
+  const turnId = ws.sendText(text);
+  if (!turnId) {
+    pendingText.value = text;
+    return;
+  }
+
+  store.completeUserTranscript(text, { utteranceId: turnId });
+  store.setTextTurnProcessing(true);
+  inputText.value = "";
+  pendingText.value = "";
+  nextTick(focusTextInput);
+}
+
+function handleTextEnter(event) {
+  event.preventDefault();
+  submitText();
+}
+
+function focusTextInput() {
+  textInput.value?.focus?.();
+}
+
+function setInteractionMode(mode) {
+  if (interactionMode.value === mode) return;
+  interactionMode.value = mode;
+  const url = new URL(window.location.href);
+  url.searchParams.set(
+    "condition",
+    mode === "text" ? "turn_based_text" : "full_duplex_voice"
+  );
+  window.history.replaceState(null, "", url);
+}
+
+function getInitialInteractionMode() {
   const params = new URLSearchParams(window.location.search);
-  const explicitUrl = params.get("ws") || import.meta.env.VITE_REALTIME_WS_URL;
-  if (explicitUrl) return explicitUrl;
+  const value = (params.get("condition") || params.get("mode") || "").toLowerCase();
+  return ["text", "tbc", "turn_based_text", "turn-based-text"].includes(value)
+    ? "text"
+    : "voice";
+}
+
+function getOrCreateAnalysisId() {
+  const params = new URLSearchParams(window.location.search);
+  const forceNew = ["1", "true", "yes", "on"].includes(
+    String(params.get("new_analysis") || params.get("newAnalysis") || "").toLowerCase()
+  );
+  const explicit = normalizeAnalysisId(params.get("analysis_id") || params.get("analysisId"));
+  if (explicit) {
+    return setCurrentAnalysisId(explicit);
+  }
+
+  const existing = forceNew ? "" : normalizeAnalysisId(window.__verbalvis_analysis_id);
+  if (existing) return existing;
+
+  const stored = forceNew ? "" : normalizeAnalysisId(readStoredAnalysisId());
+  if (stored) return setCurrentAnalysisId(stored);
+
+  const id = `analysis-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
+  return setCurrentAnalysisId(id);
+}
+
+function normalizeAnalysisId(value) {
+  return String(value || "").trim().replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 80);
+}
+
+function readStoredAnalysisId() {
+  try {
+    return window.localStorage?.getItem(ANALYSIS_ID_STORAGE_KEY) || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function setCurrentAnalysisId(id) {
+  window.__verbalvis_analysis_id = id;
+  try {
+    window.localStorage?.setItem(ANALYSIS_ID_STORAGE_KEY, id);
+  } catch (_) {
+    // Storage can be disabled in private modes; the in-memory id still works.
+  }
+  return id;
+}
+
+function buildWsUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const explicitUrl = interactionMode.value === "text"
+    ? (params.get("textWs") || import.meta.env.VITE_TEXT_WS_URL)
+    : (params.get("ws") || import.meta.env.VITE_REALTIME_WS_URL);
+  if (explicitUrl) return withAnalysisId(explicitUrl);
 
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const configuredPath = (
-    params.get("wsPath") ||
-    import.meta.env.VITE_REALTIME_WS_PATH ||
-    "/ws"
-  );
+  const configuredPath = interactionMode.value === "text"
+    ? (params.get("textWsPath") || import.meta.env.VITE_TEXT_WS_PATH || "/ws/text")
+    : (params.get("wsPath") || import.meta.env.VITE_REALTIME_WS_PATH || "/ws");
   const path = configuredPath.startsWith("/") ? configuredPath : `/${configuredPath}`;
   const url = new URL(`${protocol}://${window.location.host}${path}`);
-  url.searchParams.set("model", QWEN_REALTIME_MODEL);
+  url.searchParams.set("analysis_id", analysisId);
+  if (interactionMode.value === "voice") {
+    url.searchParams.set("model", QWEN_REALTIME_MODEL);
+  } else {
+    url.searchParams.set("condition", "turn_based_text");
+  }
 
+  return url.toString();
+}
+
+function withAnalysisId(rawUrl) {
+  const url = new URL(rawUrl, window.location.href);
+  if (url.protocol === "http:") url.protocol = "ws:";
+  if (url.protocol === "https:") url.protocol = "wss:";
+  url.searchParams.set("analysis_id", analysisId);
   return url.toString();
 }
 </script>
@@ -522,20 +853,22 @@ function buildRealtimeWsUrl() {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(280px, max-content) minmax(180px, 1fr);
   align-items: center;
-  gap: 18px;
-  min-height: 78px;
-  margin-bottom: 14px;
-  padding: 13px 24px;
+  gap: 12px;
+  min-height: 58px;
+  margin-bottom: 10px;
+  padding: 8px 16px;
   border: 1px solid #c9d3df;
   border-radius: 8px;
   background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.1);
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .brand-lockup {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -545,8 +878,8 @@ function buildRealtimeWsUrl() {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  width: 48px;
-  height: 48px;
+  width: 36px;
+  height: 36px;
   border-radius: 8px;
   background: linear-gradient(135deg, #2f7cff 0%, #145de4 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32), 0 8px 18px rgba(37, 99, 235, 0.22);
@@ -559,28 +892,28 @@ function buildRealtimeWsUrl() {
 }
 
 .brand-mark span:nth-child(1),
-.brand-mark span:nth-child(5) { height: 13px; opacity: 0.78; }
+.brand-mark span:nth-child(5) { height: 9px; opacity: 0.78; }
 .brand-mark span:nth-child(2),
-.brand-mark span:nth-child(4) { height: 22px; }
-.brand-mark span:nth-child(3) { height: 30px; }
+.brand-mark span:nth-child(4) { height: 16px; }
+.brand-mark span:nth-child(3) { height: 22px; }
 
 .brand-copy {
   min-width: 0;
 }
 
 .dashboard__title {
-  font-size: 23px;
-  line-height: 1.08;
+  font-size: 20px;
+  line-height: 1.05;
   font-weight: 700;
   margin: 0;
   letter-spacing: 0;
 }
 
 .brand-copy p {
-  margin: 4px 0 0;
+  margin: 2px 0 0;
   color: #6b7280;
-  font-size: 13px;
-  line-height: 1.2;
+  font-size: 12px;
+  line-height: 1.15;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -590,35 +923,37 @@ function buildRealtimeWsUrl() {
   display: flex;
   align-items: center;
   justify-self: center;
-  gap: 7px;
-  min-width: 0;
-  max-width: 100%;
+  gap: 6px;
+  min-width: max-content;
+  max-width: none;
   color: #1f2937;
-  font-size: 16px;
+  font-size: 14px;
   white-space: nowrap;
+  overflow: visible;
 }
 
 .status-dot {
-  width: 14px;
-  height: 14px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: #9ca3af;
-  box-shadow: 0 0 0 3px rgba(156, 163, 175, 0.14);
+  box-shadow: 0 0 0 2px rgba(156, 163, 175, 0.14);
 }
 .status-dot--connected {
   background: #25c63a;
-  box-shadow: 0 0 0 3px rgba(37, 198, 58, 0.14);
+  box-shadow: 0 0 0 2px rgba(37, 198, 58, 0.14);
 }
 .status-dot--connecting {
   background: #f5b51b;
-  box-shadow: 0 0 0 3px rgba(245, 181, 27, 0.16);
+  box-shadow: 0 0 0 2px rgba(245, 181, 27, 0.16);
 }
 .status-dot--disconnected { background: #9ca3af; }
 
 .model-status__model {
-  overflow: hidden;
-  max-width: 260px;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  overflow: visible;
+  max-width: none;
+  text-overflow: clip;
   font-weight: 650;
 }
 
@@ -631,9 +966,10 @@ function buildRealtimeWsUrl() {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  max-width: 350px;
-  overflow: hidden;
+  flex: 0 0 auto;
+  min-width: max-content;
+  max-width: none;
+  overflow: visible;
   padding-left: 8px;
 }
 
@@ -641,9 +977,10 @@ function buildRealtimeWsUrl() {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-width: 0;
-  max-width: 150px;
-  padding: 4px 8px;
+  flex: 0 0 auto;
+  min-width: max-content;
+  max-width: none;
+  padding: 3px 7px;
   border: 1px solid #d8dee8;
   border-radius: 999px;
   background: #f8fafc;
@@ -651,8 +988,9 @@ function buildRealtimeWsUrl() {
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 .tool-call-chip__icon {
@@ -662,25 +1000,69 @@ function buildRealtimeWsUrl() {
   fill: currentColor;
 }
 
-.voice-control {
+.interaction-control {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   min-width: 0;
+}
+
+.mode-switch {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 0 0 auto;
+  height: 34px;
+  overflow: hidden;
+  border: 1px solid #ccd6e3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.mode-switch__button {
+  min-width: 54px;
+  border: 0;
+  border-right: 1px solid #dce4ef;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.mode-switch__button:last-child {
+  border-right: 0;
+}
+
+.mode-switch__button:hover {
+  background: #f1f6ff;
+  color: #1d4ed8;
+}
+
+.mode-switch__button--active {
+  background: #1d4ed8;
+  color: #ffffff;
+}
+
+.mode-switch__button--active:hover {
+  background: #1d4ed8;
+  color: #ffffff;
 }
 
 .mic-pill {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  min-width: 150px;
-  height: 48px;
-  padding: 6px 15px 6px 7px;
+  gap: 8px;
+  min-width: 132px;
+  height: 40px;
+  padding: 4px 12px 4px 5px;
   border: 1px solid #b8d3ff;
   border-radius: 999px;
   background: #eaf3ff;
   color: #225fcf;
   cursor: pointer;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 750;
   line-height: 1;
   white-space: nowrap;
@@ -709,8 +1091,8 @@ function buildRealtimeWsUrl() {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   background: #2563eb;
   color: #ffffff;
@@ -718,8 +1100,8 @@ function buildRealtimeWsUrl() {
 }
 
 .mic-pill__icon svg {
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
@@ -729,50 +1111,56 @@ function buildRealtimeWsUrl() {
 
 .mic-pill--recording .mic-pill__icon {
   background: #1d4ed8;
-  box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.12), 0 6px 14px rgba(37, 99, 235, 0.28);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12), 0 6px 14px rgba(37, 99, 235, 0.28);
 }
 
-.filter-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: -2px 0 14px;
-  min-width: 0;
-}
-
-.filter-row__icon {
+.text-status {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  background: #f1f5f9;
-  color: #475569;
-}
-
-.filter-row__icon svg {
-  width: 14px;
-  height: 14px;
-  fill: currentColor;
-}
-
-.filter-badges {
-  display: flex;
-  gap: 6px;
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  overflow-x: auto;
+  min-width: 126px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
   white-space: nowrap;
 }
-.filter-badge {
+
+.text-status--busy {
+  border-color: #f3c66d;
+  background: #fff8e8;
+  color: #92400e;
+}
+
+.status-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-width: max-content;
+  max-width: none;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.status-filters__label {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.status-filter {
   flex: 0 0 auto;
   border: 1px solid #dbe4f0;
   background: #ffffff;
   color: #334155;
-  padding: 4px 9px;
+  padding: 3px 8px;
   border-radius: 999px;
   font-size: 11px;
   font-family: monospace;
@@ -785,22 +1173,24 @@ function buildRealtimeWsUrl() {
 
   .dashboard__topbar {
     grid-template-columns: 1fr;
-    gap: 12px;
-    padding: 12px;
+    gap: 8px;
+    padding: 8px 10px;
   }
 
   .model-status {
     justify-self: start;
-    flex-wrap: wrap;
-    white-space: normal;
+    flex-wrap: nowrap;
+    white-space: nowrap;
   }
 
-  .voice-control {
+  .interaction-control {
     justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
-  .tool-call-strip {
-    max-width: 100%;
+  .tool-call-strip,
+  .status-filters {
+    max-width: none;
     padding-left: 0;
   }
 }
@@ -811,27 +1201,27 @@ function buildRealtimeWsUrl() {
   }
 
   .brand-mark {
-    width: 44px;
-    height: 44px;
+    width: 34px;
+    height: 34px;
   }
 
   .dashboard__title {
-    font-size: 21px;
+    font-size: 20px;
   }
 
   .model-status {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .mic-pill {
     min-width: 0;
-    height: 44px;
-    font-size: 14px;
+    height: 38px;
+    font-size: 13px;
   }
 
   .mic-pill__icon {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
   }
 }
 
@@ -839,48 +1229,6 @@ function buildRealtimeWsUrl() {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
   gap: 16px;
-}
-
-.dashboard__summaries {
-  margin-top: 16px;
-  overflow: hidden;
-  border: 1px solid #d7e1ee;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.summary-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 40px;
-  padding: 9px 14px;
-  border-bottom: 1px solid #e1e8f2;
-  background: #f8fbff;
-}
-
-.summary-header h3 {
-  margin: 0;
-  color: #0f172a;
-  font-size: 14px;
-  font-weight: 750;
-  line-height: 1.2;
-}
-
-.summary-clear {
-  border: 0;
-  background: transparent;
-  color: #1d4ed8;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 650;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.summary-clear:hover {
-  color: #0f2f66;
 }
 
 .dashboard__transcript {
@@ -982,49 +1330,171 @@ function buildRealtimeWsUrl() {
 
 .transcript-list {
   max-height: 230px;
+  min-height: 26px;
   overflow-y: auto;
   background: #ffffff;
 }
 
-.transcript-row {
-  display: grid;
-  grid-template-columns: 34px 78px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  min-height: 48px;
-  padding: 10px 16px;
+.transcript-exchange {
+  padding: 3px 6px;
   border-bottom: 1px solid #edf2f7;
-  color: #1f2937;
-  font-size: 14px;
 }
 
-.transcript-row:last-child {
+.transcript-exchange:last-child {
   border-bottom: 0;
 }
 
-.transcript-row--assistant {
-  background: #fbfdff;
-}
-
-.transcript-speaker {
-  color: #1d4ed8;
-  font-weight: 750;
-}
-
-.transcript-row--assistant .transcript-speaker {
-  color: #0f2f66;
-}
-
-.transcript-text {
-  min-width: 0;
+.transcript-message {
+  display: grid;
+  grid-template-columns: 42px 28px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 6px;
+  min-height: 18px;
+  padding: 1px 4px;
   color: #1f2937;
+  font-size: 12px;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.transcript-message + .transcript-message {
+  margin-top: 2px;
+}
+
+.transcript-message--interrupted {
+  border-left: 2px solid #a8b0bc;
+  color: rgba(31, 41, 55, 0.68);
+}
+
+.transcript-exchange--inline {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.transcript-exchange--inline .transcript-message {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.transcript-exchange--inline .transcript-message--user {
+  flex: 0 1 42%;
+}
+
+.transcript-exchange--inline .transcript-message + .transcript-message {
+  margin-top: 0;
+}
+
+.transcript-time,
+.transcript-role,
+.transcript-content,
+.transcript-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .transcript-time {
   color: #64748b;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.transcript-role {
+  color: #1d4ed8;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.6;
+}
+
+.transcript-message--assistant .transcript-role {
+  color: #0f2f66;
+}
+
+.transcript-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.transcript-text {
+  min-width: 0;
+  color: inherit;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.transcript-text--collapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.transcript-message--user .transcript-text--collapsed {
+  line-clamp: 1;
+  -webkit-line-clamp: 1;
+}
+
+.transcript-message--assistant .transcript-text--collapsed {
+  line-clamp: 2;
+  -webkit-line-clamp: 2;
+}
+
+.transcript-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-height: 16px;
+}
+
+.message-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #c7ced8;
+  border-radius: 50%;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.transcript-action-count {
+  border: 1px solid #d8dee8;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.transcript-tool-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.transcript-tool-item {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid #dbe4f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 2px 5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 700px) {
@@ -1034,20 +1504,15 @@ function buildRealtimeWsUrl() {
     gap: 8px;
   }
 
-  .transcript-row {
-    grid-template-columns: 32px minmax(0, 1fr);
-    gap: 8px 10px;
-  }
-
-  .transcript-speaker {
-    align-self: center;
+  .transcript-message {
+    grid-template-columns: 38px 26px minmax(0, 1fr) auto;
   }
 
 }
 
 .dashboard {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   width: min(100vw, 3840px);
   max-width: 3840px;
   height: min(100dvh, 2160px);
@@ -1062,89 +1527,27 @@ function buildRealtimeWsUrl() {
   padding-bottom: 4px;
 }
 
-.dashboard__summaries {
+.dashboard__transcript {
   margin-top: 8px;
-  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  height: 300px;
+  max-height: 300px;
+  min-height: 300px;
   box-shadow: none;
 }
 
-.summary-header {
-  min-height: 28px;
-  padding: 5px 10px;
-}
-
-.summary-header h3,
-.summary-clear {
-  font-size: 12px;
-}
-
-.summary-header h3 {
-  font-size: 0;
-}
-
-.summary-header h3::after {
-  content: "阶段纪要";
-  font-size: 12px;
-}
-
-.summary-clear {
-  font-size: 0;
-}
-
-.summary-clear::after {
-  content: "清空";
-  font-size: 12px;
-}
-
-.summary-stream {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  min-height: 34px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 4px 8px 6px;
-  white-space: nowrap;
-}
-
-.summary-item {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 8px;
-  max-width: min(720px, 78vw);
-  height: 24px;
-  padding: 0 9px;
-  border: 1px solid #dbe4f0;
-  border-radius: 999px;
-  background: #f8fafc;
-  color: #1f2937;
-  font-size: 12px;
-  line-height: 1;
-}
-
-.summary-item__phase {
-  flex: 0 0 auto;
-  color: #1d4ed8;
-  font-weight: 750;
-}
-
-.summary-item__time {
-  flex: 0 0 auto;
-  color: #64748b;
-  font-variant-numeric: tabular-nums;
-}
-
-.summary-item__text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dashboard__transcript {
+.dashboard__text-entry {
   margin-top: 8px;
-  max-height: 144px;
+  display: flex;
+  flex-direction: column;
+  height: 300px;
+  max-height: 300px;
+  min-height: 300px;
+  overflow: hidden;
+  border: 1px solid #d7e1ee;
+  border-radius: 8px;
+  background: #ffffff;
   box-shadow: none;
 }
 
@@ -1164,47 +1567,184 @@ function buildRealtimeWsUrl() {
 }
 
 .transcript-list {
-  max-height: 108px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow: auto;
 }
 
-.transcript-row {
-  display: grid;
-  grid-template-columns: 68px minmax(0, 1fr) 76px;
-  gap: 8px;
-  min-height: 26px;
-  padding: 4px 10px;
+.text-history {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e1e8f2;
+  background: #ffffff;
   font-size: 12px;
+  scrollbar-color: #cbd5e1 #f8fbff;
+}
+
+.text-history__exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+  border-bottom: 1px solid #edf2f7;
+}
+
+.text-history__exchange:last-child {
+  border-bottom: 0;
+}
+
+.text-history__message {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px;
+  min-height: 18px;
+  color: #1f2937;
+  line-height: 1.35;
+}
+
+.text-history__message--user .text-history__role {
+  color: #1d4ed8;
+}
+
+.text-history__message--assistant .text-history__role {
+  color: #0f2f66;
+}
+
+.text-history__role {
+  color: #0f2f66;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.6;
+}
+
+.text-history__content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.text-history__tools {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.text-pending {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
+  flex: 0 0 auto;
+  max-height: 58px;
+  overflow: auto;
+  padding: 5px 10px;
+  border-bottom: 1px solid #e1e8f2;
+  background: #eef6ff;
+  color: #1f2937;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.text-pending__role {
+  color: #1d4ed8;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.text-pending__content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.text-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  height: 35px;
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  background: #f8fbff;
+}
+
+.text-composer__input {
+  width: 100%;
+  min-height: 27px;
+  max-height: 27px;
+  resize: none;
+  border: 1px solid #cbd7e6;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  outline: none;
+  padding: 4px 8px;
+}
+
+.text-composer__input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.text-composer__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 82px;
+  height: 27px;
+  border: 1px solid #1d4ed8;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
   line-height: 1;
 }
 
-.transcript-speaker,
-.transcript-text,
-.transcript-time {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.text-composer__send:hover:not(:disabled) {
+  background: #1d4ed8;
 }
 
-.transcript-text {
-  line-height: 1.2;
-  overflow-wrap: normal;
+.text-composer__send:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.text-composer__send svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.3;
+}
+
+.transcript-exchange {
+  padding: 3px 6px;
+}
+
+.transcript-message {
+  grid-template-columns: 42px 28px minmax(0, 1fr) auto;
+  padding: 1px 4px;
+  font-size: 12px;
 }
 
 .transcript-time {
-  justify-self: end;
-  color: #64748b;
-  font-variant-numeric: tabular-nums;
+  justify-self: start;
 }
 
 @media (max-width: 700px) {
   .dashboard {
-    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
-  }
-
-  .summary-item {
-    max-width: 86vw;
+    grid-template-rows: auto minmax(0, 1fr) auto;
   }
 
   .transcript-header {
@@ -1212,8 +1752,17 @@ function buildRealtimeWsUrl() {
     flex-direction: row;
   }
 
-  .transcript-row {
-    grid-template-columns: 52px minmax(0, 1fr) 66px;
+  .transcript-exchange--inline {
+    display: block;
   }
+
+  .transcript-exchange--inline .transcript-message + .transcript-message {
+    margin-top: 2px;
+  }
+
+  .transcript-message {
+    grid-template-columns: 38px 26px minmax(0, 1fr) auto;
+  }
+
 }
 </style>

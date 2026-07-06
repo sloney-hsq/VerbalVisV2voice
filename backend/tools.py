@@ -72,16 +72,20 @@ RATIO_STAT_ALIASES = {
     HIGH_SCORE_RATIO: "high_score_orders",
 }
 MAX_VIEW_LIMIT = 100
+MAX_INSPECT_ROWS = 60
+MAX_SCATTER_SAMPLE_ROWS = 16
 LOW_SCORE_THRESHOLD_DEFAULT = 2
+BASE_VIEW_COUNT = 4
+OVERALL_SERIES_LABEL = "Overall"
 
 # ------------------------------------------------------------------
 # Runtime state (per-session; single-user prototype)
 # ------------------------------------------------------------------
 
 active_filters: list[dict[str, Any]] = []
-workspace_counter: int = 0          # workspace1, workspace2, …
-views: list[dict[str, Any]] = []    # all views (base + workspace)
-highlighted_view: str | None = None
+view_counter: int = BASE_VIEW_COUNT
+views: list[dict[str, Any]] = []
+highlighted_views: list[str] = []
 low_score_threshold: int = LOW_SCORE_THRESHOLD_DEFAULT
 
 LOG_DIR = Path(__file__).parent / "logs"
@@ -94,8 +98,8 @@ LOG_DIR.mkdir(exist_ok=True)
 
 BASE_VIEWS_DEFS = [
     {
-        "id": "view-trend",
-        "label": "view 1-trend",
+        "id": "view-1",
+        "label": "view 1",
         "chart_type": "line",
         "title": "Monthly Orders Trend",
         "x_field": "order_month",
@@ -104,11 +108,13 @@ BASE_VIEWS_DEFS = [
         "agg_expr": "COUNT(*)",
         "agg_alias": "order_count",
         "order_by": "order_month",
+        "sort_by": "order_month",
+        "sort_order": "asc",
         "source_table": "fact_order",
     },
     {
-        "id": "view-review",
-        "label": "view 2-review",
+        "id": "view-2",
+        "label": "view 2",
         "chart_type": "bar",
         "title": "Review Score Distribution",
         "x_field": "review_score",
@@ -117,11 +123,13 @@ BASE_VIEWS_DEFS = [
         "agg_expr": "COUNT(*)",
         "agg_alias": "order_count",
         "order_by": "review_score",
+        "sort_by": "review_score",
+        "sort_order": "asc",
         "source_table": "fact_order",
     },
     {
-        "id": "view-map",
-        "label": "view 3-map",
+        "id": "view-3",
+        "label": "view 3",
         "chart_type": "bar",
         "title": "Orders by State",
         "x_field": "customer_state",
@@ -130,14 +138,16 @@ BASE_VIEWS_DEFS = [
         "agg_expr": "COUNT(*)",
         "agg_alias": "order_count",
         "order_by": "order_count DESC",
+        "sort_by": "order_count",
+        "sort_order": "desc",
         "source_table": "fact_order",
     },
     {
         # NOTE: queries fact_item (item grain). Revenue is SUM of per-item
         # (price + freight) — not the previous "whole-order payment misallocated
         # to alphabetically-first category" bug.
-        "id": "view-category",
-        "label": "view 4-category",
+        "id": "view-4",
+        "label": "view 4",
         "chart_type": "bar",
         "title": "Category Revenue (Top 15)",
         "x_field": "product_category",
@@ -146,6 +156,8 @@ BASE_VIEWS_DEFS = [
         "agg_expr": "ROUND(SUM(item_revenue), 2)",
         "agg_alias": "revenue",
         "order_by": "revenue DESC",
+        "sort_by": "revenue",
+        "sort_order": "desc",
         "limit": 15,
         "source_table": "fact_item",
     },
@@ -154,10 +166,10 @@ BASE_VIEWS_DEFS = [
 
 def init_views() -> None:
     """Reset state and populate base views with data."""
-    global active_filters, workspace_counter, views, highlighted_view, low_score_threshold
+    global active_filters, view_counter, views, highlighted_views, low_score_threshold
     active_filters = []
-    workspace_counter = 0
-    highlighted_view = None
+    view_counter = BASE_VIEW_COUNT
+    highlighted_views = []
     low_score_threshold = LOW_SCORE_THRESHOLD_DEFAULT
     views = []
     for defn in BASE_VIEWS_DEFS:
@@ -210,13 +222,23 @@ TOOL_SCHEMAS = [
     ),
     _tool(
         "highlight_visual",
-        "Highlight a dashboard view to direct user attention. Other views are dimmed.",
+        "Highlight one or more dashboard views to direct user attention, or clear all current highlights.",
         {
             "type": "object",
             "properties": {
-                "view_id": {
+                "action": {
                     "type": "string",
-                    "description": "ID of the view to highlight.",
+                    "enum": ["highlight", "clear"],
+                    "description": "Use 'highlight' to emphasize one or more views; use 'clear' to cancel/remove all current highlights.",
+                },
+                "view_id": {
+                    "type": ["string", "null"],
+                    "description": "Single view id to highlight, e.g. view-1 or view-5. Use view_ids for simultaneous multi-view highlighting.",
+                },
+                "view_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Multiple view ids to highlight together, e.g. ['view-3', 'view-5', 'view-10']. Use when the user asks to highlight several views simultaneously.",
                 },
                 "highlight_element": {
                     "type": ["string", "null"],
@@ -227,7 +249,7 @@ TOOL_SCHEMAS = [
                     "description": "Whether to dim other views. Default true.",
                 },
             },
-            "required": ["view_id"],
+            "required": ["action"],
         },
     ),
     _tool(
@@ -330,6 +352,15 @@ TOOL_SCHEMAS = [
                     "type": ["string", "null"],
                     "enum": ["asc", "desc", None],
                 },
+                "include_overall": {
+                    "type": "boolean",
+                    "description": (
+                        "For multi-series line charts, add one extra Overall series "
+                        "aggregated across all color values. Use this for requests "
+                        "like Top 5 states plus overall; keep series_limit as the "
+                        "Top N colored series count, not N+1."
+                    ),
+                },
                 "low_score_threshold": {
                     "type": ["integer", "null"],
                     "description": (
@@ -392,6 +423,29 @@ TOOL_SCHEMAS = [
         },
     ),
     _tool(
+        "inspect_visual",
+        (
+            "Read the authoritative current content of one existing dashboard view. "
+            "Call this before answering questions about a chart's values, ranking, "
+            "trend, distribution, comparison, pattern, or relationship. "
+            "Do not infer chart contents from its title or metadata alone. "
+            "This tool is read-only and does not change the dashboard."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "view_id": {
+                    "type": "string",
+                    "description": (
+                        "ID of the dashboard view to inspect, such as view-1 or view-5. "
+                        "Use the highlighted view when the user says 'this chart'."
+                    ),
+                },
+            },
+            "required": ["view_id"],
+        },
+    ),
+    _tool(
         "delete_visual",
         "Delete a chart/view from the dashboard grid by its view_id. "
         "Use this to remove a view the user no longer wants. The remaining views are unaffected.",
@@ -400,7 +454,7 @@ TOOL_SCHEMAS = [
             "properties": {
                 "view_id": {
                     "type": "string",
-                    "description": "ID of the view to delete (e.g. 'workspace1', 'view-trend').",
+                    "description": "ID of the view to delete, e.g. view-5.",
                 },
             },
             "required": ["view_id"],
@@ -426,6 +480,8 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             return _exec_append_visual(arguments)
         elif name == "set_low_score_threshold":
             return _exec_set_low_score_threshold(arguments)
+        elif name == "inspect_visual":
+            return _exec_inspect_visual(arguments)
         elif name == "delete_visual":
             return _exec_delete_visual(arguments)
         else:
@@ -445,16 +501,52 @@ def normalize_tool_arguments(
     normalized = dict(arguments or {})
     if user_transcript:
         normalized["_user_transcript"] = user_transcript
+    if name == "inspect_visual":
+        view_ref = str(normalized.get("view_id") or "").strip().lower()
+        transcript_ref = user_transcript.lower()
+        current_view_refs = {
+            "this chart",
+            "this visual",
+            "this view",
+            "current chart",
+            "current view",
+            "这张图",
+            "这个图",
+            "这幅图",
+            "当前图",
+        }
+        points_to_current = (
+            view_ref in current_view_refs
+            or (
+                not view_ref
+                and any(
+                    phrase in transcript_ref
+                    for phrase in current_view_refs
+                )
+            )
+        )
+        if points_to_current and _primary_highlighted_view():
+            normalized["view_id"] = _primary_highlighted_view()
+    if name in {"highlight_visual", "delete_visual", "inspect_visual"} and normalized.get("view_id"):
+        normalized["view_id"] = _resolve_view_id(normalized.get("view_id"))
+    if name == "highlight_visual" and normalized.get("view_ids"):
+        view_ids_arg = normalized.get("view_ids")
+        if not isinstance(view_ids_arg, list):
+            view_ids_arg = [view_ids_arg]
+        normalized["view_ids"] = [_resolve_view_id(view_id) for view_id in view_ids_arg]
     if name in {"filter_data", "append_visual"} and "value" in normalized:
         normalized["value"] = _coerce_jsonish(normalized["value"])
     append_text = ""
     wants_state_category_table = False
+    wants_overall_series = False
     if name == "append_visual":
         append_text = " ".join(str(v or "") for v in (normalized.get("title"), user_transcript))
         wants_state_category_table = _wants_state_category_table(append_text)
+        wants_overall_series = _wants_overall_series(append_text)
     if (
         name == "append_visual"
         and not wants_state_category_table
+        and not wants_overall_series
         and normalized.get("limit") in (None, "")
         and normalized.get("series_limit") in (None, "")
     ):
@@ -466,6 +558,25 @@ def normalize_tool_arguments(
             normalized["limit"] = inferred_limit
     if name == "append_visual":
         text = append_text
+        if wants_overall_series:
+            normalized["include_overall"] = True
+            if normalized.get("chart_type") in (None, ""):
+                normalized["chart_type"] = "line"
+            if normalized.get("color") in (None, "") and _mentions_state_series(text):
+                normalized["color"] = "customer_state"
+            inferred_series_limit = _infer_top_series_limit_from_text(text)
+            if inferred_series_limit is not None:
+                normalized["series_limit"] = inferred_series_limit
+                if normalized.get("limit") == inferred_series_limit:
+                    normalized["limit"] = None
+            elif (
+                normalized.get("series_limit") in (None, "")
+                and normalized.get("limit") not in (None, "")
+                and normalized.get("chart_type") == "line"
+                and normalized.get("color") not in (None, "")
+            ):
+                normalized["series_limit"] = normalized["limit"]
+                normalized["limit"] = None
         if wants_state_category_table:
             normalized["chart_type"] = "table"
             normalized["x"] = "customer_state"
@@ -633,27 +744,140 @@ def _exec_set_low_score_threshold(args: dict) -> dict:
 
 # --- highlight_visual ---
 
-def _exec_highlight_visual(args: dict) -> dict:
-    global highlighted_view
+def _view_label(view_id: Any) -> str:
+    text = str(view_id or "").strip()
+    match = re.fullmatch(r"view-(\d+)", text, flags=re.IGNORECASE)
+    if match:
+        return f"view {int(match.group(1))}"
+    return text
 
-    view_id = args.get("view_id")
-    view_ids = [v["id"] for v in views]
-    if view_id not in view_ids:
+
+def _resolve_view_id(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    raw = value.strip()
+    if not raw:
+        return raw
+
+    for view in views:
+        if raw == view.get("id") or raw.lower() == str(view.get("label", "")).lower():
+            return view["id"]
+
+    compact = re.sub(r"[\s_]+", "-", raw.lower())
+    compact = re.sub(r"^view-?0*(\d+)$", r"view-\1", compact)
+    if re.fullmatch(r"view-\d+", compact):
+        return compact
+
+    match = re.search(r"(?:view|视图|图)\s*[-#：:]?\s*([0-9]+)", raw, flags=re.IGNORECASE)
+    if match:
+        return f"view-{int(match.group(1))}"
+
+    match = re.search(r"(?:视图|图)\s*[-#：:]?\s*([一二两三四五六七八九十百零〇]+)", raw)
+    if match:
+        parsed = _parse_chinese_int(match.group(1))
+        if parsed is not None:
+            return f"view-{parsed}"
+
+    return raw
+
+
+def _available_view_ids() -> list[str]:
+    return [v["id"] for v in views]
+
+
+def _available_view_labels() -> list[str]:
+    return [v.get("label") or _view_label(v["id"]) for v in views]
+
+
+def _primary_highlighted_view() -> str | None:
+    return highlighted_views[0] if highlighted_views else None
+
+
+def _resolve_highlight_view_ids(args: dict) -> list[str]:
+    raw_view_ids: list[Any] = []
+    view_ids_arg = args.get("view_ids")
+    if isinstance(view_ids_arg, list):
+        raw_view_ids.extend(view_ids_arg)
+    elif view_ids_arg not in (None, ""):
+        raw_view_ids.append(view_ids_arg)
+
+    if args.get("view_id") not in (None, ""):
+        raw_view_ids.insert(0, args.get("view_id"))
+
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for raw_view_id in raw_view_ids:
+        view_id = _resolve_view_id(raw_view_id)
+        if not view_id or view_id in seen:
+            continue
+        resolved.append(view_id)
+        seen.add(view_id)
+    return resolved
+
+
+def _exec_highlight_visual(args: dict) -> dict:
+    global highlighted_views
+
+    action = args.get("action") or ("highlight" if args.get("view_id") or args.get("view_ids") else "clear")
+    if action == "clear":
+        previous_view_ids = highlighted_views.copy()
+        highlighted_views = []
+        return {
+            "tool": "highlight_visual",
+            "success": True,
+            "payload": {
+                "action": "clear",
+                "previous_view_id": previous_view_ids[0] if previous_view_ids else None,
+                "previous_view_ids": previous_view_ids,
+                "view_id": None,
+                "view_ids": [],
+                "highlighted_view": None,
+                "highlighted_views": [],
+            },
+        }
+
+    if action != "highlight":
         return {
             "tool": "highlight_visual",
             "success": False,
-            "error": f"Unknown view_id: '{view_id}'. Available: {', '.join(view_ids)}",
+            "error": "action must be 'highlight' or 'clear'.",
+        }
+
+    view_ids = _resolve_highlight_view_ids(args)
+    available_view_ids = set(_available_view_ids())
+    unknown_view_ids = [view_id for view_id in view_ids if view_id not in available_view_ids]
+    if unknown_view_ids:
+        return {
+            "tool": "highlight_visual",
+            "success": False,
+            "error": (
+                f"Unknown view_id: '{unknown_view_ids[0]}'. "
+                f"Available: {', '.join(_available_view_ids())}"
+            ),
+        }
+    if not view_ids:
+        return {
+            "tool": "highlight_visual",
+            "success": False,
+            "error": "Provide view_id or view_ids when action='highlight'.",
         }
 
     dim_others = args.get("dim_others", True)
     highlight_element = args.get("highlight_element")
-    highlighted_view = view_id
+    highlighted_views = view_ids
+    primary_view_id = _primary_highlighted_view()
 
     return {
         "tool": "highlight_visual",
         "success": True,
         "payload": {
-            "view_id": view_id,
+            "action": "highlight",
+            "view_id": primary_view_id,
+            "view_ids": view_ids,
+            "highlighted_view": primary_view_id,
+            "highlighted_views": view_ids,
+            "label": _view_label(primary_view_id),
+            "labels": [_view_label(view_id) for view_id in view_ids],
             "highlight_element": highlight_element,
             "dim_others": dim_others,
         },
@@ -663,7 +887,7 @@ def _exec_highlight_visual(args: dict) -> dict:
 # --- append_visual ---
 
 def _exec_append_visual(args: dict) -> dict:
-    global workspace_counter
+    global view_counter
 
     x = args.get("x")
     y = args.get("y")
@@ -700,6 +924,7 @@ def _exec_append_visual(args: dict) -> dict:
     low_score_threshold_for_view = _coerce_low_score_threshold(low_score_threshold_arg)
     inherit_global_filters = _as_bool(args.get("inherit_global_filters", True))
     freeze = _as_bool(args.get("freeze", args.get("frozen", False)))
+    include_overall = _as_bool(args.get("include_overall", False))
     local_filters, filter_error = _normalize_local_filters(
         args.get("filters") if args.get("filters") is not None else args.get("view_filters"),
         tool_name="append_visual",
@@ -813,8 +1038,9 @@ def _exec_append_visual(args: dict) -> dict:
             "error": f"limit must be an integer between 1 and {MAX_VIEW_LIMIT}.",
         }
 
-    workspace_counter += 1
-    view_id = f"workspace{workspace_counter}"
+    view_counter += 1
+    view_id = f"view-{view_counter}"
+    view_label = _view_label(view_id)
 
     # Route to fact_item whenever product_category is involved (x / y / color);
     # otherwise stay on fact_order. Keeps revenue at item grain when grouping
@@ -843,6 +1069,7 @@ def _exec_append_visual(args: dict) -> dict:
 
     view_def: dict[str, Any] = {
         "id": view_id,
+        "label": view_label,
         "chart_type": chart_type,
         "title": title,
         "x_field": x,
@@ -858,6 +1085,7 @@ def _exec_append_visual(args: dict) -> dict:
         "series_limit": series_limit,
         "series_sort_by": series_sort_by,
         "series_sort_order": series_sort_order,
+        "include_overall": include_overall,
         "low_score_threshold": low_score_threshold_for_view,
         "filters": local_filters,
         "inherit_global_filters": inherit_global_filters,
@@ -885,7 +1113,7 @@ def _exec_append_visual(args: dict) -> dict:
             filters=effective_filters,
             extra_group_fields=extra_group_fields,
         )
-        if limit and not _uses_series_limit(view_def):
+        if limit and not _uses_series_limit(view_def) and not _uses_overall_series(view_def):
             data = data[:limit]
         _attach_rank(data)
         view_def["data"] = data
@@ -898,6 +1126,7 @@ def _exec_append_visual(args: dict) -> dict:
         "success": True,
         "payload": {
             "view_id": view_id,
+            "label": view_label,
             "chart_type": chart_type,
             "x": x,
             "y": y,
@@ -909,6 +1138,7 @@ def _exec_append_visual(args: dict) -> dict:
             "series_limit": series_limit,
             "series_sort_by": series_sort_by,
             "series_sort_order": series_sort_order,
+            "include_overall": include_overall,
             "low_score_threshold": low_score_threshold_for_view,
             "filters": local_filters,
             "inherit_global_filters": inherit_global_filters,
@@ -927,32 +1157,157 @@ def _exec_append_visual(args: dict) -> dict:
 # --- delete_visual ---
 
 def _exec_delete_visual(args: dict) -> dict:
-    global views, highlighted_view
+    global views, highlighted_views
 
-    view_id = args.get("view_id")
+    view_id = _resolve_view_id(args.get("view_id"))
     view_ids = [v["id"] for v in views]
     if view_id not in view_ids:
         return {
             "tool": "delete_visual",
             "success": False,
-            "error": f"Unknown view_id: '{view_id}'. Available: {', '.join(view_ids)}",
+            "error": f"Unknown view_id: '{view_id}'. Available: {', '.join(_available_view_ids())}",
         }
 
     deleted = next(v for v in views if v["id"] == view_id)
     views = [v for v in views if v["id"] != view_id]
 
-    # Clear highlight if the deleted view was the highlighted one.
-    if highlighted_view == view_id:
-        highlighted_view = None
+    # Clear the deleted view from the current highlight set.
+    if view_id in highlighted_views:
+        highlighted_views = [highlighted_id for highlighted_id in highlighted_views if highlighted_id != view_id]
 
     return {
         "tool": "delete_visual",
         "success": True,
         "payload": {
             "view_id": view_id,
+            "label": _view_label(view_id),
             "title": deleted.get("title"),
-            "remaining_view_ids": [v["id"] for v in views],
+            "remaining_view_ids": _available_view_ids(),
         },
+    }
+
+
+# --- inspect_visual ---
+
+def _evenly_sample_rows(
+    rows: list[dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    if len(rows) <= limit:
+        return rows
+
+    if limit <= 1:
+        return rows[:1]
+
+    indexes = {
+        round(index * (len(rows) - 1) / (limit - 1))
+        for index in range(limit)
+    }
+
+    return [rows[index] for index in sorted(indexes)]
+
+
+def _build_scatter_summary(
+    view: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    x_field = view.get("x_field")
+    y_field = view.get("y_field")
+    pairs: list[tuple[float, float]] = []
+
+    for row in rows:
+        try:
+            x_value = float(row.get(x_field))
+            y_value = float(row.get(y_field))
+        except (TypeError, ValueError):
+            continue
+        pairs.append((x_value, y_value))
+
+    if not pairs:
+        return {
+            "sample_size": 0,
+            "correlation": None,
+        }
+
+    x_values = [item[0] for item in pairs]
+    y_values = [item[1] for item in pairs]
+    mean_x = sum(x_values) / len(x_values)
+    mean_y = sum(y_values) / len(y_values)
+
+    numerator = sum(
+        (x_value - mean_x) * (y_value - mean_y)
+        for x_value, y_value in pairs
+    )
+    denominator_x = sum((value - mean_x) ** 2 for value in x_values)
+    denominator_y = sum((value - mean_y) ** 2 for value in y_values)
+    denominator = (denominator_x * denominator_y) ** 0.5
+    correlation = numerator / denominator if denominator else None
+
+    return {
+        "sample_size": len(pairs),
+        "x_min": round(min(x_values), 4),
+        "x_max": round(max(x_values), 4),
+        "x_mean": round(mean_x, 4),
+        "y_min": round(min(y_values), 4),
+        "y_max": round(max(y_values), 4),
+        "y_mean": round(mean_y, 4),
+        "correlation": round(correlation, 4) if correlation is not None else None,
+    }
+
+
+def _exec_inspect_visual(args: dict[str, Any]) -> dict[str, Any]:
+    view_id = _resolve_view_id(args.get("view_id"))
+    view = next((item for item in views if item.get("id") == view_id), None)
+
+    if view is None:
+        return {
+            "tool": "inspect_visual",
+            "success": False,
+            "error": (
+                f"Unknown view_id: '{view_id}'. "
+                f"Available: {', '.join(_available_view_ids())}"
+            ),
+        }
+
+    data = list(view.get("data") or [])
+    chart_type = view.get("chart_type")
+    effective_filters = _effective_filters_for_view(view)
+    payload: dict[str, Any] = {
+        "view_id": view["id"],
+        "label": view.get("label") or _view_label(view["id"]),
+        "title": view.get("title"),
+        "chart_type": chart_type,
+        "encoding": {
+            "x": view.get("x_field"),
+            "y": view.get("y_field"),
+            "color": view.get("color"),
+        },
+        "filter_scope": _filter_scope(view),
+        "global_filters": active_filters.copy(),
+        "local_filters": list(view.get("filters") or []),
+        "effective_filters": effective_filters,
+        "snapshot_filters": list(view.get("snapshot_filters") or []),
+        "low_score_threshold": view.get("low_score_threshold", low_score_threshold),
+        "statistics": dict(view.get("statistics") or {}),
+        "total_data_points": len(data),
+    }
+
+    if chart_type == "scatter":
+        sample = _evenly_sample_rows(data, MAX_SCATTER_SAMPLE_ROWS)
+        payload["scatter_summary"] = _build_scatter_summary(view, data)
+        payload["data_sample"] = sample
+        payload["returned_data_points"] = len(sample)
+        payload["truncated"] = len(sample) < len(data)
+    else:
+        returned_data = data[:MAX_INSPECT_ROWS]
+        payload["data"] = returned_data
+        payload["returned_data_points"] = len(returned_data)
+        payload["truncated"] = len(returned_data) < len(data)
+
+    return {
+        "tool": "inspect_visual",
+        "success": True,
+        "payload": payload,
     }
 
 
@@ -1116,7 +1471,8 @@ def _aggregate_visual_data(
     extra_group_fields: list[str] | None,
 ) -> list[dict[str, Any]]:
     if _uses_series_limit(view):
-        return _series_limited_aggregate_data(view, filters, extra_group_fields)
+        data = _series_limited_aggregate_data(view, filters, extra_group_fields)
+        return _with_overall_series(view, filters, data)
 
     con = get_connection()
     table = view.get("source_table", "fact_order")
@@ -1167,7 +1523,8 @@ def _aggregate_visual_data(
     """
     result = con.execute(sql)
     col_names = [d[0] for d in result.description]
-    return [dict(zip(col_names, row)) for row in result.fetchall()]
+    data = [dict(zip(col_names, row)) for row in result.fetchall()]
+    return _with_overall_series(view, filters, data)
 
 
 def _uses_series_limit(view: dict[str, Any]) -> bool:
@@ -1176,6 +1533,71 @@ def _uses_series_limit(view: dict[str, Any]) -> bool:
         and bool(view.get("color"))
         and bool(view.get("series_limit"))
     )
+
+
+def _uses_overall_series(view: dict[str, Any]) -> bool:
+    return (
+        view.get("chart_type") == "line"
+        and bool(view.get("color"))
+        and _as_bool(view.get("include_overall", False))
+    )
+
+
+def _with_overall_series(
+    view: dict[str, Any],
+    filters: list[dict[str, Any]],
+    data: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not _uses_overall_series(view):
+        return data
+    overall_rows = _overall_series_rows(
+        view,
+        filters,
+        include_sort_value=bool(data and "series_sort_value" in data[0]),
+    )
+    return [*data, *overall_rows]
+
+
+def _overall_series_rows(
+    view: dict[str, Any],
+    filters: list[dict[str, Any]],
+    *,
+    include_sort_value: bool = False,
+) -> list[dict[str, Any]]:
+    con = get_connection()
+    table = view.get("source_table", "fact_order")
+    group_field = view["group_field"]
+    color = view["color"]
+    y = view["y_field"]
+    agg_alias = view["agg_alias"]
+    agg_expr = view["agg_expr"]
+    threshold = view.get("low_score_threshold", low_score_threshold)
+    where = build_where(filters, table=table)
+
+    select_parts = [group_field, f"'{OVERALL_SERIES_LABEL}' AS {color}"]
+    if y in COUNTED_RATIO_MEASURES:
+        numerator_expr, total_expr = _counted_ratio_count_exprs(y, table, threshold)
+        numerator_alias = _ratio_count_alias(y)
+        select_parts.extend([
+            f"{numerator_expr} AS {numerator_alias}",
+            f"{total_expr} AS order_count",
+            f"{agg_expr} AS {agg_alias}",
+        ])
+    else:
+        select_parts.append(f"{agg_expr} AS {agg_alias}")
+    if include_sort_value:
+        select_parts.append("NULL AS series_sort_value")
+
+    sql = f"""
+        SELECT {", ".join(select_parts)}
+        FROM {table}
+        WHERE {where}
+        GROUP BY {group_field}
+        ORDER BY {group_field} ASC
+    """
+    result = con.execute(sql)
+    col_names = [d[0] for d in result.description]
+    return [dict(zip(col_names, row)) for row in result.fetchall()]
 
 
 def _series_limited_aggregate_data(
@@ -1310,7 +1732,7 @@ def _refresh_all_views() -> None:
                 filters=effective_filters,
                 extra_group_fields=extra_group_fields,
             )
-            if limit and not _uses_series_limit(view):
+            if limit and not _uses_series_limit(view) and not _uses_overall_series(view):
                 data = data[:limit]
             _attach_rank(data)
             view["data"] = data
@@ -1350,8 +1772,19 @@ def _compute_view_stats(view: dict) -> dict:
         stats[stat_alias] = matching_orders
         stats[f"overall_{y}"] = round(matching_orders / total_orders, 4) if total_orders else 0
 
+    if view.get("chart_type") == "line" and view.get("color"):
+        color = view["color"]
+        series_values = {
+            d.get(color)
+            for d in data
+            if d.get(color) not in (None, "")
+        }
+        stats["series_count"] = len(series_values)
+        if OVERALL_SERIES_LABEL in series_values:
+            stats["includes_overall"] = True
+
     try:
-        if vid == "view-trend" or view["chart_type"] == "line":
+        if vid == "view-1" or view["chart_type"] == "line":
             values = [(d.get(view["x_field"]), d.get(y, 0)) for d in data if d.get(y) is not None]
             if values:
                 peak = max(values, key=lambda t: t[1])
@@ -1363,7 +1796,7 @@ def _compute_view_stats(view: dict) -> dict:
                     stats["peak_month"] = str(peak[0])
                     stats["avg_monthly"] = round(avg_val, 1)
 
-        elif vid == "view-review":
+        elif vid == "view-2":
             total = sum(d.get(y, 0) for d in data)
             if total > 0:
                 low = sum(d.get(y, 0) for d in data if d.get("review_score") is not None and d["review_score"] <= 2)
@@ -1371,7 +1804,7 @@ def _compute_view_stats(view: dict) -> dict:
                 dominant = max(data, key=lambda d: d.get(y, 0))
                 stats["dominant_score"] = dominant.get("review_score")
 
-        elif vid == "view-map":
+        elif vid == "view-3":
             if data:
                 top = data[0]
                 bottom = min(data, key=lambda d: d.get(y, 0))
@@ -1383,7 +1816,7 @@ def _compute_view_stats(view: dict) -> dict:
                 stats["bottom_state_count"] = bottom.get(y)
                 stats["state_count"] = len(data)
 
-        elif vid == "view-category":
+        elif vid == "view-4":
             if data:
                 top = data[0]
                 stats["top_category"] = top.get("product_category")
@@ -1426,37 +1859,33 @@ def rebuild_context() -> dict[str, Any]:
     for v in views:
         view_context = {
             "id": v["id"],
-            "chart_type": v["chart_type"],
+            "label": v.get("label") or _view_label(v["id"]),
+            "type": v["chart_type"],
             "title": v["title"],
-            "x_field": v["x_field"],
-            "y_field": v["y_field"],
+            "x": v["x_field"],
+            "y": v["y_field"],
             "color": v.get("color"),
-            "limit": v.get("limit"),
-            "sort_by": v.get("sort_by"),
-            "sort_order": v.get("sort_order"),
-            "series_limit": v.get("series_limit"),
-            "series_sort_by": v.get("series_sort_by"),
-            "series_sort_order": v.get("series_sort_order"),
-            "table_columns": v.get("table_columns"),
-            "low_score_threshold": v.get("low_score_threshold", low_score_threshold),
-            "filters": v.get("filters", []),
-            "inherit_global_filters": v.get("inherit_global_filters", True),
-            "freeze": v.get("freeze", False),
-            **_view_scope_payload(v),
-            "statistics": v["statistics"],
         }
-        if v.get("chart_type") == "table":
-            view_context["data"] = v.get("data", [])
+        if v.get("filters"):
+            view_context["local_filters"] = v.get("filters", [])
+        if not v.get("inherit_global_filters", True):
+            view_context["inherit_global_filters"] = False
+        if v.get("freeze"):
+            view_context["filter_scope"] = "frozen_snapshot"
+        if v.get("limit"):
+            view_context["limit"] = v.get("limit")
+        if v.get("series_limit"):
+            view_context["series_limit"] = v.get("series_limit")
         ctx_views.append(view_context)
 
     return {
-        "active_filters": active_filters.copy(),
+        "filters": active_filters.copy(),
         "low_score_threshold": low_score_threshold,
         "low_score_definition": f"review_score <= {low_score_threshold}",
-        "highlighted_view": highlighted_view,
+        "highlighted": highlighted_views.copy(),
         "views": ctx_views,
-        "available_view_ids": [v["id"] for v in views],
-        "filtered_rows": total_rows(active_filters),
+        "available_view_ids": _available_view_ids(),
+        "available_view_labels": _available_view_labels(),
     }
 
 
@@ -1465,51 +1894,43 @@ def context_text() -> str:
     ctx = rebuild_context()
 
     filters = (
-        "; ".join(f"{f['field']} {f['operator']} {f['value']}" for f in ctx["active_filters"])
-        if ctx["active_filters"]
+        "; ".join(f"{f['field']} {f['operator']} {f['value']}" for f in ctx["filters"])
+        if ctx["filters"]
         else "none"
     )
     lines = [
         "Dashboard state:",
         f"filters={filters}",
         f"low_score_definition=review_score <= {ctx['low_score_threshold']}",
-        f"rows={ctx['filtered_rows']}",
-        f"highlighted={ctx['highlighted_view'] or 'none'}",
+        f"highlighted={', '.join(ctx['highlighted']) if ctx['highlighted'] else 'none'}",
         "views:",
     ]
     for v in ctx["views"]:
-        stat_str = ", ".join(f"{k}={v_}" for k, v_ in v["statistics"].items() if k != "row_count")
         meta = []
         if v.get("limit"):
             meta.append(f"limit={v['limit']}")
-        if v.get("sort_by"):
-            meta.append(f"sort={v.get('sort_by')} {v.get('sort_order') or ''}".strip())
         if v.get("series_limit"):
-            series_sort = v.get("series_sort_by") or v.get("y_field")
-            meta.append(
-                f"series_limit={v['series_limit']} by {series_sort} {v.get('series_sort_order') or 'desc'}"
-            )
-        if v.get("low_score_threshold") and v.get("y_field") == LOW_SCORE_RATIO:
-            meta.append(f"low_score<= {v['low_score_threshold']}")
-        if v.get("filters"):
-            meta.append("local_filters=" + _format_filters(v["filters"]))
-        if not v.get("inherit_global_filters", True):
+            meta.append(f"series_limit={v['series_limit']}")
+        if v.get("local_filters"):
+            meta.append("local_filters=" + _format_filters(v["local_filters"]))
+        if v.get("inherit_global_filters") is False:
             meta.append("independent")
-        if v.get("freeze"):
+        if v.get("filter_scope") == "frozen_snapshot":
             meta.append("frozen")
-        meta.append(f"scope={_filter_scope(v)}")
-        if v.get("chart_type") == "table":
-            if v.get("table_columns"):
-                meta.append(
-                    "table_columns="
-                    + json.dumps(v["table_columns"], ensure_ascii=False, default=str)
-                )
-            if v.get("data"):
-                meta.append("data=" + json.dumps(v["data"], ensure_ascii=False, default=str))
         meta_str = f" | {'; '.join(meta)}" if meta else ""
-        lines.append(f"- {v['id']} | {v['title']} | {v['chart_type']}{meta_str} | {stat_str or 'no_stats'}")
+        label = v.get("label") or _view_label(v["id"])
+        lines.append(
+            f"- {v['id']} ({label}) | {v['title']} | "
+            f"{v['type']} | x={v.get('x')} | y={v.get('y')} | "
+            f"color={v.get('color') or 'none'}{meta_str}"
+        )
 
     return "\n".join(lines)
+
+
+def realtime_state() -> dict[str, Any]:
+    """Structured dashboard metadata sent to Qwen after tool calls."""
+    return rebuild_context()
 
 
 def get_all_view_data() -> list[dict]:
@@ -1529,7 +1950,7 @@ def get_views_for_frontend() -> list[dict]:
     for v in views:
         result.append({
             "id": v["id"],
-            "label": v.get("label"),
+            "label": v.get("label") or _view_label(v["id"]),
             "chart_type": v["chart_type"],
             "title": v["title"],
             "x_field": v["x_field"],
@@ -1541,6 +1962,7 @@ def get_views_for_frontend() -> list[dict]:
             "series_limit": v.get("series_limit"),
             "series_sort_by": v.get("series_sort_by"),
             "series_sort_order": v.get("series_sort_order"),
+            "include_overall": v.get("include_overall", False),
             "table_columns": v.get("table_columns"),
             "low_score_threshold": v.get("low_score_threshold", low_score_threshold),
             "filters": v.get("filters", []),
@@ -1548,7 +1970,7 @@ def get_views_for_frontend() -> list[dict]:
             "freeze": v.get("freeze", False),
             **_view_scope_payload(v),
             "data": v["data"],
-            "highlighted": v["id"] == highlighted_view,
+            "highlighted": v["id"] in highlighted_views,
         })
     return result
 
@@ -1610,6 +2032,149 @@ def _coerce_low_score_threshold(value: Any) -> int | None:
     if threshold < 1 or threshold > 5:
         return None
     return threshold
+
+
+def _wants_overall_series(*texts: Any) -> bool:
+    text = " ".join(str(t or "") for t in texts)
+    if not text:
+        return False
+    lowered = text.lower()
+    if any(
+        phrase in lowered
+        for phrase in (
+            "overall",
+            "overall trend",
+            "overall series",
+            "overall line",
+            "total trend",
+            "total series",
+            "all-orders trend",
+            "all orders trend",
+        )
+    ):
+        return True
+    if any(
+        phrase in text
+        for phrase in (
+            "\u603b\u4f53",
+            "\u6574\u4f53",
+            "\u603b\u8ba1",
+            "\u603b\u7684",
+        )
+    ):
+        return True
+    return "\u5168\u90e8" in text and any(
+        phrase in text
+        for phrase in (
+            "\u8d8b\u52bf",
+            "\u7ebf",
+            "\u8ba2\u5355",
+        )
+    )
+
+
+def _mentions_state_series(*texts: Any) -> bool:
+    text = " ".join(str(t or "") for t in texts)
+    lowered = text.lower()
+    return any(
+        phrase in lowered
+        for phrase in ("customer_state", "state", "states")
+    ) or any(
+        phrase in text
+        for phrase in (
+            "\u5dde",
+            "\u5730\u533a",
+            "\u7701",
+        )
+    )
+
+
+def _infer_top_series_limit_from_text(*texts: Any) -> int | None:
+    text = " ".join(str(t or "") for t in texts)
+    if not text:
+        return None
+    number = r"(\d{1,3}|[A-Za-z]+|[\u96f6\u3007\u4e00\u4e8c\u4e24\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341\u767e]{1,5})"
+    patterns = [
+        rf"\btop\s*{number}\b",
+        rf"(?:\u6392\u540d\s*)?\u524d\s*{number}\s*(?:\u4e2a|\u540d|\u6761)?",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = _parse_human_int(match.group(1))
+        if value is not None and 1 <= value <= MAX_VIEW_LIMIT:
+            return value
+
+    if _wants_overall_series(text):
+        line_patterns = [
+            rf"{number}\s*(?:\u6761)?\s*(?:\u8f74\u7ebf|\u6298\u7ebf|\u7ebf|lines?)",
+            rf"(?:total|overall)\s*of\s*{number}\s*(?:lines?|series)",
+        ]
+        for pattern in line_patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            value = _parse_human_int(match.group(1))
+            if value is not None and 2 <= value <= MAX_VIEW_LIMIT:
+                return value - 1
+    return None
+
+
+def _parse_human_int(raw: Any) -> int | None:
+    text = str(raw or "").strip().lower()
+    if not text:
+        return None
+    if text.isdigit():
+        return int(text)
+    english = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+    }
+    if text in english:
+        return english[text]
+
+    digits = {
+        "\u96f6": 0,
+        "\u3007": 0,
+        "\u4e00": 1,
+        "\u4e8c": 2,
+        "\u4e24": 2,
+        "\u4e09": 3,
+        "\u56db": 4,
+        "\u4e94": 5,
+        "\u516d": 6,
+        "\u4e03": 7,
+        "\u516b": 8,
+        "\u4e5d": 9,
+    }
+    if text == "\u5341":
+        return 10
+    if "\u767e" in text:
+        prefix, suffix = text.split("\u767e", 1)
+        hundreds = digits.get(prefix, 1 if not prefix else None)
+        rest = _parse_human_int(suffix) if suffix else 0
+        if hundreds is None or rest is None:
+            return None
+        return hundreds * 100 + rest
+    if "\u5341" in text:
+        prefix, suffix = text.split("\u5341", 1)
+        tens = digits.get(prefix, 1 if not prefix else None)
+        ones = digits.get(suffix, 0 if not suffix else None)
+        if tens is None or ones is None:
+            return None
+        return tens * 10 + ones
+    if text in digits:
+        return digits[text]
+    return None
 
 
 def _infer_limit_from_text(*texts: Any) -> int | None:
@@ -1910,8 +2475,10 @@ def _normalize_local_filters(value: Any, *, tool_name: str) -> tuple[list[dict[s
 
 
 def _effective_filters_for_view(view: dict[str, Any]) -> list[dict[str, Any]]:
+    if view.get("freeze") and "snapshot_filters" in view:
+        return list(view.get("snapshot_filters") or [])
     base = active_filters if view.get("inherit_global_filters", True) else []
-    return [*base, *view.get("filters", [])]
+    return [*base, *list(view.get("filters") or [])]
 
 
 def _filter_scope(view: dict[str, Any]) -> str:
@@ -2098,6 +2665,7 @@ def log_tool_call(
     tool_name: str,
     params: dict,
     mode: str = "barge_in",
+    analysis_id: str | None = None,
     response_id: str | None = None,
     call_id: str | None = None,
     result_success: bool | None = None,
@@ -2108,6 +2676,7 @@ def log_tool_call(
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "session_id": session_id,
+        "analysis_id": analysis_id,
         "tool": tool_name,
         "params": params,
         "response_id": response_id,
