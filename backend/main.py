@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from db import initialize_db
-from realtime_qwen import QWEN_TURN_DETECTION, QwenRealtimeSession
+from backend.realtime import QWEN_TURN_DETECTION, QwenRealtimeSession
 from text_conversation import QWEN_TEXT_MODEL, QwenTextConversationSession
 
 QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime"
