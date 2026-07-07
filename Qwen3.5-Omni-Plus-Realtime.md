@@ -1,4 +1,27 @@
-**第一份资料，要求详细查看，[help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77](https://help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77)。**
+**第一份资料，[help.aliyun.com/zh/model-studio/client-events](https://help.aliyun.com/zh/model-studio/client-events)要求详细查看，[help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77](https://help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77)。**
+
+[help.aliyun.com/zh/model-studio/omni-realtime-python-sdk](https://help.aliyun.com/zh/model-studio/omni-realtime-python-sdk)
+
+[help.aliyun.com/zh/model-studio/omni-realtime-interaction-process](https://help.aliyun.com/zh/model-studio/omni-realtime-interaction-process)
+
+
+# 客户端事件
+
+**更新时间：2026-06-16 23:00:39**
+
+**复制 MD 格式**[产品详情](https://www.aliyun.com/product/bailian)
+
+[我的收藏](https://help.aliyun.com/my_favorites.html)
+
+Qwen-Omni-Realtime API的客户端事件参考。
+
+> 另请参见： [实时（Qwen-Omni-Realtime）](https://help.aliyun.com/zh/model-studio/realtime) 。
+
+## **session.update**
+
+建立 WebSocket 连接后，发送此事件更新会话的默认配置。服务端收到 `session.update` 事件后校验参数，若参数不合法则返回错误，若参数合法则应用更改并返回完整配置。
+
+[help.aliyun.com/zh/model-studio/server-events](https://help.aliyun.com/zh/model-studio/server-events)
 
 **Qwen-Omni-Realtime
 更新时间：2026-06-12 15:05:06

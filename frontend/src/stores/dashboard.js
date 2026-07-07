@@ -210,6 +210,15 @@ export const useDashboardStore = defineStore("dashboard", () => {
     return message;
   }
 
+  function setAssistantTranscript(responseId, text = "") {
+    const targetResponseId = responseId || currentAssistantResponseId.value || makeTranscriptId("response");
+    currentAssistantResponseId.value = targetResponseId;
+    const message = getOrCreateAssistantMessage(targetResponseId);
+    message.text = String(text || "");
+    message.status = "streaming";
+    return message;
+  }
+
   function completeAssistantResponse(responseId) {
     const message = findAssistantMessageByResponseId(responseId);
     if (message) {
@@ -476,6 +485,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     completeUserTranscript,
     beginAssistantResponse,
     appendAssistantTranscript,
+    setAssistantTranscript,
     completeAssistantResponse,
     suppressAssistantResponse,
     interruptAssistantResponse,

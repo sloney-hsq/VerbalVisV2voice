@@ -11,7 +11,6 @@ export function useWebSocket(audioPlayer) {
   const store = useDashboardStore();
   const socket = ref(null);
 
-  let suppressCurrentAssistantTranscript = false;
   let activeResponseId = null;
   let manualClose = false;
   let lastUrl = null;
@@ -78,7 +77,6 @@ export function useWebSocket(audioPlayer) {
       case "assistant_response_started":
         if (!msg.response_id) break;
         activeResponseId = msg.response_id;
-        suppressCurrentAssistantTranscript = false;
         if (store.sessionMode === "turn_based_text") {
           store.setTextTurnProcessing(true);
         }
@@ -112,17 +110,17 @@ export function useWebSocket(audioPlayer) {
           if (!msg.response_id || msg.response_id !== activeResponseId) {
             break;
           }
-          if (!suppressCurrentAssistantTranscript) {
-            store.appendAssistantTranscript(msg.response_id, msg.delta || "");
-          }
+          store.appendAssistantTranscript(msg.response_id, msg.delta || "");
         } else if (msg.role === "user") {
           _handleUserTranscript(msg);
         }
         break;
 
-      case "suppress_assistant_buffer":
-        suppressCurrentAssistantTranscript = true;
-        store.suppressAssistantResponse(msg.response_id || activeResponseId);
+      case "assistant_transcript_done":
+        if (!msg.response_id || msg.response_id !== activeResponseId) {
+          break;
+        }
+        store.setAssistantTranscript(msg.response_id, msg.text || "");
         break;
 
       case "response_done":
@@ -131,22 +129,12 @@ export function useWebSocket(audioPlayer) {
         }
         store.completeAssistantResponse(msg.response_id);
         store.setTextTurnProcessing(false);
-        suppressCurrentAssistantTranscript = false;
         if (audioPlayer) {
           audioPlayer.flush({
             response_id: msg.response_id,
           });
         }
         activeResponseId = null;
-        break;
-
-      case "assistant_response_done":
-        if (msg.response_id && msg.response_id === activeResponseId) {
-          store.completeAssistantResponse(msg.response_id);
-          activeResponseId = null;
-        }
-        store.setTextTurnProcessing(false);
-        suppressCurrentAssistantTranscript = false;
         break;
 
       case "speech_started":
@@ -158,30 +146,8 @@ export function useWebSocket(audioPlayer) {
         }
         break;
 
-      case "assistant_playback_pause":
-        store.isAssistantSpeaking = false;
-        audioPlayer?.pauseAssistantAudio?.({
-          responseId: msg.response_id || activeResponseId,
-          reason: msg.reason || "assistant_playback_pause",
-        });
-        break;
-
-      case "assistant_playback_resume":
-        store.isAssistantSpeaking = true;
-        audioPlayer?.resumeAssistantAudio?.({
-          responseId: msg.response_id || activeResponseId,
-          reason: msg.reason || "assistant_playback_resume",
-        });
-        break;
-
       case "assistant_playback_stop":
         _stopAssistantPlayback(msg.response_id, msg.reason || "assistant_playback_stop");
-        break;
-
-      case "assistant_playback_invalidated":
-        if (msg.response_id) {
-          _stopAssistantPlayback(msg.response_id, msg.reason || "assistant_playback_invalidated");
-        }
         break;
 
       case "assistant_response_interrupted":
@@ -250,7 +216,11 @@ export function useWebSocket(audioPlayer) {
 
   function sendAudio(base64pcm) {
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      socket.value.send(JSON.stringify({ type: "audio", data: base64pcm }));
+      socket.value.send(JSON.stringify({
+        type: "audio",
+        data: base64pcm,
+        analysis_id: analysisId,
+      }));
     } else {
       console.warn("sendAudio: socket not open, readyState =", socket.value?.readyState);
     }
@@ -258,7 +228,6 @@ export function useWebSocket(audioPlayer) {
 
   function _stopAssistantPlayback(responseId, reason) {
     store.isAssistantSpeaking = false;
-    suppressCurrentAssistantTranscript = false;
     store.interruptAssistantResponse(responseId || activeResponseId);
     if (!responseId || activeResponseId === responseId) {
       activeResponseId = null;
@@ -313,13 +282,6 @@ export function useWebSocket(audioPlayer) {
     }
 
     store.completeUserTranscript(text, { utteranceId });
-  }
-
-  function truncateAssistantAudio(assistantAudio) {
-    if (!assistantAudio?.item_id) return;
-    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      socket.value.send(JSON.stringify({ type: "truncate_assistant_audio", assistant_audio: assistantAudio }));
-    }
   }
 
   function disconnect() {
@@ -379,7 +341,6 @@ export function useWebSocket(audioPlayer) {
     socket,
     connect,
     startSession,
-    truncateAssistantAudio,
     sendAudio,
     sendText,
     interruptActiveResponse,

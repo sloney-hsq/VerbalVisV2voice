@@ -281,8 +281,6 @@ const ws = useWebSocket({
   flush: audio.flush,
   beginAssistantResponse: audio.beginAssistantResponse,
   stop: audio.stop,
-  pauseAssistantAudio: audio.pauseAssistantAudio,
-  resumeAssistantAudio: audio.resumeAssistantAudio,
   stopAssistantAudio: audio.stopAssistantAudio,
 });
 
@@ -311,6 +309,7 @@ const statusClass = computed(() => ({
 const recordButtonDisabled = computed(() => (
   interactionMode.value !== "voice" ||
   store.connectionStatus !== "connected" ||
+  !store.sessionReady ||
   (store.sessionMode === "turn_based" && store.isAssistantSpeaking)
 ));
 
@@ -434,7 +433,7 @@ async function ensureSessionReady({ fresh = false } = {}) {
   if (store.sessionReady) return;
   if (sessionPromise) return sessionPromise;
 
-  sessionPromise = new Promise((resolve) => {
+  sessionPromise = new Promise((resolve, reject) => {
     ws.startSession();
     const check = setInterval(() => {
       if (store.sessionReady) {
@@ -446,7 +445,7 @@ async function ensureSessionReady({ fresh = false } = {}) {
     setTimeout(() => {
       clearInterval(check);
       sessionPromise = null;
-      resolve();
+      reject(new Error("Qwen realtime session was not ready."));
     }, 15000);
   });
 
@@ -471,23 +470,15 @@ async function startListeningMic() {
   }
 
   isStartingListening.value = true;
-  await ensureSessionReady();
-  if (recordButtonDisabled.value) {
-    isStartingListening.value = false;
-    return;
-  }
-
   try {
+    await ensureSessionReady();
+    if (recordButtonDisabled.value) {
+      return;
+    }
     await audio.startRecording({
       gateSilence: false,
       onChunk: (base64pcm) => {
-        if (store.isAssistantSpeaking && store.sessionMode === "turn_based") {
-          return;
-        }
         ws.sendAudio(base64pcm);
-      },
-      onSpeechStart: () => {
-        audio.pauseAssistantAudio?.();
       },
     });
   } catch (error) {
