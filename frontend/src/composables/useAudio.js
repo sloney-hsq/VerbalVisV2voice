@@ -3,6 +3,8 @@ import { ref, onBeforeUnmount } from "vue";
 const DEFAULT_INPUT_SAMPLE_RATE = 16000; // Qwen realtime input rate
 const DEFAULT_OUTPUT_SAMPLE_RATE = 24000;
 const CHUNK_MS = 40;
+const PLAYBACK_START_BUFFER_MS = 100;
+const PLAYBACK_SAFETY_BUFFER_MS = 70;
 const PREFIX_CHUNKS = 3;
 const TRAILING_SILENCE_CHUNKS = 9;
 const SPEECH_RMS_THRESHOLD = 0.01;
@@ -224,7 +226,13 @@ export function useAudio(options = {}) {
     buffer.getChannelData(0).set(float32);
 
     const now = ctx.currentTime;
-    if (nextPlayTime < now) nextPlayTime = now;
+    const startBufferSeconds = PLAYBACK_START_BUFFER_MS / 1000;
+    const safetyBufferSeconds = PLAYBACK_SAFETY_BUFFER_MS / 1000;
+    if (nextPlayTime <= 0 || nextPlayTime < now) {
+      nextPlayTime = now + startBufferSeconds;
+    } else if (nextPlayTime - now < safetyBufferSeconds) {
+      nextPlayTime = now + safetyBufferSeconds;
+    }
     const scheduledStart = nextPlayTime;
 
     const source = ctx.createBufferSource();
