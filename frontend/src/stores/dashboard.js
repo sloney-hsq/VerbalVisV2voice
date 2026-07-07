@@ -3,21 +3,13 @@ import { computed, ref } from "vue";
 
 export const useDashboardStore = defineStore("dashboard", () => {
   // ---- state ----
-  const activeWorkspaceId = ref("voice");
-  const workspaces = ref({
-    voice: createWorkspace(),
-    text: createWorkspace(),
-  });
-  const views = workspaceField("views");
-  const activeFilters = workspaceField("activeFilters");
-  const highlightedViewIds = workspaceField("highlightedViewIds");
+  const views = ref([]);
+  const activeFilters = ref([]);
+  const highlightedViewIds = ref([]);
   const highlightedViewId = computed(() => highlightedViewIds.value[0] || null);
-  const highlightElement = workspaceField("highlightElement");
-  const transcriptExchanges = workspaceField("transcriptExchanges");
+  const highlightElement = ref(null);
+  const transcriptExchanges = ref([]);
   const transcripts = computed(() => (
-    timelineEvents.value.filter((event) => event.role === "user" || event.role === "assistant")
-  ));
-  const legacyTranscripts = computed(() => (
     transcriptExchanges.value.flatMap((exchange) => (
       [exchange.user, exchange.assistant].filter(Boolean)
     ))
@@ -33,63 +25,18 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const inputAudioRate = ref(16000);
   const outputAudioRate = ref(24000);
   const isTextTurnProcessing = ref(false);
-  const recentToolCalls = workspaceField("recentToolCalls");
-  const currentUserEntryId = workspaceField("currentUserEntryId");
-  const currentAssistantResponseId = workspaceField("currentAssistantResponseId");
-  const pendingToolActions = workspaceField("pendingToolActions");
-  const assistantResponseExchangeIds = workspaceField("assistantResponseExchangeIds");
-  const timelineEvents = workspaceField("timelineEvents");
+  const recentToolCalls = ref([]);
+  const currentUserEntryId = ref(null);
+  const currentAssistantResponseId = ref(null);
+  const pendingToolActions = ref([]);
 
   // ---- getters ----
   const viewIds = computed(() => views.value.map((v) => v.id));
 
   // ---- actions ----
 
-  function createWorkspace() {
-    return {
-      views: [],
-      activeFilters: [],
-      highlightedViewIds: [],
-      highlightElement: null,
-      transcriptExchanges: [],
-      recentToolCalls: [],
-      currentUserEntryId: null,
-      currentAssistantResponseId: null,
-      pendingToolActions: [],
-      assistantResponseExchangeIds: {},
-      timelineEvents: [],
-    };
-  }
-
-  function workspaceField(field) {
-    return computed({
-      get: () => currentWorkspace()[field],
-      set: (value) => {
-        currentWorkspace()[field] = value;
-      },
-    });
-  }
-
-  function currentWorkspace() {
-    const key = normalizeWorkspaceId(activeWorkspaceId.value);
-    if (!workspaces.value[key]) {
-      workspaces.value[key] = createWorkspace();
-    }
-    return workspaces.value[key];
-  }
-
-  function normalizeWorkspaceId(workspaceId) {
-    return workspaceId === "text" ? "text" : "voice";
-  }
-
-  function setActiveWorkspace(workspaceId) {
-    activeWorkspaceId.value = normalizeWorkspaceId(workspaceId);
-  }
-
-  function initViews(viewList, options = {}) {
-    activeFilters.value = Array.isArray(options.activeFilters)
-      ? options.activeFilters
-      : [];
+  function initViews(viewList) {
+    activeFilters.value = [];
     highlightedViewIds.value = viewList.filter((v) => v.highlighted).map((v) => v.id);
     const highlightedIds = new Set(highlightedViewIds.value);
     views.value = viewList.map((v) => ({ ...v, highlighted: highlightedIds.has(v.id) }));
@@ -159,13 +106,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
   function handleToolResult(msg) {
     const tool = msg.tool;
     if (tool === "highlight_visual" && msg.success && msg.payload) {
-      const requestedIds = msg.payload.view_ids || msg.payload.highlighted_views || [msg.payload.view_id];
-      const normalizedIds = normalizeViewIds(requestedIds);
-      if (msg.payload.action === "clear" || normalizedIds.length === 0) {
+      if (msg.payload.action === "clear") {
         clearHighlight();
       } else {
         highlightViews(
-          normalizedIds,
+          msg.payload.view_ids || msg.payload.highlighted_views || [msg.payload.view_id],
           msg.payload.highlight_element,
           msg.payload.dim_others ?? true
         );
@@ -212,7 +157,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
       id: makeTranscriptId("exchange"),
       user: message,
     });
-    upsertTimelineMessage(message);
     trimTranscriptHistory();
     return message;
   }
@@ -221,7 +165,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     const message = findPendingUserMessage(options.utteranceId) || beginUserTranscript(options);
     message.text = String(options.text || "");
     message.status = options.status || "listening";
-    upsertTimelineMessage(message);
     return message;
   }
 
@@ -235,7 +178,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
       message.status = "completed";
       message.completedAt = Date.now();
       currentUserEntryId.value = null;
-      upsertTimelineMessage(message);
       return message;
     }
 
@@ -250,18 +192,13 @@ export const useDashboardStore = defineStore("dashboard", () => {
       id: makeTranscriptId("exchange"),
       user: completed,
     });
-    upsertTimelineMessage(completed);
     trimTranscriptHistory();
     return completed;
   }
 
   function beginAssistantResponse(responseId) {
-    if (!responseId) return null;
+    if (!responseId) return;
     currentAssistantResponseId.value = responseId;
-    // Create the response-bound transcript entry immediately. A function-call-
-    // only response may never emit assistant text, but its tool action still
-    // must remain attached to this exact response_id.
-    return getOrCreateAssistantMessage(responseId);
   }
 
   function appendAssistantTranscript(responseId, delta = "") {
@@ -281,7 +218,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
       } else if (message.status !== "interrupted") {
         message.status = "completed";
         message.completedAt = Date.now();
-        upsertTimelineMessage(message);
       }
     }
     if (!responseId || currentAssistantResponseId.value === responseId) {
@@ -307,7 +243,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
       } else {
         message.status = "interrupted";
         message.completedAt = Date.now();
-        upsertTimelineMessage(message);
       }
     }
     if (!responseId || currentAssistantResponseId.value === responseId) {
@@ -317,57 +252,16 @@ export const useDashboardStore = defineStore("dashboard", () => {
 
   function addToolActionToTranscript(call = {}, responseId = null) {
     const action = createToolAction(call);
-    const targetResponseId = responseId || currentAssistantResponseId.value;
-
-    if (targetResponseId) {
-      const message = getOrCreateAssistantMessage(targetResponseId);
+    const message = findAssistantMessageByResponseId(responseId || currentAssistantResponseId.value);
+    if (message && message.text.trim()) {
       message.toolActions.push(action);
-      upsertTimelineMessage(message);
-      return message;
+      return;
     }
-
-    // Legacy fallback only. Realtime tool_call events always provide response_id.
     pendingToolActions.value.push(action);
-    return null;
-  }
-
-  function upsertToolTimelineEvent(event) {
-    const callId = event.call_id || event.transaction_id;
-    if (!callId) return;
-    const existing = timelineEvents.value.find(
-      (item) => item.callId === callId && item.kind === "tool"
-    );
-    const patch = {
-      kind: "tool",
-      callId,
-      transactionId: event.transaction_id,
-      responseId: event.response_id,
-      originTurnId: event.turn_id || event.origin_turn_id,
-      name: event.name || existing?.name || event.type,
-      arguments: event.arguments,
-      status: event.status || toolEventStatus(event),
-      success: event.success,
-      durationMs: event.duration_ms,
-      followupSuppressed: event.followup_suppressed,
-      result: event.result,
-      error: event.error,
-      updatedAt: Date.now(),
-    };
-    if (existing) {
-      Object.assign(existing, patch);
-    } else {
-      timelineEvents.value.push({
-        id: `tool-${callId}`,
-        startedAt: Date.now(),
-        ts: Date.now(),
-        expanded: false,
-        ...patch,
-      });
-    }
   }
 
   function toggleTranscriptMessage(messageId) {
-    const message = findTranscriptMessage(messageId) || findTimelineEvent(messageId);
+    const message = findTranscriptMessage(messageId);
     if (message) {
       message.expanded = !message.expanded;
     }
@@ -385,8 +279,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     currentUserEntryId.value = null;
     currentAssistantResponseId.value = null;
     pendingToolActions.value = [];
-    assistantResponseExchangeIds.value = {};
-    timelineEvents.value = [];
   }
 
   function setTextTurnProcessing(value) {
@@ -430,16 +322,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     };
   }
 
-  function upsertTimelineMessage(message) {
-    if (!message?.id) return;
-    const existing = findTimelineEvent(message.id);
-    if (existing) {
-      Object.assign(existing, message);
-    } else {
-      timelineEvents.value.push(message);
-    }
-  }
-
   function getOrCreateAssistantMessage(responseId) {
     const existing = findAssistantMessageByResponseId(responseId);
     if (existing) return existing;
@@ -452,30 +334,16 @@ export const useDashboardStore = defineStore("dashboard", () => {
     });
     pendingToolActions.value = [];
 
-    const mappedExchangeId = assistantResponseExchangeIds.value[responseId];
-    const mappedExchange = mappedExchangeId
-      ? transcriptExchanges.value.find((exchange) => exchange.id === mappedExchangeId)
-      : null;
-    const exchange = mappedExchange || findLatestExchangeWithoutAssistant();
+    const exchange = findLatestExchangeWithoutAssistant();
     if (exchange) {
       exchange.assistant = message;
-      assistantResponseExchangeIds.value = {
-        ...assistantResponseExchangeIds.value,
-        [responseId]: exchange.id,
-      };
     } else {
-      const newExchange = {
+      transcriptExchanges.value.push({
         id: makeTranscriptId("exchange"),
         assistant: message,
-      };
-      transcriptExchanges.value.push(newExchange);
-      assistantResponseExchangeIds.value = {
-        ...assistantResponseExchangeIds.value,
-        [responseId]: newExchange.id,
-      };
+      });
     }
     trimTranscriptHistory();
-    upsertTimelineMessage(message);
     return message;
   }
 
@@ -509,14 +377,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
 
   function findTranscriptMessage(messageId) {
     if (!messageId) return null;
-    return transcripts.value.find((message) => message.id === messageId) ||
-      legacyTranscripts.value.find((message) => message.id === messageId) ||
-      null;
-  }
-
-  function findTimelineEvent(eventId) {
-    if (!eventId) return null;
-    return timelineEvents.value.find((event) => event.id === eventId) || null;
+    return transcripts.value.find((message) => message.id === messageId) || null;
   }
 
   function removeTranscriptMessage(messageId) {
@@ -531,10 +392,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
       if (!exchange.user && !exchange.assistant) {
         transcriptExchanges.value.splice(i, 1);
       }
-    }
-    const index = timelineEvents.value.findIndex((event) => event.id === messageId);
-    if (index >= 0) {
-      timelineEvents.value.splice(index, 1);
     }
   }
 
@@ -574,16 +431,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   function trimTranscriptHistory() {
-    // Keep the full in-session transcript until the user explicitly clears it.
-    // Study sessions are short, and hidden truncation makes later utterances
-    // hard to audit when debugging interruption or tool-calling behavior.
-  }
-
-  function toolEventStatus(event = {}) {
-    if (event.type === "tool_execution_started") return "running";
-    if (event.type === "tool_execution_completed") return event.success === false ? "failed" : "completed";
-    if (event.type === "tool_batch_completed") return event.followup_suppressed ? "completed" : "completed";
-    return event.status || "committed";
+    if (transcriptExchanges.value.length > 50) {
+      transcriptExchanges.value = transcriptExchanges.value.slice(-50);
+    }
   }
 
   function makeTranscriptId(prefix) {
@@ -591,7 +441,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   return {
-    activeWorkspaceId,
     views,
     activeFilters,
     highlightedViewIds,
@@ -599,7 +448,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     highlightElement,
     transcriptExchanges,
     transcripts,
-    timelineEvents,
     isAssistantSpeaking,
     connectionStatus,
     sessionReady,
@@ -613,7 +461,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     isTextTurnProcessing,
     recentToolCalls,
     viewIds,
-    setActiveWorkspace,
     initViews,
     setSessionInfo,
     updateViews,
@@ -633,7 +480,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     suppressAssistantResponse,
     interruptAssistantResponse,
     addToolActionToTranscript,
-    upsertToolTimelineEvent,
     toggleTranscriptMessage,
     toggleTranscriptActions,
     clearTranscripts,

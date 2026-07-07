@@ -55,9 +55,6 @@ does not establish causality.
 Use highlight_visual to direct attention to an existing view. If the user asks
 for chart facts from that view, call inspect_visual before answering.
 
-If the user asks to cancel, clear, remove, stop, or turn off highlighting,
-call highlight_visual with action="clear". Do not answer with only text.
-
 Use filter_data for global filters and remove_filter to remove one field's
 filter.
 
@@ -114,28 +111,6 @@ Pure acknowledgements such as "ok", "okay", "good", "right", "go on", and
 acknowledgement alone.
 
 Always follow the user's latest completed request.
-
-## Committed Analytical Actions And Revision
-A function call whose complete name and arguments have been emitted is a
-committed analytical action and will finish in order.
-
-Always interpret the newest completed user utterance against the current
-dashboard and prior tool results.
-
-When the user corrects a value, scope, metric, or chart request, issue the
-appropriate corrected tool call. Do not continue explaining the obsolete
-request.
-
-Do not call undo_last_action merely because a newer request supersedes an older
-one. Prefer a direct corrected tool call when it naturally replaces the prior
-state, such as filter_data(..., append=false).
-
-Call undo_last_action only when the user explicitly asks to undo, go back,
-restore the previous state, cancel the last completed action, or recover a
-deleted/replaced view.
-
-If the user only acknowledges the response and introduces no analytical request,
-do not call a dashboard tool.
 """
 
 TEXT_INTERACTION_PROMPT = """\

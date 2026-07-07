@@ -117,20 +117,20 @@
 
       <div ref="transcriptList" class="transcript-list" aria-live="polite">
         <div
-          v-for="row in transcriptRows"
-          :key="row.id"
+          v-for="exchange in transcriptRows"
+          :key="exchange.id"
           class="transcript-exchange"
-          :class="{ 'transcript-exchange--inline': canDisplayInline(row) }"
+          :class="{ 'transcript-exchange--inline': canDisplayInline(exchange) }"
         >
           <div
-            v-for="message in exchangeMessages(row)"
+            v-for="message in exchangeMessages(exchange)"
             :key="message.id"
             class="transcript-message"
             :class="transcriptMessageClass(message)"
-            :title="transcriptMessageTitle(message)"
+            :title="message.text"
             @click="toggleTranscriptMessage(message)"
           >
-            <span class="transcript-time">{{ transcriptMessageTime(row, message) }}</span>
+            <span class="transcript-time">{{ transcriptMessageTime(exchange, message) }}</span>
             <span class="transcript-role">{{ transcriptRoleLabel(message) }}</span>
             <span class="transcript-content">
               <span
@@ -178,16 +178,16 @@
     <section v-else class="dashboard__text-entry" aria-label="Text interaction">
       <div ref="textHistoryList" class="text-history" aria-live="polite">
         <div
-          v-for="row in transcriptRows"
-          :key="`text-${row.id}`"
+          v-for="exchange in transcriptRows"
+          :key="`text-${exchange.id}`"
           class="text-history__exchange"
         >
           <div
-            v-for="message in exchangeMessages(row)"
+            v-for="message in exchangeMessages(exchange)"
             :key="`text-${message.id}`"
             class="text-history__message"
-            :class="`text-history__message--${message.role || message.kind}`"
-            :title="transcriptMessageTitle(message)"
+            :class="`text-history__message--${message.role}`"
+            :title="message.text"
           >
             <span class="text-history__role">{{ transcriptRoleLabel(message) }}</span>
             <span class="text-history__content">
@@ -260,8 +260,8 @@ import { useWebSocket } from "../composables/useWebSocket";
 
 const store = useDashboardStore();
 const QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime";
+const ANALYSIS_ID_STORAGE_KEY = "verbalvis.analysisId";
 const analysisId = getOrCreateAnalysisId();
-store.setActiveWorkspace(getInitialInteractionMode());
 const realtimeInputSampleRate = getNumericOption(
   "inputRate",
   "VITE_REALTIME_INPUT_SAMPLE_RATE",
@@ -276,18 +276,15 @@ const audio = useAudio({
   inputSampleRate: realtimeInputSampleRate,
   outputSampleRate: realtimeOutputSampleRate,
 });
-const ws = useWebSocket(
-  {
-    enqueue: audio.enqueue,
-    flush: audio.flush,
-    beginAssistantResponse: audio.beginAssistantResponse,
-    stop: audio.stop,
-    pauseAssistantAudio: audio.pauseAssistantAudio,
-    resumeAssistantAudio: audio.resumeAssistantAudio,
-    stopAssistantAudio: audio.stopAssistantAudio,
-  },
-  { getAnalysisId: getCurrentAnalysisId }
-);
+const ws = useWebSocket({
+  enqueue: audio.enqueue,
+  flush: audio.flush,
+  beginAssistantResponse: audio.beginAssistantResponse,
+  stop: audio.stop,
+  pauseAssistantAudio: audio.pauseAssistantAudio,
+  resumeAssistantAudio: audio.resumeAssistantAudio,
+  stopAssistantAudio: audio.stopAssistantAudio,
+});
 
 let sessionPromise = null;
 const isStartingListening = ref(false);
@@ -301,9 +298,8 @@ const textInput = ref(null);
 const transcriptPanelWidth = ref(0);
 let transcriptResizeObserver = null;
 
-audio.setPlaybackIdleHandler?.(({ responseId } = {}) => {
+audio.setPlaybackIdleHandler?.(() => {
   store.isAssistantSpeaking = false;
-  ws.sendAssistantPlaybackCompleted?.(responseId);
 });
 
 const statusClass = computed(() => ({
@@ -358,18 +354,15 @@ const textSendLabel = computed(() => (
 ));
 
 const transcriptRows = computed(() => {
-  return store.timelineEvents
-    .slice()
-    .sort((a, b) => (a.startedAt || a.ts || 0) - (b.startedAt || b.ts || 0))
-    .map((event, index) => ({
-      id: event.id || `timeline-${index}`,
-      event,
-    }));
+  return store.transcriptExchanges.map((exchange, index) => ({
+    ...exchange,
+    id: exchange.id || `exchange-${index}`,
+  }));
 });
 
 const transcriptScrollKey = computed(() => (
-  store.timelineEvents
-    .map((event) => `${event.id}:${event.text?.length || 0}:${event.status}:${event.expanded}:${event.updatedAt || ""}`)
+  store.transcripts
+    .map((message) => `${message.id}:${message.text.length}:${message.status}:${message.expanded}`)
     .join("|")
 ));
 
@@ -411,10 +404,12 @@ watch(
     audio.stopAssistantAudio?.({ blockNewAudio: true });
     store.isAssistantSpeaking = false;
     store.setTextTurnProcessing(false);
+    store.clearTranscripts();
+    pendingText.value = "";
     sessionPromise = null;
     ws.disconnect();
     await nextTick();
-    ws.connect(buildWsUrl({ preserveState: true }));
+    ws.connect(buildWsUrl());
     if (interactionMode.value === "text") {
       focusTextInput();
     }
@@ -486,7 +481,13 @@ async function startListeningMic() {
     await audio.startRecording({
       gateSilence: false,
       onChunk: (base64pcm) => {
+        if (store.isAssistantSpeaking && store.sessionMode === "turn_based") {
+          return;
+        }
         ws.sendAudio(base64pcm);
+      },
+      onSpeechStart: () => {
+        audio.pauseAssistantAudio?.();
       },
     });
   } catch (error) {
@@ -547,12 +548,10 @@ function formatTranscriptTime(ts) {
 }
 
 function exchangeMessages(exchange) {
-  if (exchange.event) return [exchange.event];
   return [exchange.user, exchange.assistant].filter(Boolean);
 }
 
 function canDisplayInline(exchange) {
-  if (exchange.event) return false;
   if (transcriptPanelWidth.value < 420 || !exchange.user || !exchange.assistant) return false;
   return (
     exchange.user.status === "completed" &&
@@ -570,26 +569,22 @@ function visibleLength(value) {
 
 function transcriptMessageClass(message) {
   return {
-    [`transcript-message--${message.role || message.kind}`]: true,
+    [`transcript-message--${message.role}`]: true,
     "transcript-message--interrupted": message.status === "interrupted",
     "transcript-message--streaming": message.status === "streaming",
-    "transcript-message--tool": message.kind === "tool",
   };
 }
 
 function transcriptMessageTime(exchange, message) {
-  if (message.kind === "tool") return formatTranscriptTime(message.startedAt || message.ts);
   if (message.role === "assistant" && exchange.user) return "";
   return formatTranscriptTime(message.startedAt || message.ts);
 }
 
 function transcriptRoleLabel(message) {
-  if (message.kind === "tool") return "TOOL";
   return message.role === "assistant" ? "AI" : "YOU";
 }
 
 function transcriptDisplayText(message) {
-  if (message.kind === "tool") return toolTimelineText(message);
   if (message.text) return message.text;
   if (message.status === "listening") return "Listening...";
   if (message.status === "streaming") return "...";
@@ -597,13 +592,8 @@ function transcriptDisplayText(message) {
 }
 
 function toggleTranscriptMessage(message) {
-  if (!message?.text && message?.kind !== "tool") return;
+  if (!message?.text) return;
   store.toggleTranscriptMessage(message.id);
-}
-
-function transcriptMessageTitle(message) {
-  if (message.kind === "tool") return toolTimelineTitle(message);
-  return message.text;
 }
 
 function toggleTranscriptActions(message) {
@@ -617,45 +607,6 @@ function toolActionsLabel(message) {
 
 function toolActionsTitle(message) {
   return (message.toolActions || []).map((action) => action.summary).join("\n");
-}
-
-function toolTimelineText(message) {
-  const name = formatToolName(message.name || "tool");
-  const status = message.status || "committed";
-  const args = parseToolArgumentsForDisplay(message.arguments);
-  const summary = summarizeToolArgs(args);
-  const duration = Number.isFinite(message.durationMs) ? ` ${message.durationMs}ms` : "";
-  const suppressed = message.followupSuppressed ? " follow-up suppressed" : "";
-  return `${name} ${status}${duration}${summary ? ` ${summary}` : ""}${suppressed}`;
-}
-
-function toolTimelineTitle(message) {
-  const parts = [
-    message.name || "tool",
-    `status: ${message.status || "committed"}`,
-  ];
-  if (message.error) parts.push(`error: ${message.error}`);
-  if (message.arguments) parts.push(`arguments: ${formatValue(parseToolArgumentsForDisplay(message.arguments))}`);
-  if (message.result) parts.push(`result: ${formatValue(message.result)}`);
-  return parts.join("\n");
-}
-
-function parseToolArgumentsForDisplay(value) {
-  if (!value) return {};
-  if (typeof value === "object") return value;
-  try {
-    return JSON.parse(value);
-  } catch (_) {
-    return { value };
-  }
-}
-
-function summarizeToolArgs(args = {}) {
-  const entries = Object.entries(args)
-    .filter(([, value]) => value !== undefined && value !== null && value !== "")
-    .slice(0, 2);
-  if (!entries.length) return "";
-  return entries.map(([key, value]) => `${key}=${formatValue(value)}`).join(", ");
 }
 
 function updateTranscriptPanelWidth() {
@@ -745,7 +696,7 @@ function submitText() {
 
   if (store.isTextTurnProcessing) {
     if (text) {
-      sendTextToAssistant(text);
+      stagePendingText(text);
       return;
     }
     return;
@@ -755,6 +706,12 @@ function submitText() {
   if (!textToSend) return;
   pendingText.value = "";
   sendTextToAssistant(textToSend);
+}
+
+function stagePendingText(text) {
+  pendingText.value = text;
+  inputText.value = "";
+  nextTick(focusTextInput);
 }
 
 function submitPendingText() {
@@ -793,7 +750,6 @@ function focusTextInput() {
 function setInteractionMode(mode) {
   if (interactionMode.value === mode) return;
   interactionMode.value = mode;
-  store.setActiveWorkspace(mode);
   const url = new URL(window.location.href);
   url.searchParams.set(
     "condition",
@@ -812,15 +768,21 @@ function getInitialInteractionMode() {
 
 function getOrCreateAnalysisId() {
   const params = new URLSearchParams(window.location.search);
+  const forceNew = ["1", "true", "yes", "on"].includes(
+    String(params.get("new_analysis") || params.get("newAnalysis") || "").toLowerCase()
+  );
   const explicit = normalizeAnalysisId(params.get("analysis_id") || params.get("analysisId"));
   if (explicit) {
     return setCurrentAnalysisId(explicit);
   }
 
-  const existing = normalizeAnalysisId(window.__verbalvis_analysis_id);
+  const existing = forceNew ? "" : normalizeAnalysisId(window.__verbalvis_analysis_id);
   if (existing) return existing;
 
-  const id = `session-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
+  const stored = forceNew ? "" : normalizeAnalysisId(readStoredAnalysisId());
+  if (stored) return setCurrentAnalysisId(stored);
+
+  const id = `analysis-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
   return setCurrentAnalysisId(id);
 }
 
@@ -828,21 +790,30 @@ function normalizeAnalysisId(value) {
   return String(value || "").trim().replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 80);
 }
 
+function readStoredAnalysisId() {
+  try {
+    return window.localStorage?.getItem(ANALYSIS_ID_STORAGE_KEY) || "";
+  } catch (_) {
+    return "";
+  }
+}
+
 function setCurrentAnalysisId(id) {
   window.__verbalvis_analysis_id = id;
+  try {
+    window.localStorage?.setItem(ANALYSIS_ID_STORAGE_KEY, id);
+  } catch (_) {
+    // Storage can be disabled in private modes; the in-memory id still works.
+  }
   return id;
 }
 
-function getCurrentAnalysisId() {
-  return `${analysisId}-${interactionMode.value === "text" ? "text" : "voice"}`;
-}
-
-function buildWsUrl({ preserveState = false } = {}) {
+function buildWsUrl() {
   const params = new URLSearchParams(window.location.search);
   const explicitUrl = interactionMode.value === "text"
     ? (params.get("textWs") || import.meta.env.VITE_TEXT_WS_URL)
     : (params.get("ws") || import.meta.env.VITE_REALTIME_WS_URL);
-  if (explicitUrl) return withAnalysisId(explicitUrl, { preserveState });
+  if (explicitUrl) return withAnalysisId(explicitUrl);
 
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   const configuredPath = interactionMode.value === "text"
@@ -850,10 +821,7 @@ function buildWsUrl({ preserveState = false } = {}) {
     : (params.get("wsPath") || import.meta.env.VITE_REALTIME_WS_PATH || "/ws");
   const path = configuredPath.startsWith("/") ? configuredPath : `/${configuredPath}`;
   const url = new URL(`${protocol}://${window.location.host}${path}`);
-  url.searchParams.set("analysis_id", getCurrentAnalysisId());
-  if (preserveState) {
-    url.searchParams.set("preserve_state", "1");
-  }
+  url.searchParams.set("analysis_id", analysisId);
   if (interactionMode.value === "voice") {
     url.searchParams.set("model", QWEN_REALTIME_MODEL);
   } else {
@@ -863,14 +831,11 @@ function buildWsUrl({ preserveState = false } = {}) {
   return url.toString();
 }
 
-function withAnalysisId(rawUrl, { preserveState = false } = {}) {
+function withAnalysisId(rawUrl) {
   const url = new URL(rawUrl, window.location.href);
   if (url.protocol === "http:") url.protocol = "ws:";
   if (url.protocol === "https:") url.protocol = "wss:";
-  url.searchParams.set("analysis_id", getCurrentAnalysisId());
-  if (preserveState) {
-    url.searchParams.set("preserve_state", "1");
-  }
+  url.searchParams.set("analysis_id", analysisId);
   return url.toString();
 }
 </script>
@@ -1566,10 +1531,9 @@ function withAnalysisId(rawUrl, { preserveState = false } = {}) {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  height: auto;
-  max-height: min(56dvh, 760px);
-  min-height: 0;
-  resize: vertical;
+  height: 300px;
+  max-height: 300px;
+  min-height: 300px;
   box-shadow: none;
 }
 
@@ -1577,9 +1541,9 @@ function withAnalysisId(rawUrl, { preserveState = false } = {}) {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  height: auto;
-  max-height: min(56dvh, 760px);
-  min-height: 0;
+  height: 300px;
+  max-height: 300px;
+  min-height: 300px;
   overflow: hidden;
   border: 1px solid #d7e1ee;
   border-radius: 8px;
@@ -1605,14 +1569,13 @@ function withAnalysisId(rawUrl, { preserveState = false } = {}) {
 .transcript-list {
   flex: 1 1 auto;
   min-height: 0;
-  max-height: min(42dvh, 640px);
+  max-height: none;
   overflow: auto;
 }
 
 .text-history {
   flex: 1 1 auto;
   min-height: 0;
-  max-height: min(42dvh, 640px);
   overflow: auto;
   padding: 8px 10px;
   border-bottom: 1px solid #e1e8f2;
