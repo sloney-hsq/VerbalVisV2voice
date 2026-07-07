@@ -67,6 +67,7 @@ export function useWebSocket(audioPlayer) {
           mode: msg.mode,
           inputMode: msg.input_mode,
           turnDetection: msg.turn_detection,
+          conditionCode: msg.condition_code,
           provider: msg.provider,
           model: msg.model,
           inputAudioRate: msg.input_audio_rate,
@@ -129,11 +130,6 @@ export function useWebSocket(audioPlayer) {
         }
         store.completeAssistantResponse(msg.response_id);
         store.setTextTurnProcessing(false);
-        if (audioPlayer) {
-          audioPlayer.flush({
-            response_id: msg.response_id,
-          });
-        }
         activeResponseId = null;
         break;
 
@@ -176,6 +172,7 @@ export function useWebSocket(audioPlayer) {
           mode: msg.mode,
           inputMode: msg.input_mode,
           turnDetection: msg.turn_detection,
+          conditionCode: msg.condition_code,
           provider: msg.provider,
           model: msg.model,
           inputAudioRate: msg.input_audio_rate,
@@ -218,15 +215,35 @@ export function useWebSocket(audioPlayer) {
     if (!responseId || activeResponseId === responseId) {
       activeResponseId = null;
     }
+
     if (!audioPlayer) return;
+
+    let result = null;
     if (audioPlayer.stopAssistantAudio) {
-      audioPlayer.stopAssistantAudio({
+      result = audioPlayer.stopAssistantAudio({
         responseId,
-        reason,
         blockNewAudio: true,
       });
-    } else {
-      audioPlayer.stop();
+    } else if (audioPlayer.stop) {
+      const cursor = audioPlayer.stop();
+      result = {
+        stopped: true,
+        cursor,
+      };
+    }
+
+    if (
+      result?.stopped &&
+      socket.value &&
+      socket.value.readyState === WebSocket.OPEN
+    ) {
+      socket.value.send(JSON.stringify({
+        type: "playback_stopped",
+        response_id: responseId,
+        reason,
+        playback_cursor: result.cursor || null,
+        client_wall_time_ms: Date.now(),
+      }));
     }
   }
 
@@ -238,6 +255,7 @@ export function useWebSocket(audioPlayer) {
         text,
         turn_id: turnId,
         condition: "turn_based_text",
+        condition_code: "text_cva",
         analysis_id: analysisId,
         timestamp: performance.now(),
       }));

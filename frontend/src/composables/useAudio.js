@@ -292,6 +292,9 @@ export function useAudio(options = {}) {
   }
 
   function stopAssistantAudio({ responseId = null, blockNewAudio = false } = {}) {
+    const cursor = getPlaybackCursor();
+    let stoppedCount = 0;
+
     if (blockNewAudio) assistantAudioBlocked = true;
     if (playbackCtx?.state === "suspended") {
       playbackCtx.resume().catch(() => {});
@@ -316,6 +319,7 @@ export function useAudio(options = {}) {
           // Already ended.
         }
         activeSources.delete(record);
+        stoppedCount += 1;
       }
     }
 
@@ -329,6 +333,11 @@ export function useAudio(options = {}) {
     if (!responseId || currentPlaybackResponseId === responseId) {
       currentPlaybackResponseId = null;
     }
+
+    return {
+      stopped: stoppedCount > 0,
+      cursor,
+    };
   }
 
   function allowAssistantAudio() {

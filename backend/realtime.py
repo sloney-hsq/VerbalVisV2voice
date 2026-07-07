@@ -202,6 +202,7 @@ class QwenRealtimeSession:
         self.running = False
 
         self.current_response_id: str | None = None
+        self.interrupted_response_ids: set[str] = set()
 
         self.last_user_transcript = ""
         self.assistant_transcript = ""
@@ -209,6 +210,7 @@ class QwenRealtimeSession:
         self.last_user_speech_stopped_at: float | None = None
         self.response_created_at: dict[str, float] = {}
         self.first_audio_at: dict[str, float] = {}
+        self.playback_stop_started_at: dict[str, float] = {}
 
         self._send_lock = asyncio.Lock()
 
@@ -238,6 +240,7 @@ class QwenRealtimeSession:
                 "mode": "barge_in",
                 "input_mode": "semantic_vad",
                 "turn_detection": QWEN_TURN_DETECTION,
+                "condition_code": "fd_voice",
                 "provider": "qwen",
                 "model": self.model,
                 "input_audio_rate": QWEN_INPUT_SAMPLE_RATE,
@@ -368,6 +371,7 @@ class QwenRealtimeSession:
                         "mode": "barge_in",
                         "input_mode": "semantic_vad",
                         "turn_detection": QWEN_TURN_DETECTION,
+                        "condition_code": "fd_voice",
                         "provider": "qwen",
                         "model": self.model,
                         "voice": QWEN_VOICE,
@@ -419,6 +423,9 @@ class QwenRealtimeSession:
                 # The Qwen connection is already ready. This keeps old
                 # frontends harmless without restarting the upstream session.
                 await self._send_client({"type": "session_ready"})
+
+            elif message_type == "playback_stopped":
+                self._handle_playback_stopped(message)
 
             elif message_type in {"close", "disconnect"}:
                 self.running = False
@@ -566,6 +573,8 @@ class QwenRealtimeSession:
                 "type": "audio",
                 "data": event.get("delta", ""),
                 "response_id": response_id,
+                "item_id": event.get("item_id"),
+                "content_index": event.get("content_index", 0),
                 "sample_rate": QWEN_OUTPUT_SAMPLE_RATE,
             }
         )
@@ -655,6 +664,9 @@ class QwenRealtimeSession:
 
         if not response_id:
             return
+
+        self.interrupted_response_ids.add(response_id)
+        self.playback_stop_started_at[response_id] = time.perf_counter()
 
         self._log_bargein(
             "BARGE_IN response_id=%s utterance_id=%s",
@@ -761,6 +773,19 @@ class QwenRealtimeSession:
 
         response_id = str(response.get("id") or "") or None
         status = str(response.get("status") or "")
+
+        if response_id and response_id in self.interrupted_response_ids:
+            self.interrupted_response_ids.discard(response_id)
+            self.assistant_transcript = ""
+            self._response_metrics(response_id, response)
+
+            if self._event_logger:
+                self._event_logger.info(
+                    "RESPONSE_DISCARDED response_id=%s "
+                    "reason=user_interruption",
+                    response_id,
+                )
+            return
 
         was_active = (
             response_id
@@ -1210,6 +1235,65 @@ class QwenRealtimeSession:
                             "text": clean,
                         },
                         ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+    def _handle_playback_stopped(
+        self,
+        message: dict[str, Any],
+    ) -> None:
+        response_id = str(message.get("response_id") or "") or None
+        started_at = (
+            self.playback_stop_started_at.pop(response_id, None)
+            if response_id
+            else None
+        )
+        latency_ms = (
+            round((time.perf_counter() - started_at) * 1000, 2)
+            if started_at is not None
+            else None
+        )
+        cursor = message.get("playback_cursor")
+        cursor_json = json.dumps(
+            cursor,
+            ensure_ascii=False,
+            default=str,
+        )
+
+        if self._bargein_logger:
+            self._bargein_logger.info(
+                "PLAYBACK_STOPPED response_id=%s "
+                "stop_ack_latency_ms=%s reason=%s cursor=%s "
+                "client_wall_time_ms=%s",
+                response_id,
+                latency_ms,
+                message.get("reason"),
+                cursor_json,
+                message.get("client_wall_time_ms"),
+            )
+
+        if self._log_dir:
+            path = self._log_dir / "playback_stopped.jsonl"
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "ts": datetime.datetime.now(
+                                datetime.timezone.utc
+                            ).isoformat(),
+                            "session_id": self.session_id,
+                            "analysis_id": self.log_scope_id,
+                            "response_id": response_id,
+                            "reason": message.get("reason"),
+                            "stop_ack_latency_ms": latency_ms,
+                            "playback_cursor": cursor,
+                            "client_wall_time_ms": message.get(
+                                "client_wall_time_ms"
+                            ),
+                        },
+                        ensure_ascii=False,
+                        default=str,
                     )
                     + "\n"
                 )

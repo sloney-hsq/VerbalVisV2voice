@@ -20,6 +20,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const sessionMode = ref("barge_in"); // barge_in | turn_based
   const inputMode = ref("semantic_vad");
   const turnDetection = ref("semantic_vad");
+  const conditionCode = ref(null);
   const provider = ref("qwen");
   const model = ref("qwen3.5-omni-plus-realtime");
   const inputAudioRate = ref(16000);
@@ -49,6 +50,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     if (info.mode) sessionMode.value = info.mode;
     if (info.inputMode) inputMode.value = info.inputMode;
     if (info.turnDetection) turnDetection.value = info.turnDetection;
+    if (info.conditionCode) conditionCode.value = info.conditionCode;
     if (info.provider) provider.value = info.provider;
     if (info.model) model.value = info.model;
     if (info.inputAudioRate) inputAudioRate.value = info.inputAudioRate;
@@ -463,6 +465,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     sessionMode,
     inputMode,
     turnDetection,
+    conditionCode,
     provider,
     model,
     inputAudioRate,

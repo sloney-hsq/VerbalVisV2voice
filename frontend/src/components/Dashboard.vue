@@ -329,8 +329,8 @@ const modelStatusTitle = computed(() => `${displayModelName.value} ${connectionL
 const voiceStatusLabel = computed(() => {
   if (audio.isRecording.value) return "Listening...";
   if (isStartingListening.value) return "Starting...";
-  if (store.connectionStatus === "connecting") return "Connecting...";
-  if (recordButtonDisabled.value) return "offline";
+  if (store.connectionStatus !== "connected") return "Offline";
+  if (!store.sessionReady) return "Initializing...";
   return "Start mic";
 });
 
