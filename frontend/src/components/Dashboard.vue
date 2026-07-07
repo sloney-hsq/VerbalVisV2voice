@@ -284,7 +284,6 @@ const ws = useWebSocket({
   stopAssistantAudio: audio.stopAssistantAudio,
 });
 
-let sessionPromise = null;
 const isStartingListening = ref(false);
 const interactionMode = ref(getInitialInteractionMode());
 const inputText = ref("");
@@ -405,7 +404,6 @@ watch(
     store.setTextTurnProcessing(false);
     store.clearTranscripts();
     pendingText.value = "";
-    sessionPromise = null;
     ws.disconnect();
     await nextTick();
     ws.connect(buildWsUrl());
@@ -424,57 +422,18 @@ watch(
   }
 );
 
-async function ensureSessionReady({ fresh = false } = {}) {
-  if (fresh) {
-    sessionPromise = null;
-    store.sessionReady = false;
-    await waitForSocketOpen();
-  }
-  if (store.sessionReady) return;
-  if (sessionPromise) return sessionPromise;
-
-  sessionPromise = new Promise((resolve, reject) => {
-    ws.startSession();
-    const check = setInterval(() => {
-      if (store.sessionReady) {
-        clearInterval(check);
-        sessionPromise = null;
-        resolve();
-      }
-    }, 100);
-    setTimeout(() => {
-      clearInterval(check);
-      sessionPromise = null;
-      reject(new Error("Qwen realtime session was not ready."));
-    }, 15000);
-  });
-
-  return sessionPromise;
-}
-
-function waitForSocketOpen(timeoutMs = 5000) {
-  const start = Date.now();
-  return new Promise((resolve) => {
-    const check = setInterval(() => {
-      if (ws.socket.value?.readyState === WebSocket.OPEN || Date.now() - start >= timeoutMs) {
-        clearInterval(check);
-        resolve();
-      }
-    }, 50);
-  });
-}
-
 async function startListeningMic() {
-  if (isStartingListening.value || audio.isRecording.value || recordButtonDisabled.value) {
+  if (
+    isStartingListening.value ||
+    audio.isRecording.value ||
+    recordButtonDisabled.value ||
+    !store.sessionReady
+  ) {
     return;
   }
 
   isStartingListening.value = true;
   try {
-    await ensureSessionReady();
-    if (recordButtonDisabled.value) {
-      return;
-    }
     await audio.startRecording({
       gateSilence: false,
       onChunk: (base64pcm) => {

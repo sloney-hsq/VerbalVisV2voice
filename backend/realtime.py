@@ -5,7 +5,6 @@ Design goals:
 - Follow the official Qwen realtime event flow.
 - Keep only one active model response.
 - Let Qwen semantic VAD decide when the user starts speaking.
-- Cancel the active response immediately on speech_started.
 - Execute completed function calls sequentially after response.done.
 - Keep the existing VerbalVis dashboard tools and multi-file logs.
 """
@@ -176,7 +175,6 @@ class QwenRealtimeSession:
 
     Runtime state is intentionally small:
     - current_response_id
-    - pending_tool_calls
     - last_user_transcript
     - assistant_transcript
     """
@@ -204,7 +202,6 @@ class QwenRealtimeSession:
         self.running = False
 
         self.current_response_id: str | None = None
-        self.pending_tool_calls: dict[str, PendingToolCall] = {}
 
         self.last_user_transcript = ""
         self.assistant_transcript = ""
@@ -460,6 +457,20 @@ class QwenRealtimeSession:
                 await self._handle_assistant_transcript_delta(event)
                 continue
 
+            if event_type in {
+                "response.audio_transcript.done",
+                "response.output_audio_transcript.done",
+            }:
+                await self._handle_assistant_transcript_done(event)
+                continue
+
+            if event_type in {
+                "response.audio.done",
+                "response.output_audio.done",
+            }:
+                self._handle_audio_done(event)
+                continue
+
             if event_type == "input_audio_buffer.speech_started":
                 await self._handle_speech_started(event)
                 continue
@@ -586,6 +597,44 @@ class QwenRealtimeSession:
             }
         )
 
+    async def _handle_assistant_transcript_done(
+        self,
+        event: dict[str, Any],
+    ) -> None:
+        response_id = self._event_response_id(event)
+
+        if (
+            not response_id
+            or response_id != self.current_response_id
+        ):
+            return
+
+        transcript = str(event.get("transcript") or "").strip()
+        if not transcript:
+            return
+
+        self.assistant_transcript = transcript
+
+        await self._send_client(
+            {
+                "type": "assistant_transcript_done",
+                "response_id": response_id,
+                "text": transcript,
+            }
+        )
+
+    def _handle_audio_done(
+        self,
+        event: dict[str, Any],
+    ) -> None:
+        response_id = self._event_response_id(event)
+
+        if self._event_logger:
+            self._event_logger.info(
+                "AUDIO_GENERATION_DONE response_id=%s",
+                response_id,
+            )
+
     async def _handle_speech_started(
         self,
         event: dict[str, Any],
@@ -607,9 +656,6 @@ class QwenRealtimeSession:
         if not response_id:
             return
 
-        # The official simple behavior:
-        # semantic VAD detected a new user turn, so stop local playback and
-        # cancel the active response immediately.
         self._log_bargein(
             "BARGE_IN response_id=%s utterance_id=%s",
             response_id,
@@ -618,7 +664,6 @@ class QwenRealtimeSession:
 
         self.current_response_id = None
         self.assistant_transcript = ""
-        self.pending_tool_calls.clear()
 
         await self._send_client(
             {
@@ -628,8 +673,6 @@ class QwenRealtimeSession:
                 "clear_queue": True,
             }
         )
-
-        await self._send_qwen({"type": "response.cancel"})
 
     async def _handle_speech_stopped(
         self,
@@ -651,18 +694,24 @@ class QwenRealtimeSession:
         self,
         event: dict[str, Any],
     ) -> None:
-        delta = event.get("delta", "")
-        if not delta:
+        preview = (
+            str(event.get("text") or "")
+            + str(event.get("stash") or "")
+        ).strip()
+
+        if not preview:
             return
 
         await self._send_client(
             {
                 "type": "transcript",
                 "role": "user",
-                "delta": delta,
+                "text": preview,
                 "status": "partial",
                 "completed": False,
                 "utterance_id": event.get("item_id"),
+                "language": event.get("language"),
+                "emotion": event.get("emotion"),
             }
         )
 
@@ -693,105 +742,154 @@ class QwenRealtimeSession:
         self,
         event: dict[str, Any],
     ) -> None:
-        call_id = str(
-            event.get("call_id")
-            or event.get("id")
-            or ""
-        )
-
-        name = str(event.get("name") or "")
-
-        if not name:
-            function = event.get("function")
-            if isinstance(function, dict):
-                name = str(function.get("name") or "")
-
-        arguments_raw = event.get("arguments", "{}")
-        if not isinstance(arguments_raw, str):
-            arguments_raw = json.dumps(
-                arguments_raw,
-                ensure_ascii=False,
-            )
-
-        if not call_id:
-            call_id = (
-                f"call-{int(time.time() * 1000)}-"
-                f"{len(self.pending_tool_calls) + 1}"
-            )
-
-        response_id = self._event_response_id(event)
-
-        self.pending_tool_calls[call_id] = PendingToolCall(
-            call_id=call_id,
-            name=name,
-            arguments_raw=arguments_raw,
-            response_id=response_id,
-        )
-
         if self._tool_logger:
             self._tool_logger.info(
-                "TOOL_PENDING name=%s call_id=%s args=%s",
-                name,
-                call_id,
-                arguments_raw,
+                "TOOL_CALL_CREATED response_id=%s call_id=%s "
+                "name=%s arguments=%s",
+                self._event_response_id(event),
+                event.get("call_id"),
+                event.get("name"),
+                event.get("arguments"),
             )
-
-        await self._send_client(
-            {
-                "type": "tool_call",
-                "name": name,
-                "arguments": arguments_raw,
-                "response_id": response_id,
-                "call_id": call_id,
-            }
-        )
 
     async def _handle_response_done(
         self,
         event: dict[str, Any],
     ) -> None:
-        response_id = self._event_response_id(event)
         response = event.get("response")
-        response_payload = (
-            response if isinstance(response, dict) else {}
+        response = response if isinstance(response, dict) else {}
+
+        response_id = str(response.get("id") or "") or None
+        status = str(response.get("status") or "")
+
+        was_active = (
+            response_id
+            and response_id == self.current_response_id
         )
 
-        if (
-            response_id
-            and self.current_response_id == response_id
-        ):
+        if was_active:
             self.current_response_id = None
 
-        if self.pending_tool_calls:
-            # This response requested tools. Execute them in the same simple
-            # order in which their completed calls were received.
+        if status != "completed":
             self.assistant_transcript = ""
-            await self._execute_pending_tools()
+
+            if was_active:
+                await self._send_client(
+                    {
+                        "type": "response_done",
+                        "response_id": response_id,
+                        "status": status,
+                        "metrics": self._response_metrics(
+                            response_id,
+                            response,
+                        ),
+                    }
+                )
             return
 
-        transcript = self.assistant_transcript.strip()
+        tool_calls = self._tool_calls_from_response(response)
+
+        if tool_calls:
+            self.assistant_transcript = ""
+            await self._execute_tool_calls(tool_calls)
+            return
+
+        transcript = (
+            self.assistant_transcript.strip()
+            or self._assistant_transcript_from_response(response)
+        )
+
         if transcript:
             self._log_conversation("AI", transcript)
 
         self.assistant_transcript = ""
 
-        metrics = self._response_metrics(
-            response_id,
-            response_payload,
-        )
-
         await self._send_client(
             {
                 "type": "response_done",
                 "response_id": response_id,
-                "metrics": metrics,
+                "status": status,
+                "metrics": self._response_metrics(
+                    response_id,
+                    response,
+                ),
             }
         )
 
-    async def _execute_pending_tools(self) -> None:
-        calls = list(self.pending_tool_calls.values())
-        self.pending_tool_calls.clear()
+    @staticmethod
+    def _tool_calls_from_response(
+        response: dict[str, Any],
+    ) -> list[PendingToolCall]:
+        calls: list[PendingToolCall] = []
 
+        response_id = str(response.get("id") or "") or None
+
+        for item in response.get("output") or []:
+            if not isinstance(item, dict):
+                continue
+
+            if item.get("type") != "function_call":
+                continue
+
+            if item.get("status") not in {None, "completed"}:
+                continue
+
+            call_id = str(item.get("call_id") or "")
+            name = str(item.get("name") or "")
+
+            if not call_id or not name:
+                continue
+
+            arguments = item.get("arguments") or "{}"
+            if not isinstance(arguments, str):
+                arguments = json.dumps(
+                    arguments,
+                    ensure_ascii=False,
+                )
+
+            calls.append(
+                PendingToolCall(
+                    call_id=call_id,
+                    name=name,
+                    arguments_raw=arguments,
+                    response_id=response_id,
+                )
+            )
+
+        return calls
+
+    @staticmethod
+    def _assistant_transcript_from_response(
+        response: dict[str, Any],
+    ) -> str:
+        parts: list[str] = []
+
+        for item in response.get("output") or []:
+            if not isinstance(item, dict):
+                continue
+
+            if item.get("type") != "message":
+                continue
+
+            for content in item.get("content") or []:
+                if not isinstance(content, dict):
+                    continue
+
+                text = (
+                    content.get("transcript")
+                    or content.get("text")
+                    or ""
+                )
+
+                if text:
+                    parts.append(str(text))
+
+        return "".join(parts).strip()
+
+    async def _execute_tool_calls(
+        self,
+        calls: list[PendingToolCall],
+    ) -> None:
         for pending in calls:
             started_at = time.perf_counter()
 
@@ -807,7 +905,20 @@ class QwenRealtimeSession:
             arguments = normalize_tool_arguments(
                 pending.name,
                 raw_arguments,
-                user_transcript=self.last_user_transcript,
+                user_transcript=None,
+            )
+
+            await self._send_client(
+                {
+                    "type": "tool_call",
+                    "name": pending.name,
+                    "arguments": json.dumps(
+                        arguments,
+                        ensure_ascii=False,
+                    ),
+                    "response_id": pending.response_id,
+                    "call_id": pending.call_id,
+                }
             )
 
             if self._tool_logger:
@@ -818,11 +929,21 @@ class QwenRealtimeSession:
                     json.dumps(arguments, ensure_ascii=False),
                 )
 
-            result = await asyncio.to_thread(
-                execute_tool,
-                pending.name,
-                arguments,
-            )
+            try:
+                result = await asyncio.to_thread(
+                    execute_tool,
+                    pending.name,
+                    arguments,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                result = {
+                    "success": False,
+                    "tool": pending.name,
+                    "payload": None,
+                    "error": str(exc),
+                }
 
             duration_ms = round(
                 (time.perf_counter() - started_at) * 1000,
@@ -924,7 +1045,7 @@ class QwenRealtimeSession:
             else None
         )
 
-        # response.cancel may race with a response that has already ended.
+        # Keep compatibility with older frontends or in-flight upstream races.
         if code == "response_cancel_not_active":
             self._log_connection(
                 "IGNORED_CANCEL_RACE %s",

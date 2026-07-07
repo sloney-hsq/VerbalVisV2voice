@@ -4,7 +4,7 @@ import { useDashboardStore } from "../stores/dashboard";
 const ANALYSIS_ID_STORAGE_KEY = "verbalvis.analysisId";
 
 /**
- * WebSocket composable – bridges frontend to VerbalVis backend.
+ * WebSocket composable bridges frontend to VerbalVis backend.
  * Dispatches incoming messages to the Pinia store and audio player.
  */
 export function useWebSocket(audioPlayer) {
@@ -201,25 +201,11 @@ export function useWebSocket(audioPlayer) {
     }
   }
 
-  function startSession() {
-    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      console.log("%c[WS] sending start_session", "color: #f59e0b; font-weight: bold");
-      store.sessionReady = false;
-      socket.value.send(JSON.stringify({
-        type: "start_session",
-        analysis_id: analysisId,
-      }));
-    } else {
-      console.error("[WS] cannot send start_session — socket not open, readyState:", socket.value?.readyState);
-    }
-  }
-
   function sendAudio(base64pcm) {
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
       socket.value.send(JSON.stringify({
         type: "audio",
         data: base64pcm,
-        analysis_id: analysisId,
       }));
     } else {
       console.warn("sendAudio: socket not open, readyState =", socket.value?.readyState);
@@ -340,7 +326,6 @@ export function useWebSocket(audioPlayer) {
   return {
     socket,
     connect,
-    startSession,
     sendAudio,
     sendText,
     interruptActiveResponse,

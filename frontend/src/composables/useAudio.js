@@ -417,7 +417,6 @@ export function useAudio(options = {}) {
 
     if (!gateSilence) {
       onAudioChunk?.(base64);
-      _updateUngatedSpeechActivity(rms, chunk.peak ?? 0);
       return;
     }
 
