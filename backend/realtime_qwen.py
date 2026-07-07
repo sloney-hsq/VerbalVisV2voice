@@ -138,7 +138,10 @@ QWEN_AUDIO_FORMAT = (
     os.getenv("QWEN_REALTIME_AUDIO_FORMAT", "pcm").strip() or "pcm"
 )
 QWEN_VAD_THRESHOLD = float(
-    os.getenv("QWEN_REALTIME_VAD_THRESHOLD", "0.5")
+    os.getenv("QWEN_REALTIME_VAD_THRESHOLD", "0.3")
+)
+QWEN_VAD_PREFIX_PADDING_MS = int(
+    os.getenv("QWEN_REALTIME_VAD_PREFIX_PADDING_MS", "500")
 )
 QWEN_VAD_SILENCE_DURATION_MS = int(
     os.getenv("QWEN_REALTIME_VAD_SILENCE_DURATION_MS", "800")
@@ -241,9 +244,18 @@ class QwenRealtimeSession:
         self._user_turn_open = False
         self._turn_sequence_fallback = 0
 
-        # Each response keeps the user turn that produced it. This mapping is also
-        # the only source used to decide whether an old tool follow-up is stale.
+        # Each response keeps the user turn that produced it. Explicit
+        # response.create calls enqueue their origin so response.created can bind
+        # the follow-up to the correct turn instead of racing latest_user_turn_id.
         self._response_turn_ids: dict[str, str | None] = {}
+        self._pending_response_origins: list[str | None] = []
+
+        # Overlap candidates become authoritative user turns only after a
+        # completed transcript looks like an actual request/correction.
+        self._overlap_candidate_turn_id: str | None = None
+        self._overlap_candidate_response_id: str | None = None
+        self._overlap_candidate_source: str | None = None
+        self._overlap_candidate_started_at: float | None = None
 
         # Tool execution state. Calls are submitted at
         # response.function_call_arguments.done and run as independent tasks.
@@ -454,6 +466,11 @@ class QwenRealtimeSession:
         self._latest_user_turn_id = None
         self._latest_user_turn_sequence = 0
         self._user_turn_open = False
+        self._overlap_candidate_turn_id = None
+        self._overlap_candidate_response_id = None
+        self._overlap_candidate_source = None
+        self._overlap_candidate_started_at = None
+        self._pending_response_origins.clear()
         self._response_turn_ids.clear()
         self._known_call_ids.clear()
         self._pending_tool_calls.clear()
@@ -568,6 +585,7 @@ class QwenRealtimeSession:
             "turn_detection": {
                 "type": QWEN_TURN_DETECTION,
                 "threshold": QWEN_VAD_THRESHOLD,
+                "prefix_padding_ms": QWEN_VAD_PREFIX_PADDING_MS,
                 "silence_duration_ms": QWEN_VAD_SILENCE_DURATION_MS,
             },
         }
@@ -608,6 +626,7 @@ class QwenRealtimeSession:
                 "output_audio_rate": QWEN_OUTPUT_SAMPLE_RATE,
                 "audio_format": QWEN_AUDIO_FORMAT,
                 "vad_threshold": QWEN_VAD_THRESHOLD,
+                "vad_prefix_padding_ms": QWEN_VAD_PREFIX_PADDING_MS,
                 "vad_silence_duration_ms": QWEN_VAD_SILENCE_DURATION_MS,
             }
         )
@@ -746,7 +765,11 @@ class QwenRealtimeSession:
         if not response_id:
             return
 
-        turn_id = self._latest_user_turn_id
+        turn_id = (
+            self._pending_response_origins.pop(0)
+            if self._pending_response_origins
+            else self._latest_user_turn_id
+        )
         self._response_turn_ids[response_id] = turn_id
         self._assistant_transcript_buffers[response_id] = ""
         self._start_response_metrics(response_id)
@@ -803,10 +826,56 @@ class QwenRealtimeSession:
         )
 
     async def _handle_qwen_speech_started(self, event: dict[str, Any]) -> None:
-        await self._begin_user_turn(
+        await self._begin_overlap_candidate(
             turn_id=event.get("item_id"),
             source="qwen_semantic_vad",
         )
+
+    async def _begin_overlap_candidate(
+        self,
+        turn_id: str | None,
+        source: str,
+    ) -> str:
+        if not turn_id:
+            self._turn_sequence_fallback += 1
+            turn_id = f"voice-turn-{self._turn_sequence_fallback}"
+        turn_id = safe_log_token(
+            turn_id,
+            f"voice-turn-{self._turn_sequence_fallback + 1}",
+        )
+        interrupted_response_id = (
+            self.latest_response_id
+            or self.current_response_id
+            or self._playback_response_id
+        )
+        self._overlap_candidate_turn_id = turn_id
+        self._overlap_candidate_response_id = interrupted_response_id
+        self._overlap_candidate_source = source
+        self._overlap_candidate_started_at = time.perf_counter()
+        self._record_timeline(
+            "overlap_candidate.started",
+            source=source,
+            response_id=interrupted_response_id,
+            turn_id=turn_id,
+        )
+        await self._send_client(
+            {
+                "type": "speech_started",
+                "turn_id": turn_id,
+                "utterance_id": turn_id,
+                "candidate": True,
+            }
+        )
+        if interrupted_response_id:
+            await self._send_client(
+                {
+                    "type": "assistant_playback_pause",
+                    "response_id": interrupted_response_id,
+                    "turn_id": turn_id,
+                    "reason": f"{source}_overlap_candidate",
+                }
+            )
+        return turn_id
 
     async def _begin_user_turn(
         self,
@@ -895,6 +964,90 @@ class QwenRealtimeSession:
 
         return turn_id
 
+    async def _resume_overlap_candidate(
+        self,
+        turn_id: str,
+        transcript: str,
+    ) -> None:
+        response_id = self._overlap_candidate_response_id
+        self._record_timeline(
+            "overlap_candidate.backchannel_resume",
+            response_id=response_id,
+            turn_id=turn_id,
+            transcript=transcript,
+        )
+        if response_id:
+            await self._send_client(
+                {
+                    "type": "assistant_playback_resume",
+                    "response_id": response_id,
+                    "turn_id": turn_id,
+                    "reason": "backchannel_or_noise",
+                }
+            )
+        self._clear_overlap_candidate()
+
+    async def _take_floor_from_overlap(self, turn_id: str | None) -> None:
+        candidate_turn_id = turn_id or self._overlap_candidate_turn_id
+        source = self._overlap_candidate_source or "qwen_semantic_vad"
+        interrupted_response_id = self._overlap_candidate_response_id
+        await self._begin_user_turn(candidate_turn_id, source)
+        # _begin_user_turn intentionally re-evaluates active playback. If a
+        # paused response was no longer considered active, still invalidate the
+        # candidate response captured at speech_started.
+        if interrupted_response_id and interrupted_response_id not in self._interrupted_response_ids:
+            self._interrupted_response_ids.add(interrupted_response_id)
+            await self._send_client(
+                {
+                    "type": "assistant_playback_stop",
+                    "response_id": interrupted_response_id,
+                    "turn_id": candidate_turn_id,
+                    "reason": f"{source}_floor_taken",
+                    "clear_queue": True,
+                }
+            )
+        self._record_timeline(
+            "overlap_candidate.floor_taken",
+            response_id=interrupted_response_id,
+            turn_id=candidate_turn_id,
+        )
+        self._clear_overlap_candidate()
+
+    def _clear_overlap_candidate(self) -> None:
+        self._overlap_candidate_turn_id = None
+        self._overlap_candidate_response_id = None
+        self._overlap_candidate_source = None
+        self._overlap_candidate_started_at = None
+
+    @staticmethod
+    def _is_backchannel_transcript(transcript: str) -> bool:
+        text = transcript.strip().lower()
+        normalized = "".join(
+            ch for ch in text if ch.isalnum() or "\u4e00" <= ch <= "\u9fff"
+        )
+        backchannels = {
+            "嗯",
+            "嗯嗯",
+            "哦",
+            "喔",
+            "好",
+            "好的",
+            "对",
+            "是",
+            "行",
+            "可以",
+            "继续",
+            "你继续",
+            "ok",
+            "okay",
+            "yes",
+            "yeah",
+            "yep",
+            "uhhuh",
+            "mhm",
+        }
+        return normalized in backchannels or len(normalized) <= 1
+
     def _end_user_turn(self, turn_id: str | None = None) -> None:
         if turn_id and self._latest_user_turn_id and turn_id != self._latest_user_turn_id:
             return
@@ -934,6 +1087,11 @@ class QwenRealtimeSession:
         self._last_user_transcript = clean_transcript
         if turn_id:
             self._user_transcripts_by_turn[turn_id] = clean_transcript
+        if turn_id == self._overlap_candidate_turn_id:
+            if self._is_backchannel_transcript(clean_transcript):
+                await self._resume_overlap_candidate(turn_id, clean_transcript)
+            else:
+                await self._take_floor_from_overlap(turn_id)
         self._log_conversation_record(
             "You",
             clean_transcript,
@@ -1124,6 +1282,14 @@ class QwenRealtimeSession:
             raise
         except Exception as exc:
             log.exception("Unexpected tool task failure: %s", exc)
+            await self._send_failed_tool_call_output(
+                response_id=response_id,
+                turn_id=turn_id,
+                call_id=call_id,
+                name=name,
+                arguments_raw=arguments_raw,
+                error=str(exc),
+            )
             self._record_timeline(
                 "tool.done",
                 response_id=response_id,
@@ -1135,6 +1301,56 @@ class QwenRealtimeSession:
             )
         finally:
             await self._finalize_tool_call(response_id, should_respond=True)
+
+    async def _send_failed_tool_call_output(
+        self,
+        *,
+        response_id: str,
+        turn_id: str | None,
+        call_id: str,
+        name: str,
+        arguments_raw: str,
+        error: str,
+    ) -> None:
+        result = {
+            "success": False,
+            "tool": name,
+            "payload": {},
+            "error": error,
+        }
+        await self._send_client(
+            {
+                "type": "tool_result",
+                "response_id": response_id,
+                "turn_id": turn_id,
+                "call_id": call_id,
+                **result,
+            }
+        )
+        await self._send_qwen(
+            {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": self._tool_result_text(result),
+                },
+            }
+        )
+        await self._send_client(
+            {
+                "type": "tool_execution_completed",
+                "response_id": response_id,
+                "turn_id": turn_id,
+                "call_id": call_id,
+                "name": name,
+                "arguments": arguments_raw,
+                "status": "failed",
+                "success": False,
+                "result": {},
+                "error": error,
+            }
+        )
 
     async def _run_tool_call(
         self,
@@ -1333,7 +1549,7 @@ class QwenRealtimeSession:
         )
 
         if should_respond and not has_newer_user_turn:
-            await self._create_response_if_idle("tool.finalize")
+            await self._create_response_if_idle("tool.finalize", origin_turn_id=origin_turn_id)
 
         if should_respond and has_newer_user_turn:
             self._record_timeline(
@@ -1378,11 +1594,20 @@ class QwenRealtimeSession:
             user_transcript=user_transcript,
         )
 
-    async def _create_response_if_idle(self, reason: str) -> bool:
+    async def _create_response_if_idle(
+        self,
+        reason: str,
+        origin_turn_id: str | None = None,
+    ) -> bool:
         if self.current_response_id:
             return False
-        self._record_timeline("response.create.sent", reason=reason)
-        return await self._send_qwen({"type": "response.create"})
+        origin = origin_turn_id if origin_turn_id is not None else self._latest_user_turn_id
+        self._pending_response_origins.append(origin)
+        self._record_timeline("response.create.sent", reason=reason, origin_turn_id=origin)
+        sent = await self._send_qwen({"type": "response.create"})
+        if not sent and self._pending_response_origins:
+            self._pending_response_origins.pop()
+        return sent
 
     async def _send_opening_response(self) -> None:
         if QWEN_OPENING_ENABLED:
