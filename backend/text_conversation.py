@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime
+import http.client
 import json
 import logging
 import os
@@ -28,11 +29,14 @@ from logging_utils import resolve_session_log_dir, safe_log_token
 from prompts import build_system_prompt
 from tools import (
     TOOL_SCHEMAS,
+    activate_state_scope,
     execute_tool,
+    get_active_filters_for_frontend,
     get_views_for_frontend,
     init_views,
     log_tool_call,
     normalize_tool_arguments,
+    persist_active_state_scope,
     realtime_state,
 )
 
@@ -59,12 +63,9 @@ QWEN_API_KEY = (
 QWEN_REGION = os.getenv("QWEN_REGION", "beijing").strip().lower()
 QWEN_TEXT_MODEL = os.getenv("QWEN_TEXT_MODEL", os.getenv("QWEN_CHAT_MODEL", "qwen3.5-plus")).strip()
 QWEN_TEXT_TEMPERATURE = float(os.getenv("QWEN_TEXT_TEMPERATURE", "0.2"))
-QWEN_TEXT_TIMEOUT_SECONDS = float(os.getenv("QWEN_TEXT_TIMEOUT_SECONDS", "120"))
-QWEN_TEXT_RETRY_ATTEMPTS = max(1, int(os.getenv("QWEN_TEXT_RETRY_ATTEMPTS", "2")))
+QWEN_TEXT_RETRY_ATTEMPTS = max(1, int(os.getenv("QWEN_TEXT_RETRY_ATTEMPTS", "3")))
 QWEN_TEXT_RETRY_BACKOFF_SECONDS = float(os.getenv("QWEN_TEXT_RETRY_BACKOFF_SECONDS", "1.5"))
-QWEN_TEXT_MAX_TOKENS = int(os.getenv("QWEN_TEXT_MAX_TOKENS", "900"))
 QWEN_TEXT_ENABLE_THINKING = _env_bool("QWEN_TEXT_ENABLE_THINKING", False)
-QWEN_TEXT_MAX_TOOL_ROUNDS = int(os.getenv("QWEN_TEXT_MAX_TOOL_ROUNDS", "8"))
 QWEN_CHAT_COMPLETIONS_URL_OVERRIDE = os.getenv("QWEN_CHAT_COMPLETIONS_URL", "").strip()
 
 MODEL_ONLY_TOOLS = {"inspect_visual"}
@@ -125,6 +126,10 @@ QWEN_CHAT_COMPLETIONS_URL = _resolve_qwen_chat_completions_url()
 
 class QwenTextTimeoutError(RuntimeError):
     """Raised when DashScope does not return a chat completion in time."""
+
+
+class QwenTextTransientNetworkError(RuntimeError):
+    """Raised for retryable DashScope chat transport failures."""
 
 
 def _create_turn_id() -> str:
@@ -193,12 +198,12 @@ def _post_chat_completion(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=QWEN_TEXT_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(request) as response:
             response_body = response.read().decode("utf-8")
             return json.loads(response_body)
     except (TimeoutError, socket.timeout) as exc:
         raise QwenTextTimeoutError(
-            f"DashScope chat completion timed out after {QWEN_TEXT_TIMEOUT_SECONDS:g}s."
+            "DashScope chat completion timed out."
         ) from exc
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
@@ -206,11 +211,49 @@ def _post_chat_completion(payload: dict[str, Any]) -> dict[str, Any]:
             f"DashScope chat completion failed with HTTP {exc.code}: {error_body[:1000]}"
         ) from exc
     except urllib.error.URLError as exc:
-        if isinstance(getattr(exc, "reason", None), (TimeoutError, socket.timeout)):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, (TimeoutError, socket.timeout)):
             raise QwenTextTimeoutError(
-                f"DashScope chat completion timed out after {QWEN_TEXT_TIMEOUT_SECONDS:g}s."
+                "DashScope chat completion timed out."
+            ) from exc
+        if _is_retryable_chat_transport_error(reason):
+            raise QwenTextTransientNetworkError(
+                "DashScope chat completion connection was reset."
             ) from exc
         raise RuntimeError(f"DashScope chat completion request failed: {exc}") from exc
+    except (http.client.RemoteDisconnected, ConnectionResetError, ConnectionAbortedError) as exc:
+        raise QwenTextTransientNetworkError(
+            "DashScope chat completion connection was reset."
+        ) from exc
+
+
+def _is_retryable_chat_transport_error(exc: Any) -> bool:
+    if isinstance(
+        exc,
+        (
+            http.client.RemoteDisconnected,
+            ConnectionResetError,
+            ConnectionAbortedError,
+            ConnectionRefusedError,
+            socket.timeout,
+            TimeoutError,
+        ),
+    ):
+        return True
+    if isinstance(exc, OSError):
+        return getattr(exc, "winerror", None) in {10053, 10054, 10060, 10061}
+    return False
+
+
+def _friendly_text_model_error(exc: Exception) -> str:
+    if isinstance(exc, QwenTextTimeoutError):
+        reason = "文本模型响应超时"
+    else:
+        reason = "文本模型连接被远端重置"
+    return (
+        f"{reason}。当前仪表盘状态已经保留；请直接重试刚才的问题，"
+        "或把问题拆成一个品类/一个指标继续分析。"
+    )
 
 
 class QwenTextConversationSession:
@@ -222,11 +265,13 @@ class QwenTextConversationSession:
         session_id: str = "default",
         model: str | None = None,
         analysis_id: str | None = None,
+        reset_views: bool = True,
     ):
         self.client_ws = client_ws
         self.session_id = session_id
         self.analysis_id = safe_log_token(analysis_id) or None
         self.log_scope_id = self.analysis_id or safe_log_token(session_id, "session")
+        self.reset_views = reset_views
         self.model = model or QWEN_TEXT_MODEL
         self.is_processing = False
         self.current_turn_id: str | None = None
@@ -247,7 +292,7 @@ class QwenTextConversationSession:
         self._conversation_logger: logging.Logger | None = None
 
     async def start(self) -> None:
-        init_views()
+        activate_state_scope(self.log_scope_id, reset=self.reset_views)
         self._running = True
         await self._send_session_snapshot()
 
@@ -276,6 +321,7 @@ class QwenTextConversationSession:
             await self._send_client({"type": "error", "message": str(exc)})
         finally:
             self._running = False
+            persist_active_state_scope()
             await self._cancel_turn_tasks()
 
     async def _reset_session(self) -> None:
@@ -300,6 +346,7 @@ class QwenTextConversationSession:
             "type": "init",
             "session_id": self.session_id,
             "views": get_views_for_frontend(),
+            "active_filters": get_active_filters_for_frontend(),
             **payload,
         })
         await self._send_client({
@@ -391,34 +438,29 @@ class QwenTextConversationSession:
             })
             response_started = True
 
-            for round_index in range(QWEN_TEXT_MAX_TOOL_ROUNDS):
+            round_index = 0
+            while self._is_current_turn(turn_id, generation):
                 response = await self._call_text_model()
                 if not self._is_current_turn(turn_id, generation):
                     return
                 message = self._extract_message(response)
+                assistant_text = self._message_text(message)
                 tool_calls = self._extract_tool_calls(message)
 
                 if not tool_calls:
-                    assistant_text = self._message_text(message).strip()
-                    if not assistant_text:
-                        assistant_text = "I could not produce a text answer."
-                    self.messages.append({"role": "assistant", "content": assistant_text})
-                    self._log_conversation("AI", assistant_text)
-                    if not self._is_current_turn(turn_id, generation):
+                    final_text = assistant_text.strip() or "I could not produce a text answer."
+                    self.messages.append({"role": "assistant", "content": final_text})
+                    if not await self._emit_assistant_text(final_text, turn_id, generation):
                         return
-                    await self._send_client({
-                        "type": "transcript",
-                        "role": "assistant",
-                        "delta": assistant_text,
-                        "response_id": turn_id,
-                    })
                     break
 
                 self.messages.append({
                     "role": "assistant",
-                    "content": self._message_text(message),
+                    "content": assistant_text,
                     "tool_calls": tool_calls,
                 })
+                if not await self._emit_assistant_text(assistant_text, turn_id, generation):
+                    return
 
                 for tool_call in tool_calls:
                     await self._execute_tool_call(
@@ -430,30 +472,18 @@ class QwenTextConversationSession:
                     )
                     if not self._is_current_turn(turn_id, generation):
                         return
-            else:
-                fallback = "I reached the tool-call limit before completing this turn."
-                self.messages.append({"role": "assistant", "content": fallback})
-                if not self._is_current_turn(turn_id, generation):
-                    return
-                await self._send_client({
-                    "type": "transcript",
-                    "role": "assistant",
-                    "delta": fallback,
-                    "response_id": turn_id,
-                })
+
+                round_index += 1
         except asyncio.CancelledError:
             if turn_id in self._interrupted_turn_ids:
                 self._truncate_turn_messages(turn_id)
             raise
-        except QwenTextTimeoutError as exc:
+        except (QwenTextTimeoutError, QwenTextTransientNetworkError) as exc:
             if not self._is_current_turn(turn_id, generation):
                 return
-            log.warning("Text turn timed out: %s", exc)
-            self._log_event("TEXT_TURN_TIMEOUT turn_id=%s %s", turn_id, exc)
-            error_text = (
-                "文本模型响应超时。我已保留当前仪表盘状态；请再试一次，"
-                "或先缩小到一个维度继续分析。"
-            )
+            log.warning("Text model unavailable after retries: %s", exc)
+            self._log_event("TEXT_TURN_MODEL_UNAVAILABLE turn_id=%s %s", turn_id, exc)
+            error_text = _friendly_text_model_error(exc)
             self.messages.append({"role": "assistant", "content": error_text})
             self._log_conversation("AI", error_text)
             if not response_started:
@@ -511,6 +541,23 @@ class QwenTextConversationSession:
                 "metrics": {"response_duration_ms": duration_ms},
             })
 
+    async def _emit_assistant_text(self, text: str, turn_id: str, generation: int) -> bool:
+        if not text or not text.strip():
+            return True
+        if not self._is_current_turn(turn_id, generation):
+            return False
+        self._log_conversation("AI", text)
+        if not self._is_current_turn(turn_id, generation):
+            return False
+        await self._send_client({
+            "type": "transcript",
+            "role": "assistant",
+            "delta": text,
+            "response_id": turn_id,
+            "turn_id": turn_id,
+        })
+        return self._is_current_turn(turn_id, generation)
+
     def _model_user_text(self, user_text: str) -> str:
         if (
             self._last_interrupted_user_text
@@ -564,36 +611,33 @@ class QwenTextConversationSession:
             "model": self.model,
             "messages": [
                 {"role": "system", "content": self._build_instructions()},
-                *self.messages[-30:],
+                *self.messages,
             ],
             "tools": _chat_tool_schemas(),
             "tool_choice": "auto",
             "temperature": QWEN_TEXT_TEMPERATURE,
             "stream": False,
         }
-        if QWEN_TEXT_MAX_TOKENS > 0:
-            payload["max_tokens"] = QWEN_TEXT_MAX_TOKENS
         payload["enable_thinking"] = QWEN_TEXT_ENABLE_THINKING
 
-        last_timeout: QwenTextTimeoutError | None = None
+        last_retryable_error: Exception | None = None
         for attempt in range(1, QWEN_TEXT_RETRY_ATTEMPTS + 1):
             self._log_event(
-                "CHAT_COMPLETION_REQUEST messages=%d attempt=%d/%d timeout=%.1fs thinking=%s max_tokens=%s",
+                "CHAT_COMPLETION_REQUEST messages=%d attempt=%d/%d thinking=%s",
                 len(payload["messages"]),
                 attempt,
                 QWEN_TEXT_RETRY_ATTEMPTS,
-                QWEN_TEXT_TIMEOUT_SECONDS,
                 QWEN_TEXT_ENABLE_THINKING,
-                payload.get("max_tokens"),
             )
             try:
                 response = await asyncio.to_thread(_post_chat_completion, payload)
-            except QwenTextTimeoutError as exc:
-                last_timeout = exc
+            except (QwenTextTimeoutError, QwenTextTransientNetworkError) as exc:
+                last_retryable_error = exc
                 self._log_event(
-                    "CHAT_COMPLETION_TIMEOUT attempt=%d/%d %s",
+                    "CHAT_COMPLETION_RETRYABLE_ERROR attempt=%d/%d kind=%s %s",
                     attempt,
                     QWEN_TEXT_RETRY_ATTEMPTS,
+                    type(exc).__name__,
                     exc,
                 )
                 if attempt >= QWEN_TEXT_RETRY_ATTEMPTS:
@@ -604,8 +648,8 @@ class QwenTextConversationSession:
             self._log_event("CHAT_COMPLETION_RESPONSE %s", json.dumps(response, ensure_ascii=False)[:2000])
             return response
 
-        if last_timeout:
-            raise last_timeout
+        if last_retryable_error:
+            raise last_retryable_error
         raise RuntimeError("DashScope chat completion did not return a response.")
 
     def _build_instructions(self) -> str:

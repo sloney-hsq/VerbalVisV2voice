@@ -260,8 +260,8 @@ import { useWebSocket } from "../composables/useWebSocket";
 
 const store = useDashboardStore();
 const QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime";
-const ANALYSIS_ID_STORAGE_KEY = "verbalvis.analysisId";
 const analysisId = getOrCreateAnalysisId();
+store.setActiveWorkspace(getInitialInteractionMode());
 const realtimeInputSampleRate = getNumericOption(
   "inputRate",
   "VITE_REALTIME_INPUT_SAMPLE_RATE",
@@ -276,15 +276,18 @@ const audio = useAudio({
   inputSampleRate: realtimeInputSampleRate,
   outputSampleRate: realtimeOutputSampleRate,
 });
-const ws = useWebSocket({
-  enqueue: audio.enqueue,
-  flush: audio.flush,
-  beginAssistantResponse: audio.beginAssistantResponse,
-  stop: audio.stop,
-  pauseAssistantAudio: audio.pauseAssistantAudio,
-  resumeAssistantAudio: audio.resumeAssistantAudio,
-  stopAssistantAudio: audio.stopAssistantAudio,
-});
+const ws = useWebSocket(
+  {
+    enqueue: audio.enqueue,
+    flush: audio.flush,
+    beginAssistantResponse: audio.beginAssistantResponse,
+    stop: audio.stop,
+    pauseAssistantAudio: audio.pauseAssistantAudio,
+    resumeAssistantAudio: audio.resumeAssistantAudio,
+    stopAssistantAudio: audio.stopAssistantAudio,
+  },
+  { getAnalysisId: getCurrentAnalysisId }
+);
 
 let sessionPromise = null;
 const isStartingListening = ref(false);
@@ -404,12 +407,10 @@ watch(
     audio.stopAssistantAudio?.({ blockNewAudio: true });
     store.isAssistantSpeaking = false;
     store.setTextTurnProcessing(false);
-    store.clearTranscripts();
-    pendingText.value = "";
     sessionPromise = null;
     ws.disconnect();
     await nextTick();
-    ws.connect(buildWsUrl());
+    ws.connect(buildWsUrl({ preserveState: true }));
     if (interactionMode.value === "text") {
       focusTextInput();
     }
@@ -487,7 +488,10 @@ async function startListeningMic() {
         ws.sendAudio(base64pcm);
       },
       onSpeechStart: () => {
-        audio.pauseAssistantAudio?.();
+        ws.beginUserSpeech?.("client_vad_speech_started");
+      },
+      onSpeechEnd: () => {
+        ws.endUserSpeech?.();
       },
     });
   } catch (error) {
@@ -500,6 +504,7 @@ async function startListeningMic() {
 
 function stopListeningMic() {
   audio.stopRecording();
+  ws.endUserSpeech?.();
   isStartingListening.value = false;
 }
 
@@ -696,7 +701,7 @@ function submitText() {
 
   if (store.isTextTurnProcessing) {
     if (text) {
-      stagePendingText(text);
+      sendTextToAssistant(text);
       return;
     }
     return;
@@ -706,12 +711,6 @@ function submitText() {
   if (!textToSend) return;
   pendingText.value = "";
   sendTextToAssistant(textToSend);
-}
-
-function stagePendingText(text) {
-  pendingText.value = text;
-  inputText.value = "";
-  nextTick(focusTextInput);
 }
 
 function submitPendingText() {
@@ -750,6 +749,7 @@ function focusTextInput() {
 function setInteractionMode(mode) {
   if (interactionMode.value === mode) return;
   interactionMode.value = mode;
+  store.setActiveWorkspace(mode);
   const url = new URL(window.location.href);
   url.searchParams.set(
     "condition",
@@ -768,21 +768,15 @@ function getInitialInteractionMode() {
 
 function getOrCreateAnalysisId() {
   const params = new URLSearchParams(window.location.search);
-  const forceNew = ["1", "true", "yes", "on"].includes(
-    String(params.get("new_analysis") || params.get("newAnalysis") || "").toLowerCase()
-  );
   const explicit = normalizeAnalysisId(params.get("analysis_id") || params.get("analysisId"));
   if (explicit) {
     return setCurrentAnalysisId(explicit);
   }
 
-  const existing = forceNew ? "" : normalizeAnalysisId(window.__verbalvis_analysis_id);
+  const existing = normalizeAnalysisId(window.__verbalvis_analysis_id);
   if (existing) return existing;
 
-  const stored = forceNew ? "" : normalizeAnalysisId(readStoredAnalysisId());
-  if (stored) return setCurrentAnalysisId(stored);
-
-  const id = `analysis-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
+  const id = `session-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
   return setCurrentAnalysisId(id);
 }
 
@@ -790,30 +784,21 @@ function normalizeAnalysisId(value) {
   return String(value || "").trim().replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 80);
 }
 
-function readStoredAnalysisId() {
-  try {
-    return window.localStorage?.getItem(ANALYSIS_ID_STORAGE_KEY) || "";
-  } catch (_) {
-    return "";
-  }
-}
-
 function setCurrentAnalysisId(id) {
   window.__verbalvis_analysis_id = id;
-  try {
-    window.localStorage?.setItem(ANALYSIS_ID_STORAGE_KEY, id);
-  } catch (_) {
-    // Storage can be disabled in private modes; the in-memory id still works.
-  }
   return id;
 }
 
-function buildWsUrl() {
+function getCurrentAnalysisId() {
+  return `${analysisId}-${interactionMode.value === "text" ? "text" : "voice"}`;
+}
+
+function buildWsUrl({ preserveState = false } = {}) {
   const params = new URLSearchParams(window.location.search);
   const explicitUrl = interactionMode.value === "text"
     ? (params.get("textWs") || import.meta.env.VITE_TEXT_WS_URL)
     : (params.get("ws") || import.meta.env.VITE_REALTIME_WS_URL);
-  if (explicitUrl) return withAnalysisId(explicitUrl);
+  if (explicitUrl) return withAnalysisId(explicitUrl, { preserveState });
 
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   const configuredPath = interactionMode.value === "text"
@@ -821,7 +806,10 @@ function buildWsUrl() {
     : (params.get("wsPath") || import.meta.env.VITE_REALTIME_WS_PATH || "/ws");
   const path = configuredPath.startsWith("/") ? configuredPath : `/${configuredPath}`;
   const url = new URL(`${protocol}://${window.location.host}${path}`);
-  url.searchParams.set("analysis_id", analysisId);
+  url.searchParams.set("analysis_id", getCurrentAnalysisId());
+  if (preserveState) {
+    url.searchParams.set("preserve_state", "1");
+  }
   if (interactionMode.value === "voice") {
     url.searchParams.set("model", QWEN_REALTIME_MODEL);
   } else {
@@ -831,11 +819,14 @@ function buildWsUrl() {
   return url.toString();
 }
 
-function withAnalysisId(rawUrl) {
+function withAnalysisId(rawUrl, { preserveState = false } = {}) {
   const url = new URL(rawUrl, window.location.href);
   if (url.protocol === "http:") url.protocol = "ws:";
   if (url.protocol === "https:") url.protocol = "wss:";
-  url.searchParams.set("analysis_id", analysisId);
+  url.searchParams.set("analysis_id", getCurrentAnalysisId());
+  if (preserveState) {
+    url.searchParams.set("preserve_state", "1");
+  }
   return url.toString();
 }
 </script>
@@ -1531,9 +1522,10 @@ function withAnalysisId(rawUrl) {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  height: 300px;
-  max-height: 300px;
-  min-height: 300px;
+  height: clamp(320px, 34dvh, 560px);
+  max-height: min(56dvh, 760px);
+  min-height: 240px;
+  resize: vertical;
   box-shadow: none;
 }
 

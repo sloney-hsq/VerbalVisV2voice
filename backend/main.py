@@ -83,6 +83,7 @@ async def _run_qwen_session(websocket: WebSocket) -> None:
         session_id=session_id,
         model=QWEN_REALTIME_MODEL,
         analysis_id=analysis_id,
+        reset_views=not _preserve_state_from_query(websocket),
     )
     try:
         await session.start()
@@ -108,6 +109,7 @@ async def _run_text_session(websocket: WebSocket) -> None:
         session_id=session_id,
         model=QWEN_TEXT_MODEL,
         analysis_id=analysis_id,
+        reset_views=not _preserve_state_from_query(websocket),
     )
     try:
         await session.start()
@@ -124,6 +126,15 @@ def _analysis_id_from_query(websocket: WebSocket) -> str | None:
         or ""
     ).strip()
     return value or None
+
+
+def _preserve_state_from_query(websocket: WebSocket) -> bool:
+    value = (
+        websocket.query_params.get("preserve_state")
+        or websocket.query_params.get("preserveState")
+        or ""
+    ).strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 if FRONTEND_DIST.exists():

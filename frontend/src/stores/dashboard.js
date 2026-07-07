@@ -3,12 +3,17 @@ import { computed, ref } from "vue";
 
 export const useDashboardStore = defineStore("dashboard", () => {
   // ---- state ----
-  const views = ref([]);
-  const activeFilters = ref([]);
-  const highlightedViewIds = ref([]);
+  const activeWorkspaceId = ref("voice");
+  const workspaces = ref({
+    voice: createWorkspace(),
+    text: createWorkspace(),
+  });
+  const views = workspaceField("views");
+  const activeFilters = workspaceField("activeFilters");
+  const highlightedViewIds = workspaceField("highlightedViewIds");
   const highlightedViewId = computed(() => highlightedViewIds.value[0] || null);
-  const highlightElement = ref(null);
-  const transcriptExchanges = ref([]);
+  const highlightElement = workspaceField("highlightElement");
+  const transcriptExchanges = workspaceField("transcriptExchanges");
   const transcripts = computed(() => (
     transcriptExchanges.value.flatMap((exchange) => (
       [exchange.user, exchange.assistant].filter(Boolean)
@@ -25,18 +30,59 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const inputAudioRate = ref(16000);
   const outputAudioRate = ref(24000);
   const isTextTurnProcessing = ref(false);
-  const recentToolCalls = ref([]);
-  const currentUserEntryId = ref(null);
-  const currentAssistantResponseId = ref(null);
-  const pendingToolActions = ref([]);
+  const recentToolCalls = workspaceField("recentToolCalls");
+  const currentUserEntryId = workspaceField("currentUserEntryId");
+  const currentAssistantResponseId = workspaceField("currentAssistantResponseId");
+  const pendingToolActions = workspaceField("pendingToolActions");
 
   // ---- getters ----
   const viewIds = computed(() => views.value.map((v) => v.id));
 
   // ---- actions ----
 
-  function initViews(viewList) {
-    activeFilters.value = [];
+  function createWorkspace() {
+    return {
+      views: [],
+      activeFilters: [],
+      highlightedViewIds: [],
+      highlightElement: null,
+      transcriptExchanges: [],
+      recentToolCalls: [],
+      currentUserEntryId: null,
+      currentAssistantResponseId: null,
+      pendingToolActions: [],
+    };
+  }
+
+  function workspaceField(field) {
+    return computed({
+      get: () => currentWorkspace()[field],
+      set: (value) => {
+        currentWorkspace()[field] = value;
+      },
+    });
+  }
+
+  function currentWorkspace() {
+    const key = normalizeWorkspaceId(activeWorkspaceId.value);
+    if (!workspaces.value[key]) {
+      workspaces.value[key] = createWorkspace();
+    }
+    return workspaces.value[key];
+  }
+
+  function normalizeWorkspaceId(workspaceId) {
+    return workspaceId === "text" ? "text" : "voice";
+  }
+
+  function setActiveWorkspace(workspaceId) {
+    activeWorkspaceId.value = normalizeWorkspaceId(workspaceId);
+  }
+
+  function initViews(viewList, options = {}) {
+    activeFilters.value = Array.isArray(options.activeFilters)
+      ? options.activeFilters
+      : [];
     highlightedViewIds.value = viewList.filter((v) => v.highlighted).map((v) => v.id);
     const highlightedIds = new Set(highlightedViewIds.value);
     views.value = viewList.map((v) => ({ ...v, highlighted: highlightedIds.has(v.id) }));
@@ -106,11 +152,13 @@ export const useDashboardStore = defineStore("dashboard", () => {
   function handleToolResult(msg) {
     const tool = msg.tool;
     if (tool === "highlight_visual" && msg.success && msg.payload) {
-      if (msg.payload.action === "clear") {
+      const requestedIds = msg.payload.view_ids || msg.payload.highlighted_views || [msg.payload.view_id];
+      const normalizedIds = normalizeViewIds(requestedIds);
+      if (msg.payload.action === "clear" || normalizedIds.length === 0) {
         clearHighlight();
       } else {
         highlightViews(
-          msg.payload.view_ids || msg.payload.highlighted_views || [msg.payload.view_id],
+          normalizedIds,
           msg.payload.highlight_element,
           msg.payload.dim_others ?? true
         );
@@ -431,9 +479,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   function trimTranscriptHistory() {
-    if (transcriptExchanges.value.length > 50) {
-      transcriptExchanges.value = transcriptExchanges.value.slice(-50);
-    }
+    // Keep the full in-session transcript until the user explicitly clears it.
+    // Study sessions are short, and hidden truncation makes later utterances
+    // hard to audit when debugging interruption or tool-calling behavior.
   }
 
   function makeTranscriptId(prefix) {
@@ -441,6 +489,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   return {
+    activeWorkspaceId,
     views,
     activeFilters,
     highlightedViewIds,
@@ -461,6 +510,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     isTextTurnProcessing,
     recentToolCalls,
     viewIds,
+    setActiveWorkspace,
     initViews,
     setSessionInfo,
     updateViews,

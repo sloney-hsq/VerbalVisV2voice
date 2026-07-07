@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import copy
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -87,6 +88,8 @@ view_counter: int = BASE_VIEW_COUNT
 views: list[dict[str, Any]] = []
 highlighted_views: list[str] = []
 low_score_threshold: int = LOW_SCORE_THRESHOLD_DEFAULT
+_active_state_scope = "default"
+_state_scope_snapshots: dict[str, dict[str, Any]] = {}
 
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -176,6 +179,53 @@ def init_views() -> None:
         view = {**defn, "data": [], "statistics": {}}
         views.append(view)
     _refresh_all_views()
+
+
+def activate_state_scope(scope_id: str | None, reset: bool = False) -> None:
+    """Switch the module-level prototype state to a named dashboard workspace."""
+    global _active_state_scope
+
+    scope = _normalize_state_scope(scope_id)
+    if scope == _active_state_scope and not reset:
+        return
+
+    _state_scope_snapshots[_active_state_scope] = _snapshot_state()
+    _active_state_scope = scope
+
+    if reset or scope not in _state_scope_snapshots:
+        init_views()
+        _state_scope_snapshots[scope] = _snapshot_state()
+        return
+
+    _restore_state(_state_scope_snapshots[scope])
+
+
+def persist_active_state_scope() -> None:
+    _state_scope_snapshots[_active_state_scope] = _snapshot_state()
+
+
+def _normalize_state_scope(scope_id: str | None) -> str:
+    scope = str(scope_id or "").strip()
+    return scope or "default"
+
+
+def _snapshot_state() -> dict[str, Any]:
+    return {
+        "active_filters": copy.deepcopy(active_filters),
+        "view_counter": view_counter,
+        "views": copy.deepcopy(views),
+        "highlighted_views": copy.deepcopy(highlighted_views),
+        "low_score_threshold": low_score_threshold,
+    }
+
+
+def _restore_state(snapshot: dict[str, Any]) -> None:
+    global active_filters, view_counter, views, highlighted_views, low_score_threshold
+    active_filters = copy.deepcopy(snapshot.get("active_filters", []))
+    view_counter = int(snapshot.get("view_counter", BASE_VIEW_COUNT))
+    views = copy.deepcopy(snapshot.get("views", []))
+    highlighted_views = copy.deepcopy(snapshot.get("highlighted_views", []))
+    low_score_threshold = int(snapshot.get("low_score_threshold", LOW_SCORE_THRESHOLD_DEFAULT))
 
 
 # ------------------------------------------------------------------
@@ -501,6 +551,11 @@ def normalize_tool_arguments(
     normalized = dict(arguments or {})
     if user_transcript:
         normalized["_user_transcript"] = user_transcript
+    if name == "highlight_visual" and _is_clear_highlight_request(normalized, user_transcript):
+        normalized["action"] = "clear"
+        normalized["view_id"] = None
+        normalized["view_ids"] = []
+        normalized["highlight_element"] = None
     if name == "inspect_visual":
         view_ref = str(normalized.get("view_id") or "").strip().lower()
         transcript_ref = user_transcript.lower()
@@ -791,6 +846,57 @@ def _available_view_labels() -> list[str]:
 
 def _primary_highlighted_view() -> str | None:
     return highlighted_views[0] if highlighted_views else None
+
+
+def _is_clear_highlight_request(args: dict[str, Any], user_transcript: str = "") -> bool:
+    action = str(args.get("action") or "").strip().lower()
+    if action in {"clear", "remove", "cancel", "reset", "none", "off"}:
+        return True
+
+    text_parts = [
+        user_transcript,
+        args.get("intent"),
+        args.get("command"),
+        args.get("description"),
+    ]
+    text = " ".join(str(part or "") for part in text_parts).strip().lower()
+    if not text:
+        return False
+
+    clear_words = (
+        "取消",
+        "清除",
+        "清空",
+        "去掉",
+        "去除",
+        "移除",
+        "不要",
+        "别高亮",
+        "不用高亮",
+        "停止高亮",
+        "取消选中",
+        "取消强调",
+        "恢复正常",
+        "clear",
+        "remove",
+        "cancel",
+        "reset",
+        "turn off",
+        "stop highlighting",
+        "unhighlight",
+    )
+    highlight_words = (
+        "高亮",
+        "highlight",
+        "highlighting",
+        "选中",
+        "强调",
+        "淡化",
+        "dim",
+    )
+    return any(word in text for word in clear_words) and any(
+        word in text for word in highlight_words
+    )
 
 
 def _resolve_highlight_view_ids(args: dict) -> list[str]:
@@ -1213,12 +1319,23 @@ def _build_scatter_summary(
 ) -> dict[str, Any]:
     x_field = view.get("x_field")
     y_field = view.get("y_field")
+    if not isinstance(x_field, str) or not isinstance(y_field, str):
+        return {
+            "sample_size": 0,
+            "correlation": None,
+        }
+
     pairs: list[tuple[float, float]] = []
 
     for row in rows:
+        raw_x = row.get(x_field)
+        raw_y = row.get(y_field)
+        if raw_x is None or raw_y is None:
+            continue
+
         try:
-            x_value = float(row.get(x_field))
-            y_value = float(row.get(y_field))
+            x_value = float(raw_x)
+            y_value = float(raw_y)
         except (TypeError, ValueError):
             continue
         pairs.append((x_value, y_value))
@@ -1973,6 +2090,10 @@ def get_views_for_frontend() -> list[dict]:
             "highlighted": v["id"] in highlighted_views,
         })
     return result
+
+
+def get_active_filters_for_frontend() -> list[dict[str, Any]]:
+    return copy.deepcopy(active_filters)
 
 
 # ------------------------------------------------------------------

@@ -416,8 +416,8 @@ export function useAudio(options = {}) {
     const base64 = _arrayBufferToBase64(buffer);
 
     if (!gateSilence) {
-      onAudioChunk?.(base64);
       _updateUngatedSpeechActivity(rms, chunk.peak ?? 0);
+      onAudioChunk?.(base64);
       return;
     }
 

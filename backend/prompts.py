@@ -55,6 +55,9 @@ does not establish causality.
 Use highlight_visual to direct attention to an existing view. If the user asks
 for chart facts from that view, call inspect_visual before answering.
 
+If the user asks to cancel, clear, remove, stop, or turn off highlighting,
+call highlight_visual with action="clear". Do not answer with only text.
+
 Use filter_data for global filters and remove_filter to remove one field's
 filter.
 

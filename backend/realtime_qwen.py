@@ -5,7 +5,9 @@ Bridges the frontend WebSocket and Alibaba DashScope's Qwen-Omni-Realtime
 WebSocket. The frontend protocol stays identical to the OpenAI relay
 (realtime.py); only the upstream provider differs.
 
-Uses qwen3.5-omni-plus-realtime as the fixed upstream model.
+Uses qwen3.5-omni-plus-realtime as the fixed upstream model. Qwen semantic
+VAD is the only interruption detector; speech_started immediately cancels the
+active response and clears frontend playback.
 """
 
 from __future__ import annotations
@@ -29,11 +31,13 @@ from logging_utils import resolve_session_log_dir, safe_log_token
 from prompts import build_system_prompt
 from tools import (
     TOOL_SCHEMAS,
+    activate_state_scope,
     execute_tool,
+    get_active_filters_for_frontend,
     get_views_for_frontend,
-    init_views,
     log_tool_call,
     normalize_tool_arguments,
+    persist_active_state_scope,
     realtime_state,
 )
 
@@ -66,6 +70,7 @@ MUTATING_TOOLS = {
     "filter_data",
     "remove_filter",
     "append_visual",
+    "highlight_visual",
     "delete_visual",
     "set_low_score_threshold",
 }
@@ -124,7 +129,6 @@ SEND_INPUT_TRANSCRIPTION_CONFIG = os.getenv(
     "QWEN_REALTIME_SEND_TRANSCRIPTION_CONFIG", "false"
 ).lower() in {"1", "true", "yes", "on"}
 
-QWEN_RECONNECT_ATTEMPTS = int(os.getenv("QWEN_REALTIME_RECONNECT_ATTEMPTS", "2"))
 QWEN_OPENING_ENABLED = os.getenv(
     "QWEN_REALTIME_OPENING_ENABLED", "true"
 ).lower() in {"1", "true", "yes", "on"}
@@ -134,40 +138,10 @@ QWEN_OPENING_ENABLED = os.getenv(
 # input_audio_buffer.append -> speech_started/stopped -> committed -> response.
 QWEN_TURN_DETECTION = "semantic_vad"
 INPUT_MODE = "semantic_vad"
-QWEN_VAD_THRESHOLD = float(os.getenv("QWEN_REALTIME_VAD_THRESHOLD", "0.5"))
-QWEN_VAD_SILENCE_DURATION_MS = int(os.getenv("QWEN_REALTIME_VAD_SILENCE_DURATION_MS", "800"))
+QWEN_VAD_THRESHOLD = 0.7
+QWEN_VAD_SILENCE_DURATION_MS = 300
 
-BARGE_IN_ENABLED = os.getenv(
-    "VERBALVIS_BARGE_IN_ENABLED", "true"
-).lower() not in {"0", "false", "no", "off"}
-
-
-NON_SUPERSEDING_UTTERANCES = {
-    "嗯",
-    "嗯嗯",
-    "好",
-    "好的",
-    "对",
-    "对的",
-    "明白",
-    "明白了",
-    "你继续",
-    "继续",
-    "继续说",
-    "ok",
-    "okay",
-    "right",
-    "go on",
-}
-
-
-def _normalize_utterance(text: str) -> str:
-    text = " ".join((text or "").strip().lower().split())
-    return text.strip("。！？.!?")
-
-
-def _is_non_superseding_utterance(text: str) -> bool:
-    return _normalize_utterance(text) in NON_SUPERSEDING_UTTERANCES
+BARGE_IN_ENABLED = True
 
 
 def _build_qwen_url(model: str) -> str:
@@ -241,28 +215,33 @@ class QwenRealtimeSession:
         session_id: str = "default",
         model: str | None = None,
         analysis_id: str | None = None,
+        reset_views: bool = True,
     ):
         self.client_ws = client_ws
         self.session_id = session_id
         self.analysis_id = safe_log_token(analysis_id) or None
         self.log_scope_id = self.analysis_id or safe_log_token(session_id, "session")
+        self.reset_views = reset_views
         self.model = QWEN_MODEL
         self.qwen_ws: Any = None
         self.current_response_id: str | None = None
         self.latest_response_id: str | None = None
         self._playback_response_id: str | None = None
+        self._latest_user_turn_id: str | None = None
+        self._user_turn_open = False
+        self._turn_sequence = 0
 
         self._running = False
         self._upstream_send_lock = asyncio.Lock()
         self._tool_state_lock = asyncio.Lock()
         self._tool_tasks: set[asyncio.Task] = set()
         self._invalidated_response_ids: set[str] = set()
-        self._interruption_pending = False
-        self._interrupted_response_id: str | None = None
 
         self._pending_tool_calls: dict[str, int] = {}
         self._pending_should_respond: dict[str, bool] = {}
+        self._response_turn_ids: dict[str, str | None] = {}
         self._responses_with_tool_calls: set[str] = set()
+        self._tool_followup_pending = False
         self._session_update_pending = False
         self._session_updated = asyncio.Event()
         self._qwen_ready = False
@@ -295,7 +274,7 @@ class QwenRealtimeSession:
         log_dir, log_scope_id = resolve_session_log_dir(
             _LOG_ROOT,
             session_id=self.session_id,
-            mode="qwen",
+            mode="audio",
             analysis_id=self.analysis_id,
         )
         self._log_dir = log_dir
@@ -323,7 +302,7 @@ class QwenRealtimeSession:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        init_views()
+        activate_state_scope(self.log_scope_id, reset=self.reset_views)
         self._running = True
 
         await self._send_client({
@@ -331,6 +310,7 @@ class QwenRealtimeSession:
             "session_id": self.session_id,
             "analysis_id": self.log_scope_id,
             "views": get_views_for_frontend(),
+            "active_filters": get_active_filters_for_frontend(),
             "mode": "barge_in" if BARGE_IN_ENABLED else "turn_based",
             "input_mode": INPUT_MODE,
             "turn_detection": QWEN_TURN_DETECTION,
@@ -376,6 +356,7 @@ class QwenRealtimeSession:
             await self._send_client({"type": "error", "message": str(exc)})
         finally:
             self._running = False
+            persist_active_state_scope()
             await self._shutdown()
 
     async def _connect_and_configure_qwen(self) -> None:
@@ -413,10 +394,13 @@ class QwenRealtimeSession:
         self._assistant_transcript_buffer = ""
         self._pending_tool_calls.clear()
         self._pending_should_respond.clear()
+        self._response_turn_ids.clear()
         self._responses_with_tool_calls.clear()
         self._invalidated_response_ids.clear()
-        self._interruption_pending = False
-        self._interrupted_response_id = None
+        self._tool_followup_pending = False
+        self._latest_user_turn_id = None
+        self._user_turn_open = False
+        self._turn_sequence = 0
         for task in list(self._tool_tasks):
             task.cancel()
         if self._tool_tasks:
@@ -597,6 +581,9 @@ class QwenRealtimeSession:
                         self._event_logger.info("CLIENT => %s", raw[:500])
 
                 if msg_type == "audio":
+                    self._update_analysis_id_from_message(msg)
+                    self._init_session_loggers()
+                    self._register_client_audio_turn(msg)
                     if not self._qwen_ready:
                         if self._event_logger:
                             self._event_logger.info("CLIENT audio ignored: qwen not ready")
@@ -605,12 +592,24 @@ class QwenRealtimeSession:
                         "type": "input_audio_buffer.append",
                         "audio": msg["data"],
                     })
+                elif msg_type == "user_speech_started":
+                    self._update_analysis_id_from_message(msg)
+                    self._init_session_loggers()
+                    await self._begin_user_turn(
+                        msg.get("turn_id") or msg.get("turnId"),
+                        source="client_vad",
+                    )
+                elif msg_type == "user_speech_stopped":
+                    self._update_analysis_id_from_message(msg)
+                    self._init_session_loggers()
+                    self._end_user_turn(msg.get("turn_id") or msg.get("turnId"))
                 elif msg_type == "truncate_assistant_audio":
                     if not self._qwen_ready:
                         continue
                     await self._truncate_assistant_audio(msg.get("assistant_audio") or msg)
                 elif msg_type == "start_session":
                     self._update_analysis_id_from_message(msg)
+                    self._init_session_loggers()
                     try:
                         await self._restart_qwen_session("client.start_session")
                     except Exception as exc:
@@ -665,14 +664,17 @@ class QwenRealtimeSession:
                 new_response_id = resp.get("id")
                 if not new_response_id:
                     continue
+                response_turn_id = self._latest_user_turn_id
                 self.latest_response_id = new_response_id
                 self.current_response_id = new_response_id
                 self._playback_response_id = new_response_id
+                self._response_turn_ids[new_response_id] = response_turn_id
                 self._invalidated_response_ids.discard(new_response_id)
                 self._start_response_metrics(new_response_id)
                 await self._send_client({
                     "type": "assistant_response_started",
                     "response_id": new_response_id,
+                    "turn_id": response_turn_id,
                 })
 
             # Qwen uses response.audio.delta. Also accept OpenAI GA's renamed
@@ -696,6 +698,7 @@ class QwenRealtimeSession:
                     "type": "audio",
                     "data": event.get("delta", ""),
                     "response_id": audio_response_id,
+                    "turn_id": self._response_turn_ids.get(audio_response_id),
                     "item_id": event.get("item_id"),
                     "content_index": event.get("content_index", 0),
                     "sample_rate": QWEN_OUTPUT_SAMPLE_RATE,
@@ -719,6 +722,7 @@ class QwenRealtimeSession:
                     "role": "assistant",
                     "delta": event.get("delta", ""),
                     "response_id": transcript_response_id,
+                    "turn_id": self._response_turn_ids.get(transcript_response_id),
                 })
 
             elif etype == "input_audio_buffer.speech_started":
@@ -726,7 +730,11 @@ class QwenRealtimeSession:
 
             elif etype == "input_audio_buffer.speech_stopped":
                 self._last_user_speech_stopped_at = time.perf_counter()
-                await self._send_client({"type": "speech_stopped"})
+                self._end_user_turn(self._latest_user_turn_id)
+                await self._send_client({
+                    "type": "speech_stopped",
+                    "turn_id": self._latest_user_turn_id,
+                })
 
             elif etype == "conversation.item.input_audio_transcription.completed":
                 transcript = event.get("transcript", "")
@@ -738,10 +746,9 @@ class QwenRealtimeSession:
                         "type": "transcript",
                         "role": "user",
                         "text": clean_transcript,
+                        "turn_id": self._latest_user_turn_id,
+                        "utterance_id": self._latest_user_turn_id,
                     })
-                    await self._handle_completed_interrupt_transcript(clean_transcript)
-                elif self._interruption_pending:
-                    await self._handle_completed_interrupt_transcript("")
                 elif self._event_logger:
                     self._event_logger.info("EMPTY_TRANSCRIPT_IGNORED")
 
@@ -758,11 +765,14 @@ class QwenRealtimeSession:
                     "type": "suppress_assistant_buffer",
                     "reason": "tool_call",
                     "response_id": response_id,
+                    "turn_id": self._response_turn_ids.get(response_id or ""),
                 })
                 await self._send_client({
                     "type": "tool_call",
                     "name": _tool_name,
                     "arguments": _tool_args,
+                    "response_id": response_id,
+                    "turn_id": self._response_turn_ids.get(response_id or ""),
                 })
 
                 if response_id:
@@ -783,6 +793,7 @@ class QwenRealtimeSession:
                 self._finish_response_metrics(response_id, response_payload)
                 has_tool_call = bool(response_id and response_id in self._responses_with_tool_calls)
                 assistant_text = self._assistant_transcript_buffer.strip()
+                response_turn_id = self._response_turn_ids.get(response_id or "")
                 if assistant_text and not has_tool_call:
                     self._log_conversation("AI", assistant_text)
                 elif has_tool_call and self._event_logger:
@@ -794,6 +805,8 @@ class QwenRealtimeSession:
                 self._assistant_transcript_buffer = ""
                 if response_id:
                     self._responses_with_tool_calls.discard(response_id)
+                    if not has_tool_call:
+                        self._response_turn_ids.pop(response_id, None)
                 if not response_id or self.current_response_id == response_id:
                     self.current_response_id = None
                     self._current_assistant_audio_item_id = None
@@ -804,8 +817,11 @@ class QwenRealtimeSession:
                 await self._send_client({
                     "type": "response_done",
                     "response_id": response_id,
+                    "turn_id": response_turn_id,
                     "metrics": self._response_metrics.get(response_id, {}) if response_id else {},
                 })
+                if self._tool_followup_pending and self.current_response_id is None:
+                    await self._create_response_if_idle("tool.followup.after_response_done")
 
             elif etype == "error":
                 error = event.get("error", {})
@@ -846,6 +862,8 @@ class QwenRealtimeSession:
 
     async def _create_response_if_idle(self, reason: str) -> bool:
         if self.current_response_id:
+            if reason.startswith("tool."):
+                self._tool_followup_pending = True
             if self._event_logger:
                 self._event_logger.info(
                     "RESPONSE_CREATE_SKIPPED reason=%s active=%s",
@@ -856,8 +874,12 @@ class QwenRealtimeSession:
                 reason=reason, response_id=self.current_response_id,
             )
             return False
-        await self._send_qwen({"type": "response.create"})
-        return True
+
+        self._tool_followup_pending = False
+        sent = await self._send_qwen({"type": "response.create"})
+        if not sent and reason.startswith("tool."):
+            self._tool_followup_pending = True
+        return sent
 
     async def _send_opening_response(self) -> None:
         if not QWEN_OPENING_ENABLED:
@@ -902,8 +924,8 @@ class QwenRealtimeSession:
         #     "audio_end_ms": audio_end_ms,
         # })
         # Qwen native client events do not expose conversation.item.truncate.
-        # Playback is stopped on the frontend. Explicit cancel gates can still
-        # call _invalidate_current_response when an active response exists.
+        # Playback is stopped on the frontend; Qwen does not expose the
+        # OpenAI-style conversation.item.truncate event used by realtime.py.
         self._record_timeline(
             "conversation.item.truncate.skipped_for_qwen",
             item_id=item_id, content_index=content_index, audio_end_ms=audio_end_ms,
@@ -918,6 +940,26 @@ class QwenRealtimeSession:
         self._current_assistant_audio_generated_ms = 0
 
     async def _handle_qwen_speech_started(self) -> None:
+        """Use Qwen semantic VAD as the single source of interruption truth.
+
+        When Qwen reports speech_started while an assistant response is active,
+        immediately cancel upstream generation and clear frontend playback. Input
+        transcription remains display/log data only; Python does not classify
+        backchannels or wait for the completed transcript before interrupting.
+        """
+        turn_id = self._latest_user_turn_id if self._user_turn_open else None
+        await self._begin_user_turn(turn_id, source="qwen_semantic_vad")
+
+    async def _begin_user_turn(self, turn_id: str | None = None, source: str = "unknown") -> str:
+        if not turn_id:
+            self._turn_sequence += 1
+            turn_id = f"voice-turn-{self._turn_sequence}"
+        turn_id = safe_log_token(turn_id, f"voice-turn-{self._turn_sequence + 1}")
+        if self._user_turn_open and self._latest_user_turn_id == turn_id:
+            return turn_id
+
+        self._latest_user_turn_id = turn_id
+        self._user_turn_open = True
         interrupted_response_id = (
             self.latest_response_id
             or self.current_response_id
@@ -925,94 +967,83 @@ class QwenRealtimeSession:
         )
         self._record_timeline(
             "speech_started.observed",
-            source="qwen_semantic_vad",
+            source=source,
             response_id=interrupted_response_id,
+            turn_id=turn_id,
         )
+        await self._send_client({
+            "type": "speech_started",
+            "turn_id": turn_id,
+            "utterance_id": turn_id,
+        })
+
         if not BARGE_IN_ENABLED or not interrupted_response_id:
-            return
-        self._interruption_pending = True
-        self._interrupted_response_id = interrupted_response_id
-        self._log_connection(
-            "INTERRUPTION_PAUSE response_id=%s", interrupted_response_id
-        )
-        if self._bargein_logger:
-            self._bargein_logger.info(
-                "INTERRUPTION_PAUSE response_id=%s", interrupted_response_id
-            )
-        await self._send_client({
-            "type": "assistant_playback_pause",
-            "response_id": interrupted_response_id,
-            "reason": "qwen_semantic_vad_speech_started",
-        })
+            return turn_id
 
-    async def _handle_completed_interrupt_transcript(self, transcript: str) -> None:
-        if not self._interruption_pending:
-            return
-        clean_transcript = transcript.strip()
-        if not clean_transcript:
-            await self._resume_interrupted_response("empty_transcript")
-            return
-        if _is_non_superseding_utterance(clean_transcript):
-            await self._resume_interrupted_response("non_superseding_utterance")
-            return
-        await self._invalidate_current_response(
-            source="user_superseded_response",
-            send_cancel=True,
-        )
-
-    async def _resume_interrupted_response(self, source: str) -> None:
-        response_id = self._interrupted_response_id
-        self._interruption_pending = False
-        self._interrupted_response_id = None
-        self._record_timeline("barge_in.resume", source=source, response_id=response_id)
-        self._log_connection("INTERRUPTION_RESUME source=%s response_id=%s", source, response_id)
-        if self._bargein_logger:
-            self._bargein_logger.info(
-                "INTERRUPTION_RESUME source=%s response_id=%s", source, response_id
-            )
-        await self._send_client({
-            "type": "assistant_playback_resume",
-            "response_id": response_id,
-            "reason": source,
-        })
-
-    async def _invalidate_current_response(self, source: str, send_cancel: bool) -> None:
-        invalidated_response_id = (
-            self._interrupted_response_id
-            or self.latest_response_id
-            or self.current_response_id
-            or self._playback_response_id
-        )
-        if invalidated_response_id:
-            self._invalidated_response_ids.add(invalidated_response_id)
+        self._invalidated_response_ids.add(interrupted_response_id)
         self.latest_response_id = None
         self._playback_response_id = None
-        self._interruption_pending = False
-        self._interrupted_response_id = None
+        self._assistant_transcript_buffer = ""
+        self._tool_followup_pending = False
 
+        self._record_timeline(
+            "barge_in",
+            source=source,
+            response_id=interrupted_response_id,
+            turn_id=turn_id,
+        )
         self._log_connection(
-            "BARGE_IN source=%s invalidated=%s", source, invalidated_response_id
+            "BARGE_IN response_id=%s source=%s turn_id=%s",
+            interrupted_response_id, source, turn_id,
         )
         if self._bargein_logger:
             self._bargein_logger.info(
-                "BARGE_IN source=%s invalidated=%s",
-                source, invalidated_response_id,
+                "BARGE_IN response_id=%s source=%s turn_id=%s",
+                interrupted_response_id, source, turn_id,
             )
-        self._assistant_transcript_buffer = ""
-        self._record_timeline("barge_in", source=source, response_id=invalidated_response_id)
 
-        for task in list(self._tool_tasks):
-            task.cancel()
-
-        if send_cancel and invalidated_response_id:
-            await self._send_qwen({"type": "response.cancel"})
+        cancel_sent = await self._send_qwen({"type": "response.cancel"})
+        self._record_timeline(
+            "response.cancel.sent" if cancel_sent else "response.cancel.failed",
+            response_id=interrupted_response_id,
+        )
 
         await self._send_client({
             "type": "assistant_playback_stop",
-            "response_id": invalidated_response_id,
-            "reason": source,
+            "response_id": interrupted_response_id,
+            "turn_id": turn_id,
+            "reason": f"{source}_speech_started",
             "clear_queue": True,
         })
+        return turn_id
+
+    def _end_user_turn(self, turn_id: str | None = None) -> None:
+        if turn_id and self._latest_user_turn_id and turn_id != self._latest_user_turn_id:
+            return
+        self._user_turn_open = False
+        self._record_timeline("speech_stopped.observed", turn_id=self._latest_user_turn_id)
+
+    def _register_client_audio_turn(self, msg: dict[str, Any]) -> None:
+        turn_id = msg.get("turn_id") or msg.get("turnId")
+        if not turn_id:
+            return
+        turn_id = safe_log_token(turn_id)
+        if not turn_id:
+            return
+        self._latest_user_turn_id = turn_id
+        self._user_turn_open = True
+
+    def _response_is_stale(self, response_id: str | None) -> bool:
+        if not response_id:
+            return False
+        if response_id in self._invalidated_response_ids:
+            return True
+        response_turn_id = self._response_turn_ids.get(response_id)
+        return bool(
+            response_turn_id
+            and self._latest_user_turn_id
+            and response_turn_id != self._latest_user_turn_id
+        )
 
     # ------------------------------------------------------------------
     # Tool call handling
@@ -1023,6 +1054,15 @@ class QwenRealtimeSession:
         tool_name = event.get("name", "")
         call_id = event.get("call_id", "")
         args_str = event.get("arguments", "{}")
+
+        if self._response_is_stale(response_id):
+            if self._tool_logger:
+                self._tool_logger.info(
+                    "TOOL_DROPPED_STALE_BEFORE_EXEC name=%s response_id=%s",
+                    tool_name, response_id,
+                )
+            await self._finalize_tool_call(response_id, False)
+            return
 
         try:
             arguments = json.loads(args_str)
@@ -1075,10 +1115,20 @@ class QwenRealtimeSession:
                     tool_name, call_id, tool_duration_ms, result.get("success"),
                 )
 
+            if self._response_is_stale(response_id):
+                if self._tool_logger:
+                    self._tool_logger.info(
+                        "TOOL_RESULT_DROPPED_STALE name=%s response_id=%s",
+                        tool_name, response_id,
+                    )
+                should_respond = False
+                return
+
             if tool_name not in MODEL_ONLY_TOOLS:
                 await self._send_client({
                     "type": "tool_result",
                     "response_id": response_id,
+                    "turn_id": self._response_turn_ids.get(response_id or ""),
                     "call_id": call_id,
                     "duration_ms": tool_duration_ms,
                     **result,
@@ -1090,7 +1140,11 @@ class QwenRealtimeSession:
                         "VIEWS_UPDATE tool=%s args=%s",
                         tool_name, json.dumps(arguments, ensure_ascii=False),
                     )
-                await self._send_client({"type": "views_update", "views": views})
+                await self._send_client({
+                    "type": "views_update",
+                    "turn_id": self._response_turn_ids.get(response_id or ""),
+                    "views": views,
+                })
 
             await self._send_qwen({
                 "type": "conversation.item.create",
@@ -1125,6 +1179,7 @@ class QwenRealtimeSession:
 
         if fire:
             await self._create_response_if_idle("tool.finalize")
+            self._response_turn_ids.pop(response_id, None)
 
     def _tool_result_text(
         self,
