@@ -1566,9 +1566,9 @@ function withAnalysisId(rawUrl, { preserveState = false } = {}) {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  height: clamp(320px, 34dvh, 560px);
+  height: auto;
   max-height: min(56dvh, 760px);
-  min-height: 240px;
+  min-height: 0;
   resize: vertical;
   box-shadow: none;
 }
@@ -1577,9 +1577,9 @@ function withAnalysisId(rawUrl, { preserveState = false } = {}) {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
-  height: 300px;
-  max-height: 300px;
-  min-height: 300px;
+  height: auto;
+  max-height: min(56dvh, 760px);
+  min-height: 0;
   overflow: hidden;
   border: 1px solid #d7e1ee;
   border-radius: 8px;
@@ -1605,13 +1605,14 @@ function withAnalysisId(rawUrl, { preserveState = false } = {}) {
 .transcript-list {
   flex: 1 1 auto;
   min-height: 0;
-  max-height: none;
+  max-height: min(42dvh, 640px);
   overflow: auto;
 }
 
 .text-history {
   flex: 1 1 auto;
   min-height: 0;
+  max-height: min(42dvh, 640px);
   overflow: auto;
   padding: 8px 10px;
   border-bottom: 1px solid #e1e8f2;
