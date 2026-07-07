@@ -186,7 +186,7 @@ export function useWebSocket(audioPlayer, options = {}) {
         break;
 
       case "speech_started":
-        _beginUserSpeech(msg.turn_id || msg.utterance_id, "server_speech_started");
+        _markUserSpeechStarted(msg.turn_id || msg.utterance_id);
         store.beginUserTranscript({
           utteranceId: latestUserTurnId,
           text: msg.text || "",
@@ -291,9 +291,6 @@ export function useWebSocket(audioPlayer, options = {}) {
 
   function sendAudio(base64pcm) {
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      if (userSpeechActive && !latestUserTurnId) {
-        _beginUserSpeech(null, "audio_chunk_started");
-      }
       socket.value.send(JSON.stringify({
         type: "audio",
         data: base64pcm,
@@ -347,42 +344,9 @@ export function useWebSocket(audioPlayer, options = {}) {
     _stopAssistantPlayback(activeResponseId, reason);
   }
 
-  function beginUserSpeech(reason = "client_speech_started") {
-    return _beginUserSpeech(null, reason);
-  }
-
-  function endUserSpeech() {
-    userSpeechActive = false;
-    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      socket.value.send(JSON.stringify({
-        type: "user_speech_stopped",
-        turn_id: latestUserTurnId,
-        analysis_id: currentAnalysisId(),
-      }));
-    }
-  }
-
-  function _beginUserSpeech(turnId = null, reason = "client_speech_started") {
-    const nextTurnId = turnId || `voice-turn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    if (userSpeechActive && latestUserTurnId === nextTurnId) return latestUserTurnId;
-
-    latestUserTurnId = nextTurnId;
+  function _markUserSpeechStarted(turnId = null) {
+    latestUserTurnId = turnId || latestUserTurnId || `voice-turn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     userSpeechActive = true;
-    if (activeResponseId) {
-      _stopAssistantPlayback(activeResponseId, reason);
-    } else {
-      audioPlayer?.stopAssistantAudio?.({ blockNewAudio: true, reason });
-      store.isAssistantSpeaking = false;
-    }
-
-    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      socket.value.send(JSON.stringify({
-        type: "user_speech_started",
-        turn_id: latestUserTurnId,
-        analysis_id: currentAnalysisId(),
-        reason,
-      }));
-    }
     return latestUserTurnId;
   }
 
@@ -478,8 +442,6 @@ export function useWebSocket(audioPlayer, options = {}) {
     truncateAssistantAudio,
     sendAudio,
     sendText,
-    beginUserSpeech,
-    endUserSpeech,
     interruptActiveResponse,
     disconnect,
     reconnect,

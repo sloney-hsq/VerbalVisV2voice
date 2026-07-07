@@ -487,12 +487,6 @@ async function startListeningMic() {
         }
         ws.sendAudio(base64pcm);
       },
-      onSpeechStart: () => {
-        ws.beginUserSpeech?.("client_vad_speech_started");
-      },
-      onSpeechEnd: () => {
-        ws.endUserSpeech?.();
-      },
     });
   } catch (error) {
     console.error("Failed to start microphone listening:", error);
@@ -504,7 +498,6 @@ async function startListeningMic() {
 
 function stopListeningMic() {
   audio.stopRecording();
-  ws.endUserSpeech?.();
   isStartingListening.value = false;
 }
 
