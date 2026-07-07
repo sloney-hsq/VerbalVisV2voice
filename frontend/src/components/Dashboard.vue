@@ -117,20 +117,20 @@
 
       <div ref="transcriptList" class="transcript-list" aria-live="polite">
         <div
-          v-for="exchange in transcriptRows"
-          :key="exchange.id"
+          v-for="row in transcriptRows"
+          :key="row.id"
           class="transcript-exchange"
-          :class="{ 'transcript-exchange--inline': canDisplayInline(exchange) }"
+          :class="{ 'transcript-exchange--inline': canDisplayInline(row) }"
         >
           <div
-            v-for="message in exchangeMessages(exchange)"
+            v-for="message in exchangeMessages(row)"
             :key="message.id"
             class="transcript-message"
             :class="transcriptMessageClass(message)"
-            :title="message.text"
+            :title="transcriptMessageTitle(message)"
             @click="toggleTranscriptMessage(message)"
           >
-            <span class="transcript-time">{{ transcriptMessageTime(exchange, message) }}</span>
+            <span class="transcript-time">{{ transcriptMessageTime(row, message) }}</span>
             <span class="transcript-role">{{ transcriptRoleLabel(message) }}</span>
             <span class="transcript-content">
               <span
@@ -178,16 +178,16 @@
     <section v-else class="dashboard__text-entry" aria-label="Text interaction">
       <div ref="textHistoryList" class="text-history" aria-live="polite">
         <div
-          v-for="exchange in transcriptRows"
-          :key="`text-${exchange.id}`"
+          v-for="row in transcriptRows"
+          :key="`text-${row.id}`"
           class="text-history__exchange"
         >
           <div
-            v-for="message in exchangeMessages(exchange)"
+            v-for="message in exchangeMessages(row)"
             :key="`text-${message.id}`"
             class="text-history__message"
-            :class="`text-history__message--${message.role}`"
-            :title="message.text"
+            :class="`text-history__message--${message.role || message.kind}`"
+            :title="transcriptMessageTitle(message)"
           >
             <span class="text-history__role">{{ transcriptRoleLabel(message) }}</span>
             <span class="text-history__content">
@@ -301,8 +301,9 @@ const textInput = ref(null);
 const transcriptPanelWidth = ref(0);
 let transcriptResizeObserver = null;
 
-audio.setPlaybackIdleHandler?.(() => {
+audio.setPlaybackIdleHandler?.(({ responseId } = {}) => {
   store.isAssistantSpeaking = false;
+  ws.sendAssistantPlaybackCompleted?.(responseId);
 });
 
 const statusClass = computed(() => ({
@@ -357,15 +358,18 @@ const textSendLabel = computed(() => (
 ));
 
 const transcriptRows = computed(() => {
-  return store.transcriptExchanges.map((exchange, index) => ({
-    ...exchange,
-    id: exchange.id || `exchange-${index}`,
-  }));
+  return store.timelineEvents
+    .slice()
+    .sort((a, b) => (a.startedAt || a.ts || 0) - (b.startedAt || b.ts || 0))
+    .map((event, index) => ({
+      id: event.id || `timeline-${index}`,
+      event,
+    }));
 });
 
 const transcriptScrollKey = computed(() => (
-  store.transcripts
-    .map((message) => `${message.id}:${message.text.length}:${message.status}:${message.expanded}`)
+  store.timelineEvents
+    .map((event) => `${event.id}:${event.text?.length || 0}:${event.status}:${event.expanded}:${event.updatedAt || ""}`)
     .join("|")
 ));
 
@@ -482,9 +486,6 @@ async function startListeningMic() {
     await audio.startRecording({
       gateSilence: false,
       onChunk: (base64pcm) => {
-        if (store.isAssistantSpeaking && store.sessionMode === "turn_based") {
-          return;
-        }
         ws.sendAudio(base64pcm);
       },
     });
@@ -546,10 +547,12 @@ function formatTranscriptTime(ts) {
 }
 
 function exchangeMessages(exchange) {
+  if (exchange.event) return [exchange.event];
   return [exchange.user, exchange.assistant].filter(Boolean);
 }
 
 function canDisplayInline(exchange) {
+  if (exchange.event) return false;
   if (transcriptPanelWidth.value < 420 || !exchange.user || !exchange.assistant) return false;
   return (
     exchange.user.status === "completed" &&
@@ -567,22 +570,26 @@ function visibleLength(value) {
 
 function transcriptMessageClass(message) {
   return {
-    [`transcript-message--${message.role}`]: true,
+    [`transcript-message--${message.role || message.kind}`]: true,
     "transcript-message--interrupted": message.status === "interrupted",
     "transcript-message--streaming": message.status === "streaming",
+    "transcript-message--tool": message.kind === "tool",
   };
 }
 
 function transcriptMessageTime(exchange, message) {
+  if (message.kind === "tool") return formatTranscriptTime(message.startedAt || message.ts);
   if (message.role === "assistant" && exchange.user) return "";
   return formatTranscriptTime(message.startedAt || message.ts);
 }
 
 function transcriptRoleLabel(message) {
+  if (message.kind === "tool") return "TOOL";
   return message.role === "assistant" ? "AI" : "YOU";
 }
 
 function transcriptDisplayText(message) {
+  if (message.kind === "tool") return toolTimelineText(message);
   if (message.text) return message.text;
   if (message.status === "listening") return "Listening...";
   if (message.status === "streaming") return "...";
@@ -590,8 +597,13 @@ function transcriptDisplayText(message) {
 }
 
 function toggleTranscriptMessage(message) {
-  if (!message?.text) return;
+  if (!message?.text && message?.kind !== "tool") return;
   store.toggleTranscriptMessage(message.id);
+}
+
+function transcriptMessageTitle(message) {
+  if (message.kind === "tool") return toolTimelineTitle(message);
+  return message.text;
 }
 
 function toggleTranscriptActions(message) {
@@ -605,6 +617,45 @@ function toolActionsLabel(message) {
 
 function toolActionsTitle(message) {
   return (message.toolActions || []).map((action) => action.summary).join("\n");
+}
+
+function toolTimelineText(message) {
+  const name = formatToolName(message.name || "tool");
+  const status = message.status || "committed";
+  const args = parseToolArgumentsForDisplay(message.arguments);
+  const summary = summarizeToolArgs(args);
+  const duration = Number.isFinite(message.durationMs) ? ` ${message.durationMs}ms` : "";
+  const suppressed = message.followupSuppressed ? " follow-up suppressed" : "";
+  return `${name} ${status}${duration}${summary ? ` ${summary}` : ""}${suppressed}`;
+}
+
+function toolTimelineTitle(message) {
+  const parts = [
+    message.name || "tool",
+    `status: ${message.status || "committed"}`,
+  ];
+  if (message.error) parts.push(`error: ${message.error}`);
+  if (message.arguments) parts.push(`arguments: ${formatValue(parseToolArgumentsForDisplay(message.arguments))}`);
+  if (message.result) parts.push(`result: ${formatValue(message.result)}`);
+  return parts.join("\n");
+}
+
+function parseToolArgumentsForDisplay(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return { value };
+  }
+}
+
+function summarizeToolArgs(args = {}) {
+  const entries = Object.entries(args)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .slice(0, 2);
+  if (!entries.length) return "";
+  return entries.map(([key, value]) => `${key}=${formatValue(value)}`).join(", ");
 }
 
 function updateTranscriptPanelWidth() {

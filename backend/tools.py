@@ -90,6 +90,8 @@ highlighted_views: list[str] = []
 low_score_threshold: int = LOW_SCORE_THRESHOLD_DEFAULT
 _active_state_scope = "default"
 _state_scope_snapshots: dict[str, dict[str, Any]] = {}
+_state_scope_history: dict[str, list[dict[str, Any]]] = {}
+MAX_UNDO_HISTORY = 30
 
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -195,6 +197,7 @@ def activate_state_scope(scope_id: str | None, reset: bool = False) -> None:
     if reset or scope not in _state_scope_snapshots:
         init_views()
         _state_scope_snapshots[scope] = _snapshot_state()
+        _state_scope_history[scope] = []
         return
 
     _restore_state(_state_scope_snapshots[scope])
@@ -202,6 +205,38 @@ def activate_state_scope(scope_id: str | None, reset: bool = False) -> None:
 
 def persist_active_state_scope() -> None:
     _state_scope_snapshots[_active_state_scope] = _snapshot_state()
+
+
+def snapshot_dashboard_state() -> dict[str, Any]:
+    """Return a deep copy used as the before-state of one tool transaction."""
+    return _snapshot_state()
+
+
+def record_dashboard_transaction(
+    *,
+    before_state: dict[str, Any],
+    transaction_id: str,
+    turn_id: str | None,
+    response_id: str | None,
+    tools: list[dict[str, Any]],
+) -> None:
+    """Record one committed response-level tool batch for exact undo."""
+    history = _state_scope_history.setdefault(_active_state_scope, [])
+    history.append({
+        "transaction_id": transaction_id,
+        "turn_id": turn_id,
+        "response_id": response_id,
+        "tools": copy.deepcopy(tools),
+        "before_state": copy.deepcopy(before_state),
+        "committed_at": datetime.now(timezone.utc).isoformat(),
+    })
+    if len(history) > MAX_UNDO_HISTORY:
+        del history[:-MAX_UNDO_HISTORY]
+    persist_active_state_scope()
+
+
+def undo_history_depth() -> int:
+    return len(_state_scope_history.get(_active_state_scope, []))
 
 
 def _normalize_state_scope(scope_id: str | None) -> str:
@@ -473,6 +508,21 @@ TOOL_SCHEMAS = [
         },
     ),
     _tool(
+        "undo_last_action",
+        (
+            "Restore the dashboard to the exact state before the most recent "
+            "committed analytical action. Use this only when the user explicitly "
+            "asks to undo, go back, restore the previous state, or cancel the last "
+            "completed dashboard action. Do not guess the previous filters or chart "
+            "specification with inverse tool calls."
+        ),
+        {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    _tool(
         "inspect_visual",
         (
             "Read the authoritative current content of one existing dashboard view. "
@@ -530,6 +580,8 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             return _exec_append_visual(arguments)
         elif name == "set_low_score_threshold":
             return _exec_set_low_score_threshold(arguments)
+        elif name == "undo_last_action":
+            return _exec_undo_last_action(arguments)
         elif name == "inspect_visual":
             return _exec_inspect_visual(arguments)
         elif name == "delete_visual":
@@ -793,6 +845,34 @@ def _exec_set_low_score_threshold(args: dict) -> dict:
             "definition": f"review_score <= {low_score_threshold}",
             "active_filters": active_filters.copy(),
             "filtered_rows": total_rows(active_filters),
+        },
+    }
+
+
+# --- undo_last_action ---
+
+def _exec_undo_last_action(args: dict[str, Any]) -> dict[str, Any]:
+    """Restore the before-state of the latest committed tool transaction."""
+    history = _state_scope_history.setdefault(_active_state_scope, [])
+    if not history:
+        return {
+            "tool": "undo_last_action",
+            "success": False,
+            "error": "There is no committed dashboard action to undo.",
+        }
+
+    entry = history.pop()
+    _restore_state(entry["before_state"])
+    persist_active_state_scope()
+    return {
+        "tool": "undo_last_action",
+        "success": True,
+        "payload": {
+            "restored_transaction_id": entry.get("transaction_id"),
+            "undone_tools": copy.deepcopy(entry.get("tools", [])),
+            "active_filters": copy.deepcopy(active_filters),
+            "restored_view_ids": [view["id"] for view in views],
+            "remaining_undo_depth": len(history),
         },
     }
 
@@ -2003,6 +2083,8 @@ def rebuild_context() -> dict[str, Any]:
         "views": ctx_views,
         "available_view_ids": _available_view_ids(),
         "available_view_labels": _available_view_labels(),
+        "undo_available": undo_history_depth() > 0,
+        "undo_depth": undo_history_depth(),
     }
 
 

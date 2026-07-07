@@ -104,7 +104,7 @@ export function useWebSocket(audioPlayer, options = {}) {
         break;
 
       case "views_update":
-        if (_isStaleTurn(msg.turn_id)) break;
+        if (!msg.committed && _isStaleTurn(msg.turn_id)) break;
         store.updateViews(msg.views);
         break;
 
@@ -233,15 +233,26 @@ export function useWebSocket(audioPlayer, options = {}) {
         if (_isStaleTurn(msg.turn_id) || !_matchesActiveResponseTurn(msg.turn_id)) break;
         console.log(`%c>>> TOOL CALL: ${msg.name}(${msg.arguments})`, "color: #f59e0b; font-weight: bold");
         store.recordToolCall({ name: msg.name, arguments: msg.arguments });
-        store.addToolActionToTranscript(
-          { name: msg.name, arguments: msg.arguments },
-          msg.response_id || activeResponseId
-        );
+        if (!msg.committed) {
+          store.addToolActionToTranscript(
+            { name: msg.name, arguments: msg.arguments },
+            msg.response_id || activeResponseId
+          );
+        }
         break;
 
       case "tool_result":
-        if (_isStaleTurn(msg.turn_id) || !_matchesActiveResponseTurn(msg.turn_id)) break;
+        if (!msg.committed && (
+          _isStaleTurn(msg.turn_id) || !_matchesActiveResponseTurn(msg.turn_id)
+        )) break;
         store.handleToolResult(msg);
+        break;
+
+      case "tool_execution_committed":
+      case "tool_execution_started":
+      case "tool_execution_completed":
+      case "tool_batch_completed":
+        store.upsertToolTimelineEvent(msg);
         break;
 
       case "session_ready":
@@ -294,7 +305,6 @@ export function useWebSocket(audioPlayer, options = {}) {
       socket.value.send(JSON.stringify({
         type: "audio",
         data: base64pcm,
-        turn_id: latestUserTurnId,
         analysis_id: currentAnalysisId(),
       }));
     } else {
@@ -389,6 +399,16 @@ export function useWebSocket(audioPlayer, options = {}) {
     store.sessionReady = false;
   }
 
+  function sendAssistantPlaybackCompleted(responseId) {
+    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      socket.value.send(JSON.stringify({
+        type: "assistant_playback_completed",
+        response_id: responseId || null,
+        analysis_id: currentAnalysisId(),
+      }));
+    }
+  }
+
   function _isStaleTurn(turnId) {
     if (!latestUserTurnId) return false;
     return Boolean(turnId) && turnId !== latestUserTurnId;
@@ -442,6 +462,7 @@ export function useWebSocket(audioPlayer, options = {}) {
     truncateAssistantAudio,
     sendAudio,
     sendText,
+    sendAssistantPlaybackCompleted,
     interruptActiveResponse,
     disconnect,
     reconnect,

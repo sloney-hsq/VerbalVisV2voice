@@ -234,13 +234,17 @@ export function useAudio(options = {}) {
       source,
       responseId,
       itemId: metadata?.item_id || metadata?.itemId || null,
+      stopped: false,
     };
     activeSources.add(sourceRecord);
     source.onended = () => {
+      if (sourceRecord.stopped) return;
       activeSources.delete(sourceRecord);
       if (activeSources.size === 0) {
+        const completedResponseId = currentPlaybackResponseId || currentPlayback?.responseId || responseId;
         currentPlayback = null;
-        onPlaybackIdle?.();
+        currentPlaybackResponseId = null;
+        onPlaybackIdle?.({ responseId: completedResponseId });
       }
     };
     source.start(scheduledStart);
@@ -311,6 +315,7 @@ export function useAudio(options = {}) {
     for (const record of Array.from(activeSources)) {
       if (!responseId || record.responseId === responseId) {
         try {
+          record.stopped = true;
           record.source.stop();
         } catch (_) {
           // Already ended.
