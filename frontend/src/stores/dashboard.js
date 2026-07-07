@@ -37,6 +37,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const currentUserEntryId = workspaceField("currentUserEntryId");
   const currentAssistantResponseId = workspaceField("currentAssistantResponseId");
   const pendingToolActions = workspaceField("pendingToolActions");
+  const assistantResponseExchangeIds = workspaceField("assistantResponseExchangeIds");
   const timelineEvents = workspaceField("timelineEvents");
 
   // ---- getters ----
@@ -55,6 +56,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       currentUserEntryId: null,
       currentAssistantResponseId: null,
       pendingToolActions: [],
+      assistantResponseExchangeIds: {},
       timelineEvents: [],
     };
   }
@@ -254,8 +256,12 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   function beginAssistantResponse(responseId) {
-    if (!responseId) return;
+    if (!responseId) return null;
     currentAssistantResponseId.value = responseId;
+    // Create the response-bound transcript entry immediately. A function-call-
+    // only response may never emit assistant text, but its tool action still
+    // must remain attached to this exact response_id.
+    return getOrCreateAssistantMessage(responseId);
   }
 
   function appendAssistantTranscript(responseId, delta = "") {
@@ -311,12 +317,18 @@ export const useDashboardStore = defineStore("dashboard", () => {
 
   function addToolActionToTranscript(call = {}, responseId = null) {
     const action = createToolAction(call);
-    const message = findAssistantMessageByResponseId(responseId || currentAssistantResponseId.value);
-    if (message && message.text.trim()) {
+    const targetResponseId = responseId || currentAssistantResponseId.value;
+
+    if (targetResponseId) {
+      const message = getOrCreateAssistantMessage(targetResponseId);
       message.toolActions.push(action);
-      return;
+      upsertTimelineMessage(message);
+      return message;
     }
+
+    // Legacy fallback only. Realtime tool_call events always provide response_id.
     pendingToolActions.value.push(action);
+    return null;
   }
 
   function upsertToolTimelineEvent(event) {
@@ -330,7 +342,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       callId,
       transactionId: event.transaction_id,
       responseId: event.response_id,
-      originTurnId: event.origin_turn_id,
+      originTurnId: event.turn_id || event.origin_turn_id,
       name: event.name || existing?.name || event.type,
       arguments: event.arguments,
       status: event.status || toolEventStatus(event),
@@ -373,6 +385,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     currentUserEntryId.value = null;
     currentAssistantResponseId.value = null;
     pendingToolActions.value = [];
+    assistantResponseExchangeIds.value = {};
     timelineEvents.value = [];
   }
 
@@ -439,14 +452,27 @@ export const useDashboardStore = defineStore("dashboard", () => {
     });
     pendingToolActions.value = [];
 
-    const exchange = findLatestExchangeWithoutAssistant();
+    const mappedExchangeId = assistantResponseExchangeIds.value[responseId];
+    const mappedExchange = mappedExchangeId
+      ? transcriptExchanges.value.find((exchange) => exchange.id === mappedExchangeId)
+      : null;
+    const exchange = mappedExchange || findLatestExchangeWithoutAssistant();
     if (exchange) {
       exchange.assistant = message;
+      assistantResponseExchangeIds.value = {
+        ...assistantResponseExchangeIds.value,
+        [responseId]: exchange.id,
+      };
     } else {
-      transcriptExchanges.value.push({
+      const newExchange = {
         id: makeTranscriptId("exchange"),
         assistant: message,
-      });
+      };
+      transcriptExchanges.value.push(newExchange);
+      assistantResponseExchangeIds.value = {
+        ...assistantResponseExchangeIds.value,
+        [responseId]: newExchange.id,
+      };
     }
     trimTranscriptHistory();
     upsertTimelineMessage(message);

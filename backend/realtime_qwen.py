@@ -1,28 +1,20 @@
 """
 VerbalVis Realtime API manager — Qwen-Omni-Realtime.
 
-Design implemented here
------------------------
-1. Qwen semantic VAD is the only source of speech-start / barge-in truth.
-2. ``response.function_call_arguments.done`` is the logical commit point for a
-   tool call. Once committed, the tool is executed in FIFO order even if a
-   newer user turn begins.
-3. A newer user turn immediately cancels obsolete model generation and stops
-   frontend playback, but it does not roll back committed tool calls.
-4. Committed tool results are always returned to Qwen and recorded in the
-   session transcript. If a newer user turn exists, the obsolete tool follow-up
-   speech is suppressed.
-5. While a committed tool batch is running, an automatically created response
-   for a newer user turn is cancelled and deferred. Once all committed tools
-   finish, one ``response.create`` is sent so the model reasons over both the
-   latest user utterance and the completed tool results.
-6. Multiple tools emitted by one response execute sequentially and lead to at
-   most one follow-up response.
-
-The frontend protocol remains backward-compatible with the existing project.
-Additional lifecycle events are emitted for a linear transcript:
-``tool_execution_committed``, ``tool_execution_started``,
-``tool_execution_completed``, and ``tool_batch_completed``.
+Linear execution semantics
+--------------------------
+1. Qwen semantic VAD's ``input_audio_buffer.speech_started`` event is the only
+   source of user-turn start and barge-in truth.
+2. ``response.function_call_arguments.done`` is the tool submission boundary.
+   Once a complete call is received, the local tool always executes to
+   completion, even if a newer user turn starts.
+3. Barge-in stops frontend playback and cancels only unfinished model
+   generation. It never cancels a submitted local tool or rolls back dashboard
+   state.
+4. Tool results always update the dashboard, reach the frontend, and are sent
+   back to Qwen as ``function_call_output``.
+5. A newer user turn suppresses only the old tool batch's follow-up
+   ``response.create``. It does not suppress the tool itself or its result.
 """
 
 from __future__ import annotations
@@ -35,7 +27,6 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +59,6 @@ normalize_tool_arguments = dashboard_tools.normalize_tool_arguments
 persist_active_state_scope = dashboard_tools.persist_active_state_scope
 realtime_state = dashboard_tools.realtime_state
 
-MODEL_ONLY_TOOLS = {"inspect_visual"}
 MUTATING_TOOLS = {
     "filter_data",
     "remove_filter",
@@ -147,9 +137,6 @@ QWEN_OUTPUT_SAMPLE_RATE = int(
 QWEN_AUDIO_FORMAT = (
     os.getenv("QWEN_REALTIME_AUDIO_FORMAT", "pcm").strip() or "pcm"
 )
-
-# Official example/default values. They remain environment-configurable so a
-# later pilot can tune them without editing source code.
 QWEN_VAD_THRESHOLD = float(
     os.getenv("QWEN_REALTIME_VAD_THRESHOLD", "0.5")
 )
@@ -172,13 +159,12 @@ def _qwen_tool_schemas() -> list[dict[str, Any]]:
     for tool in TOOL_SCHEMAS:
         nested_function = tool.get("function")
         function = nested_function if isinstance(nested_function, dict) else tool
-        description = function.get("description", "")
         qwen_tools.append(
             {
                 "type": "function",
                 "function": {
                     "name": function.get("name"),
-                    "description": description,
+                    "description": function.get("description", ""),
                     "parameters": _qwen_json_schema(
                         function.get(
                             "parameters",
@@ -218,30 +204,6 @@ def _qwen_json_schema(value: Any) -> Any:
     return normalized
 
 
-@dataclass(slots=True)
-class CommittedToolCall:
-    response_id: str
-    item_id: str | None
-    call_id: str
-    name: str
-    arguments_raw: str
-    origin_turn_id: str | None
-    origin_turn_sequence: int
-    user_transcript: str
-    committed_at: float = field(default_factory=time.perf_counter)
-
-
-@dataclass(slots=True)
-class CommittedToolBatch:
-    response_id: str
-    transaction_id: str
-    origin_turn_id: str | None
-    origin_turn_sequence: int
-    calls: list[CommittedToolCall]
-    queued_reason: str
-    queued_at: float = field(default_factory=time.perf_counter)
-
-
 class QwenRealtimeSession:
     """One frontend WebSocket plus one Qwen Realtime WebSocket."""
 
@@ -258,7 +220,7 @@ class QwenRealtimeSession:
         self.analysis_id = safe_log_token(analysis_id) or None
         self.log_scope_id = self.analysis_id or safe_log_token(session_id, "session")
         self.reset_views = reset_views
-        self.model = QWEN_MODEL
+        self.model = model or QWEN_MODEL
 
         self.qwen_ws: Any = None
         self._running = False
@@ -279,25 +241,22 @@ class QwenRealtimeSession:
         self._user_turn_open = False
         self._turn_sequence_fallback = 0
 
+        # Each response keeps the user turn that produced it. This mapping is also
+        # the only source used to decide whether an old tool follow-up is stale.
         self._response_turn_ids: dict[str, str | None] = {}
-        self._response_turn_sequences: dict[str, int] = {}
-        self._invalidated_response_ids: set[str] = set()
-        self._barrier_cancelled_response_ids: set[str] = set()
 
-        # A call is committed at function_call_arguments.done. Calls are grouped
-        # by their originating response and later executed by one FIFO worker.
-        self._pending_calls_by_response: dict[str, list[CommittedToolCall]] = {}
-        self._queued_response_ids: set[str] = set()
+        # Tool execution state. Calls are submitted at
+        # response.function_call_arguments.done and run as independent tasks.
         self._known_call_ids: set[str] = set()
-        self._tool_queue: asyncio.Queue[CommittedToolBatch | None] = asyncio.Queue()
-        self._tool_worker_task: asyncio.Task | None = None
-        self._tool_work_count = 0
-        self._active_tool_batch: CommittedToolBatch | None = None
+        self._pending_tool_calls: dict[str, int] = {}
+        self._response_generation_done: set[str] = set()
+        self._response_should_respond: dict[str, bool] = {}
+        self._responses_with_tools: set[str] = set()
+        self._tool_tasks: set[asyncio.Task[Any]] = set()
 
-        # Response coordination.
-        self._deferred_latest_response_needed = False
-        self._deferred_latest_turn_id: str | None = None
-        self._old_tool_followup_needed = False
+        # Interrupted response ids are retained only for transcript/log semantics.
+        # They never gate tool execution or tool-result delivery.
+        self._interrupted_response_ids: set[str] = set()
 
         # Transcripts and metrics.
         self._last_user_speech_stopped_at: float | None = None
@@ -402,10 +361,6 @@ class QwenRealtimeSession:
     async def start(self) -> None:
         activate_state_scope(self.log_scope_id, reset=self.reset_views)
         self._running = True
-        self._tool_worker_task = asyncio.create_task(
-            self._tool_worker(),
-            name=f"{self.session_id}:tool_worker",
-        )
 
         await self._send_client(
             {
@@ -482,11 +437,11 @@ class QwenRealtimeSession:
         await self._send_opening_response()
 
     async def _restart_qwen_session(self, reason: str) -> None:
-        if self._tool_work_count:
+        if any(not task.done() for task in self._tool_tasks):
             await self._send_client(
                 {
                     "type": "error",
-                    "message": "Cannot restart the realtime session while committed tools are running.",
+                    "message": "Cannot restart the realtime session while tools are running.",
                 }
             )
             return
@@ -496,19 +451,16 @@ class QwenRealtimeSession:
         self.current_response_id = None
         self.latest_response_id = None
         self._playback_response_id = None
-        self._response_turn_ids.clear()
-        self._response_turn_sequences.clear()
-        self._invalidated_response_ids.clear()
-        self._barrier_cancelled_response_ids.clear()
-        self._pending_calls_by_response.clear()
-        self._queued_response_ids.clear()
-        self._known_call_ids.clear()
-        self._deferred_latest_response_needed = False
-        self._deferred_latest_turn_id = None
-        self._old_tool_followup_needed = False
         self._latest_user_turn_id = None
         self._latest_user_turn_sequence = 0
         self._user_turn_open = False
+        self._response_turn_ids.clear()
+        self._known_call_ids.clear()
+        self._pending_tool_calls.clear()
+        self._response_generation_done.clear()
+        self._response_should_respond.clear()
+        self._responses_with_tools.clear()
+        self._interrupted_response_ids.clear()
         self._assistant_transcript_buffers.clear()
         await self._close_qwen()
         self._log_connection(
@@ -546,18 +498,16 @@ class QwenRealtimeSession:
                     await self._close_qwen()
 
     async def _shutdown(self) -> None:
-        if self._tool_worker_task:
-            # Give already committed tools a short opportunity to finish so their
-            # dashboard state remains linear even when the browser disconnects.
+        active_tasks = [task for task in self._tool_tasks if not task.done()]
+        if active_tasks:
             with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(self._tool_queue.join(), timeout=10)
-            await self._tool_queue.put(None)
-            with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(self._tool_worker_task, timeout=2)
-            if not self._tool_worker_task.done():
-                self._tool_worker_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._tool_worker_task
+                await asyncio.wait_for(
+                    asyncio.gather(*active_tasks, return_exceptions=True),
+                    timeout=10,
+                )
+        for task in list(self._tool_tasks):
+            if not task.done():
+                task.cancel()
         await self._close_qwen()
 
     async def _close_qwen(self) -> None:
@@ -598,7 +548,6 @@ class QwenRealtimeSession:
             "- The newest completed user request is authoritative for subsequent planning.\n"
             "- If the user corrects a parameter, call the appropriate tool with the corrected parameter; "
             "do not narrate the obsolete request.\n"
-            "- If the user explicitly asks to undo, use undo_last_action rather than guessing the previous state.\n"
             "- Brief acknowledgements with no analytical request should not modify the dashboard.\n\n"
             "CURRENT DASHBOARD METADATA (use only to choose a view; inspect_visual is required "
             "for chart values):\n"
@@ -686,8 +635,8 @@ class QwenRealtimeSession:
                         }
                     )
                 elif msg_type in {"user_speech_started", "user_speech_stopped"}:
-                    # Backward compatibility only. The latest frontend no longer
-                    # emits these; semantic VAD is the sole interruption source.
+                    # Compatibility only. Semantic VAD is the sole interruption
+                    # and user-turn-start source.
                     if self._event_logger:
                         self._event_logger.info(
                             "IGNORED_CLIENT_VAD_EVENT type=%s",
@@ -798,38 +747,9 @@ class QwenRealtimeSession:
             return
 
         turn_id = self._latest_user_turn_id
-        turn_sequence = self._latest_user_turn_sequence
         self._response_turn_ids[response_id] = turn_id
-        self._response_turn_sequences[response_id] = turn_sequence
         self._assistant_transcript_buffers[response_id] = ""
         self._start_response_metrics(response_id)
-
-        # Tool completion barrier: a VAD-triggered response may be created before
-        # an earlier committed tool has finished. Cancel it, but remember that the
-        # latest user turn still needs one response after all tool outputs arrive.
-        if self._tool_work_count > 0:
-            self._barrier_cancelled_response_ids.add(response_id)
-            self._invalidated_response_ids.add(response_id)
-            self._deferred_latest_response_needed = True
-            self._deferred_latest_turn_id = turn_id
-            self.current_response_id = response_id
-            self.latest_response_id = None
-            self._record_timeline(
-                "response.deferred_for_tool_barrier",
-                response_id=response_id,
-                turn_id=turn_id,
-                tool_work_count=self._tool_work_count,
-            )
-            await self._send_qwen({"type": "response.cancel"})
-            await self._send_client(
-                {
-                    "type": "assistant_response_deferred",
-                    "response_id": response_id,
-                    "turn_id": turn_id,
-                    "reason": "committed_tool_batch_running",
-                }
-            )
-            return
 
         self.current_response_id = response_id
         self.latest_response_id = response_id
@@ -844,11 +764,7 @@ class QwenRealtimeSession:
 
     async def _handle_audio_delta(self, event: dict[str, Any]) -> None:
         response_id = self._event_explicit_response_id(event)
-        if (
-            not response_id
-            or response_id != self.latest_response_id
-            or response_id in self._invalidated_response_ids
-        ):
+        if not response_id or response_id != self.latest_response_id:
             return
         self._track_assistant_audio(event)
         self._playback_response_id = response_id
@@ -870,11 +786,7 @@ class QwenRealtimeSession:
         event: dict[str, Any],
     ) -> None:
         response_id = self._event_explicit_response_id(event)
-        if (
-            not response_id
-            or response_id != self.latest_response_id
-            or response_id in self._invalidated_response_ids
-        ):
+        if not response_id or response_id != self.latest_response_id:
             return
         delta = event.get("delta", "")
         self._assistant_transcript_buffers[response_id] = (
@@ -891,9 +803,8 @@ class QwenRealtimeSession:
         )
 
     async def _handle_qwen_speech_started(self, event: dict[str, Any]) -> None:
-        turn_id = event.get("item_id")
         await self._begin_user_turn(
-            turn_id=turn_id,
+            turn_id=event.get("item_id"),
             source="qwen_semantic_vad",
         )
 
@@ -922,6 +833,8 @@ class QwenRealtimeSession:
             or self.current_response_id
             or self._playback_response_id
         )
+        generating_response_id = self.current_response_id
+
         self._record_timeline(
             "speech_started.observed",
             source=source,
@@ -941,14 +854,9 @@ class QwenRealtimeSession:
         if not BARGE_IN_ENABLED or not interrupted_response_id:
             return turn_id
 
-        # If a full function call was emitted just before interruption, it is
-        # already committed. Queue it now rather than relying on response.done.
-        await self._enqueue_committed_batch(
-            interrupted_response_id,
-            reason="barge_in_after_function_call_commit",
-        )
-
-        self._invalidated_response_ids.add(interrupted_response_id)
+        # Audio validity is controlled only by the active/latest response ids.
+        # Tool execution state is deliberately untouched.
+        self._interrupted_response_ids.add(interrupted_response_id)
         self.latest_response_id = None
         self._playback_response_id = None
 
@@ -965,11 +873,7 @@ class QwenRealtimeSession:
                 interrupted_by_turn_id=turn_id,
             )
 
-        cancel_sent = await self._send_qwen({"type": "response.cancel"})
-        self._record_timeline(
-            "response.cancel.sent" if cancel_sent else "response.cancel.failed",
-            response_id=interrupted_response_id,
-        )
+        # Stop and clear frontend playback first.
         await self._send_client(
             {
                 "type": "assistant_playback_stop",
@@ -979,6 +883,16 @@ class QwenRealtimeSession:
                 "clear_queue": True,
             }
         )
+
+        # Cancel only if Qwen is still generating this response. Submitted local
+        # tool tasks are independent and continue to completion.
+        if generating_response_id == interrupted_response_id:
+            cancel_sent = await self._send_qwen({"type": "response.cancel"})
+            self._record_timeline(
+                "response.cancel.sent" if cancel_sent else "response.cancel.failed",
+                response_id=interrupted_response_id,
+            )
+
         return turn_id
 
     def _end_user_turn(self, turn_id: str | None = None) -> None:
@@ -1044,6 +958,7 @@ class QwenRealtimeSession:
         event: dict[str, Any],
         response_id: str | None,
     ) -> None:
+        """Submit a complete Qwen function call for unconditional execution."""
         if not response_id:
             return
         call_id = str(event.get("call_id") or "").strip()
@@ -1051,69 +966,52 @@ class QwenRealtimeSession:
             return
         self._known_call_ids.add(call_id)
 
-        origin_turn_id = self._response_turn_ids.get(response_id)
-        origin_turn_sequence = self._response_turn_sequences.get(
-            response_id,
-            self._latest_user_turn_sequence,
+        name = str(event.get("name") or "").strip()
+        arguments_raw = str(event.get("arguments") or "{}")
+        turn_id = self._response_turn_ids.get(response_id)
+        user_transcript = (
+            self._user_transcripts_by_turn.get(turn_id or "")
+            or self._last_user_transcript
         )
-        call = CommittedToolCall(
-            response_id=response_id,
-            item_id=event.get("item_id"),
-            call_id=call_id,
-            name=str(event.get("name") or ""),
-            arguments_raw=str(event.get("arguments") or "{}"),
-            origin_turn_id=origin_turn_id,
-            origin_turn_sequence=origin_turn_sequence,
-            user_transcript=(
-                self._user_transcripts_by_turn.get(origin_turn_id or "")
-                or self._last_user_transcript
-            ),
+
+        self._responses_with_tools.add(response_id)
+        self._pending_tool_calls[response_id] = (
+            self._pending_tool_calls.get(response_id, 0) + 1
         )
-        self._pending_calls_by_response.setdefault(response_id, []).append(call)
+        self._response_should_respond[response_id] = True
 
         self._log_conversation_record(
             "TOOL",
-            f"{call.name}({call.arguments_raw})",
-            status="committed",
+            f"{name}({arguments_raw})",
+            status="submitted",
             response_id=response_id,
             call_id=call_id,
-            origin_turn_id=origin_turn_id,
-            origin_turn_sequence=origin_turn_sequence,
+            turn_id=turn_id,
         )
-        await self._send_client(
-            {
-                "type": "tool_execution_committed",
-                "transaction_id": f"txn-{response_id}",
-                "response_id": response_id,
-                "origin_turn_id": origin_turn_id,
-                "origin_turn_sequence": origin_turn_sequence,
-                "call_id": call_id,
-                "name": call.name,
-                "arguments": call.arguments_raw,
-                "status": "committed",
-            }
-        )
-        # Compatibility with the current frontend. Deliberately omit turn_id so
-        # a committed old call is not rejected by latest-turn filtering.
         await self._send_client(
             {
                 "type": "tool_call",
                 "response_id": response_id,
-                "origin_turn_id": origin_turn_id,
+                "turn_id": turn_id,
                 "call_id": call_id,
-                "name": call.name,
-                "arguments": call.arguments_raw,
-                "committed": True,
+                "name": name,
+                "arguments": arguments_raw,
             }
         )
 
-        # If the response has already been invalidated by barge-in, do not wait
-        # for a possibly delayed/cancelled response.done.
-        if response_id in self._invalidated_response_ids:
-            await self._enqueue_committed_batch(
-                response_id,
-                reason="committed_call_on_invalidated_response",
-            )
+        task = asyncio.create_task(
+            self._execute_tool_call(
+                response_id=response_id,
+                turn_id=turn_id,
+                call_id=call_id,
+                name=name,
+                arguments_raw=arguments_raw,
+                user_transcript=user_transcript,
+            ),
+            name=f"{self.session_id}:tool:{call_id}",
+        )
+        self._tool_tasks.add(task)
+        task.add_done_callback(self._tool_tasks.discard)
 
     async def _handle_response_done(
         self,
@@ -1125,8 +1023,8 @@ class QwenRealtimeSession:
         if not response_id:
             return
 
-        # response.done is authoritative and contains full function_call output
-        # items. Recover any call missed because of a transient event gap.
+        # Recover any complete function call included in response.done but missed
+        # as a standalone event. _known_call_ids prevents duplicate execution.
         for output_item in response_payload.get("output") or []:
             if not isinstance(output_item, dict) or output_item.get("type") != "function_call":
                 continue
@@ -1141,15 +1039,15 @@ class QwenRealtimeSession:
                 response_id,
             )
 
+        self._response_generation_done.add(response_id)
         response_turn_id = self._response_turn_ids.get(response_id)
         assistant_text = self._assistant_transcript_buffers.pop(
             response_id,
             "",
         ).strip()
-        was_barrier_cancelled = response_id in self._barrier_cancelled_response_ids
-        was_interrupted = response_id in self._invalidated_response_ids
+        was_interrupted = response_id in self._interrupted_response_ids
 
-        if assistant_text and not was_barrier_cancelled and not was_interrupted:
+        if assistant_text and not was_interrupted:
             self._log_conversation_record(
                 "AI",
                 assistant_text,
@@ -1158,35 +1056,28 @@ class QwenRealtimeSession:
                 turn_id=response_turn_id,
             )
 
-        await self._enqueue_committed_batch(
-            response_id,
-            reason="response_done",
-        )
-
         if self.current_response_id == response_id:
             self.current_response_id = None
         if self.latest_response_id == response_id:
             self.latest_response_id = None
-        # Do not clear _playback_response_id here. response.done means Qwen has
-        # finished generating audio, but the browser may still have buffered PCM
-        # queued for playback. Keeping the id lets a later semantic-VAD
-        # speech_started event stop that queued audio immediately.
+        # Keep _playback_response_id until the browser reports playback complete;
+        # this allows a later speech_started event to clear queued PCM.
         self._reset_audio_tracking()
 
-        if was_barrier_cancelled:
-            self._barrier_cancelled_response_ids.discard(response_id)
-        else:
-            await self._send_client(
-                {
-                    "type": "response_done",
-                    "response_id": response_id,
-                    "turn_id": response_turn_id,
-                    "interrupted": was_interrupted,
-                    "metrics": self._response_metrics.get(response_id, {}),
-                }
-            )
+        await self._send_client(
+            {
+                "type": "response_done",
+                "response_id": response_id,
+                "turn_id": response_turn_id,
+                "interrupted": was_interrupted,
+                "metrics": self._response_metrics.get(response_id, {}),
+            }
+        )
 
-        await self._release_response_barrier()
+        if response_id in self._responses_with_tools:
+            await self._maybe_finalize_tool_response(response_id)
+        else:
+            self._cleanup_response_state(response_id)
 
     async def _handle_qwen_error(self, event: dict[str, Any]) -> None:
         error = event.get("error") or {}
@@ -1207,330 +1098,287 @@ class QwenRealtimeSession:
         )
 
     # ------------------------------------------------------------------
-    # Committed tool queue
+    # Tool execution
     # ------------------------------------------------------------------
 
-    async def _enqueue_committed_batch(
+    async def _execute_tool_call(
         self,
+        *,
         response_id: str,
-        reason: str,
+        turn_id: str | None,
+        call_id: str,
+        name: str,
+        arguments_raw: str,
+        user_transcript: str,
     ) -> None:
-        if response_id in self._queued_response_ids:
-            return
-        calls = self._pending_calls_by_response.pop(response_id, [])
-        if not calls:
-            return
+        try:
+            await self._run_tool_call(
+                response_id=response_id,
+                turn_id=turn_id,
+                call_id=call_id,
+                name=name,
+                arguments_raw=arguments_raw,
+                user_transcript=user_transcript,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.exception("Unexpected tool task failure: %s", exc)
+            self._record_timeline(
+                "tool.done",
+                response_id=response_id,
+                turn_id=turn_id,
+                call_id=call_id,
+                name=name,
+                success=False,
+                error=str(exc),
+            )
+        finally:
+            await self._finalize_tool_call(response_id, should_respond=True)
 
-        self._queued_response_ids.add(response_id)
-        batch = CommittedToolBatch(
-            response_id=response_id,
-            transaction_id=f"txn-{response_id}",
-            origin_turn_id=calls[0].origin_turn_id,
-            origin_turn_sequence=calls[0].origin_turn_sequence,
-            calls=calls,
-            queued_reason=reason,
-        )
-        self._tool_work_count += 1
-        await self._tool_queue.put(batch)
-        self._record_timeline(
-            "tool_batch.queued",
-            response_id=response_id,
-            transaction_id=batch.transaction_id,
-            call_count=len(calls),
-            reason=reason,
-        )
-
-    async def _tool_worker(self) -> None:
-        while True:
-            batch = await self._tool_queue.get()
-            if batch is None:
-                self._tool_queue.task_done()
-                return
-            self._active_tool_batch = batch
-            try:
-                await self._execute_committed_batch(batch)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                log.exception("Committed tool batch failed: %s", exc)
-                await self._send_client(
-                    {
-                        "type": "error",
-                        "message": f"Committed tool batch failed: {exc}",
-                    }
-                )
-            finally:
-                self._active_tool_batch = None
-                self._tool_work_count = max(0, self._tool_work_count - 1)
-                self._tool_queue.task_done()
-                await self._release_response_barrier()
-
-    async def _execute_committed_batch(
+    async def _run_tool_call(
         self,
-        batch: CommittedToolBatch,
+        *,
+        response_id: str,
+        turn_id: str | None,
+        call_id: str,
+        name: str,
+        arguments_raw: str,
+        user_transcript: str,
     ) -> None:
-        mutating_call_exists = any(
-            call.name in MUTATING_TOOLS and call.name != "undo_last_action"
-            for call in batch.calls
+        arguments = self._parse_and_normalize_arguments(
+            name,
+            arguments_raw,
+            user_transcript,
         )
-        before_state = None
-        snapshot_fn = getattr(
-            dashboard_tools,
-            "snapshot_dashboard_state",
-            None,
+        started_at = time.perf_counter()
+
+        self._record_timeline(
+            "tool.start",
+            response_id=response_id,
+            turn_id=turn_id,
+            call_id=call_id,
+            name=name,
         )
-        if mutating_call_exists and callable(snapshot_fn):
-            before_state = snapshot_fn()
-
-        committed_tools: list[dict[str, Any]] = []
-        any_mutation_succeeded = False
-
-        for index, call in enumerate(batch.calls):
-            arguments = self._parse_and_normalize_arguments(call)
-            await self._send_client(
-                {
-                    "type": "tool_execution_started",
-                    "transaction_id": batch.transaction_id,
-                    "response_id": batch.response_id,
-                    "origin_turn_id": batch.origin_turn_id,
-                    "origin_turn_sequence": batch.origin_turn_sequence,
-                    "call_id": call.call_id,
-                    "tool_index": index,
-                    "tool_count": len(batch.calls),
-                    "name": call.name,
-                    "arguments": arguments,
-                    "status": "running",
-                }
+        if self._tool_logger:
+            self._tool_logger.info(
+                "TOOL_START response=%s turn=%s call=%s name=%s args=%s",
+                response_id,
+                turn_id,
+                call_id,
+                name,
+                json.dumps(arguments, ensure_ascii=False),
             )
-            self._log_conversation_record(
-                "TOOL",
-                f"{call.name}({json.dumps(arguments, ensure_ascii=False)})",
-                status="running",
-                transaction_id=batch.transaction_id,
-                call_id=call.call_id,
-            )
-
-            started_at = time.perf_counter()
-            async with self._tool_state_lock:
-                result = await asyncio.to_thread(
-                    execute_tool,
-                    call.name,
-                    arguments,
-                )
-                duration_ms = round(
-                    (time.perf_counter() - started_at) * 1000,
-                    2,
-                )
-                views = get_views_for_frontend()
-                persist_active_state_scope()
-
-            success = bool(result.get("success"))
-            if success and call.name in MUTATING_TOOLS:
-                any_mutation_succeeded = True
-            committed_tools.append(
-                {
-                    "name": call.name,
-                    "arguments": arguments,
-                    "call_id": call.call_id,
-                    "success": success,
-                }
-            )
-
-            log_tool_call(
-                session_id=self.session_id,
-                analysis_id=self.log_scope_id,
-                tool_name=call.name,
-                params=arguments,
-                mode="barge_in" if BARGE_IN_ENABLED else "turn_based",
-                response_id=batch.response_id,
-                call_id=call.call_id,
-                result_success=success,
-                cancelled=False,
-                metrics={
-                    "tool_duration_ms": duration_ms,
-                    "transaction_id": batch.transaction_id,
-                    "origin_turn_sequence": batch.origin_turn_sequence,
-                    "latest_turn_sequence": self._latest_user_turn_sequence,
-                    "timeline": self._timeline_snapshot(),
-                },
-                log_dir=self._log_dir,
-            )
-
-            followup_suppressed = (
-                self._latest_user_turn_sequence
-                > batch.origin_turn_sequence
-            )
-
-            # Existing frontend compatibility. No turn_id is included because a
-            # committed old action must still update the current dashboard.
-            if call.name not in MODEL_ONLY_TOOLS:
-                await self._send_client(
-                    {
-                        "type": "tool_result",
-                        "transaction_id": batch.transaction_id,
-                        "response_id": batch.response_id,
-                        "origin_turn_id": batch.origin_turn_id,
-                        "origin_turn_sequence": batch.origin_turn_sequence,
-                        "call_id": call.call_id,
-                        "duration_ms": duration_ms,
-                        "committed": True,
-                        "followup_suppressed": followup_suppressed,
-                        **result,
-                    }
-                )
-
-            if call.name in MUTATING_TOOLS:
-                if self._dashboard_logger:
-                    self._dashboard_logger.info(
-                        "VIEWS_UPDATE transaction=%s tool=%s args=%s",
-                        batch.transaction_id,
-                        call.name,
-                        json.dumps(arguments, ensure_ascii=False),
-                    )
-                await self._send_client(
-                    {
-                        "type": "views_update",
-                        "transaction_id": batch.transaction_id,
-                        "origin_turn_id": batch.origin_turn_id,
-                        "origin_turn_sequence": batch.origin_turn_sequence,
-                        "committed": True,
-                        "views": views,
-                    }
-                )
-
-            # Always close the committed function call in Qwen conversation.
-            await self._send_qwen(
-                {
-                    "type": "conversation.item.create",
-                    "item": {
-                        "type": "function_call_output",
-                        "call_id": call.call_id,
-                        "output": self._tool_result_text(result),
-                    },
-                }
-            )
-
-            await self._send_client(
-                {
-                    "type": "tool_execution_completed",
-                    "transaction_id": batch.transaction_id,
-                    "response_id": batch.response_id,
-                    "origin_turn_id": batch.origin_turn_id,
-                    "origin_turn_sequence": batch.origin_turn_sequence,
-                    "call_id": call.call_id,
-                    "name": call.name,
-                    "arguments": arguments,
-                    "status": "completed" if success else "failed",
-                    "success": success,
-                    "duration_ms": duration_ms,
-                    "followup_suppressed": followup_suppressed,
-                    "result": self._compact_tool_payload(result),
-                    "error": result.get("error"),
-                }
-            )
-            self._log_conversation_record(
-                "TOOL",
-                f"{call.name} completed",
-                status="completed" if success else "failed",
-                transaction_id=batch.transaction_id,
-                call_id=call.call_id,
-                duration_ms=duration_ms,
-                followup_suppressed=followup_suppressed,
-                result=self._compact_tool_payload(result),
-                error=result.get("error"),
-            )
-
-        record_transaction_fn = getattr(
-            dashboard_tools,
-            "record_dashboard_transaction",
-            None,
-        )
-        if (
-            before_state is not None
-            and any_mutation_succeeded
-            and callable(record_transaction_fn)
-        ):
-            record_transaction_fn(
-                before_state=before_state,
-                transaction_id=batch.transaction_id,
-                turn_id=batch.origin_turn_id,
-                response_id=batch.response_id,
-                tools=committed_tools,
-            )
-
-        followup_suppressed = (
-            self._latest_user_turn_sequence
-            > batch.origin_turn_sequence
-        )
         await self._send_client(
             {
-                "type": "tool_batch_completed",
-                "transaction_id": batch.transaction_id,
-                "response_id": batch.response_id,
-                "origin_turn_id": batch.origin_turn_id,
-                "origin_turn_sequence": batch.origin_turn_sequence,
-                "tool_count": len(batch.calls),
-                "followup_suppressed": followup_suppressed,
-                "suppression_reason": (
-                    "newer_user_turn"
-                    if followup_suppressed
-                    else None
-                ),
+                "type": "tool_execution_started",
+                "response_id": response_id,
+                "turn_id": turn_id,
+                "call_id": call_id,
+                "name": name,
+                "arguments": arguments,
+                "status": "running",
             }
         )
 
-        if followup_suppressed:
-            self._record_timeline(
-                "tool_followup.suppressed",
-                transaction_id=batch.transaction_id,
-                origin_turn_sequence=batch.origin_turn_sequence,
-                latest_turn_sequence=self._latest_user_turn_sequence,
+        try:
+            async with self._tool_state_lock:
+                result = await asyncio.to_thread(
+                    execute_tool,
+                    name,
+                    arguments,
+                )
+                views = get_views_for_frontend()
+                persist_active_state_scope()
+        except Exception as exc:
+            log.exception("Tool execution failed: %s", exc)
+            result = {
+                "success": False,
+                "tool": name,
+                "payload": {},
+                "error": str(exc),
+            }
+            views = get_views_for_frontend()
+
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        success = bool(result.get("success"))
+
+        log_tool_call(
+            session_id=self.session_id,
+            analysis_id=self.log_scope_id,
+            tool_name=name,
+            params=arguments,
+            mode="barge_in" if BARGE_IN_ENABLED else "turn_based",
+            response_id=response_id,
+            call_id=call_id,
+            result_success=success,
+            cancelled=False,
+            metrics={
+                "tool_duration_ms": duration_ms,
+                "turn_id": turn_id,
+                "timeline": self._timeline_snapshot(),
+            },
+            log_dir=self._log_dir,
+        )
+
+        # Tool events are always delivered, regardless of whether a newer user
+        # turn has started.
+        await self._send_client(
+            {
+                "type": "tool_result",
+                "response_id": response_id,
+                "turn_id": turn_id,
+                "call_id": call_id,
+                "duration_ms": duration_ms,
+                **result,
+            }
+        )
+        await self._send_client(
+            {
+                "type": "views_update",
+                "response_id": response_id,
+                "turn_id": turn_id,
+                "call_id": call_id,
+                "views": views,
+            }
+        )
+
+        # Always close the submitted function call in Qwen conversation.
+        await self._send_qwen(
+            {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": self._tool_result_text(result),
+                },
+            }
+        )
+
+        self._record_timeline(
+            "tool.done",
+            response_id=response_id,
+            turn_id=turn_id,
+            call_id=call_id,
+            name=name,
+            success=success,
+            duration_ms=duration_ms,
+        )
+        if self._tool_logger:
+            self._tool_logger.info(
+                "TOOL_DONE response=%s turn=%s call=%s name=%s success=%s duration_ms=%s",
+                response_id,
+                turn_id,
+                call_id,
+                name,
+                success,
+                duration_ms,
             )
-        else:
-            self._old_tool_followup_needed = True
+        self._log_conversation_record(
+            "TOOL",
+            f"{name} completed",
+            status="completed" if success else "failed",
+            response_id=response_id,
+            turn_id=turn_id,
+            call_id=call_id,
+            duration_ms=duration_ms,
+            result=self._compact_tool_payload(result),
+            error=result.get("error"),
+        )
+        await self._send_client(
+            {
+                "type": "tool_execution_completed",
+                "response_id": response_id,
+                "turn_id": turn_id,
+                "call_id": call_id,
+                "name": name,
+                "arguments": arguments,
+                "status": "completed" if success else "failed",
+                "success": success,
+                "duration_ms": duration_ms,
+                "result": self._compact_tool_payload(result),
+                "error": result.get("error"),
+            }
+        )
+
+    async def _finalize_tool_call(
+        self,
+        response_id: str,
+        *,
+        should_respond: bool,
+    ) -> None:
+        """Count one completed tool and finalize the response-level tool batch."""
+        remaining = max(0, self._pending_tool_calls.get(response_id, 0) - 1)
+        self._pending_tool_calls[response_id] = remaining
+        self._response_should_respond[response_id] = (
+            self._response_should_respond.get(response_id, False)
+            or should_respond
+        )
+        await self._maybe_finalize_tool_response(response_id)
+
+    async def _maybe_finalize_tool_response(self, response_id: str) -> None:
+        # Wait until Qwen has finished emitting the response and every complete
+        # function call from that response has finished locally.
+        if response_id not in self._response_generation_done:
+            return
+        if self._pending_tool_calls.get(response_id, 0) > 0:
+            return
+
+        should_respond = self._response_should_respond.get(response_id, False)
+        origin_turn_id = self._response_turn_ids.get(response_id)
+        has_newer_user_turn = bool(
+            origin_turn_id
+            and self._latest_user_turn_id
+            and origin_turn_id != self._latest_user_turn_id
+        )
+
+        if should_respond and not has_newer_user_turn:
+            await self._create_response_if_idle("tool.finalize")
+
+        if should_respond and has_newer_user_turn:
+            self._record_timeline(
+                "tool.followup.suppressed",
+                response_id=response_id,
+                origin_turn_id=origin_turn_id,
+                latest_turn_id=self._latest_user_turn_id,
+            )
+            if self._tool_logger:
+                self._tool_logger.info(
+                    "TOOL_FOLLOWUP_SUPPRESSED response=%s origin_turn=%s latest_turn=%s",
+                    response_id,
+                    origin_turn_id,
+                    self._latest_user_turn_id,
+                )
+
+        self._cleanup_response_state(response_id)
+
+    def _cleanup_response_state(self, response_id: str) -> None:
+        self._response_turn_ids.pop(response_id, None)
+        self._pending_tool_calls.pop(response_id, None)
+        self._response_should_respond.pop(response_id, None)
+        self._response_generation_done.discard(response_id)
+        self._responses_with_tools.discard(response_id)
+        self._interrupted_response_ids.discard(response_id)
 
     def _parse_and_normalize_arguments(
         self,
-        call: CommittedToolCall,
+        name: str,
+        arguments_raw: str,
+        user_transcript: str,
     ) -> dict[str, Any]:
         try:
-            arguments = json.loads(call.arguments_raw)
+            arguments = json.loads(arguments_raw)
             if not isinstance(arguments, dict):
                 arguments = {}
         except json.JSONDecodeError:
             arguments = {}
         return normalize_tool_arguments(
-            call.name,
+            name,
             arguments,
-            user_transcript=call.user_transcript,
+            user_transcript=user_transcript,
         )
 
-    async def _release_response_barrier(self) -> None:
-        if self._tool_work_count > 0 or self.current_response_id:
-            return
-
-        if self._deferred_latest_response_needed:
-            self._deferred_latest_response_needed = False
-            deferred_turn_id = self._deferred_latest_turn_id
-            self._deferred_latest_turn_id = None
-            self._old_tool_followup_needed = False
-            self._record_timeline(
-                "response.create.after_tool_barrier",
-                turn_id=deferred_turn_id,
-            )
-            await self._send_qwen({"type": "response.create"})
-            return
-
-        if self._old_tool_followup_needed:
-            self._old_tool_followup_needed = False
-            self._record_timeline("response.create.after_committed_tools")
-            await self._send_qwen({"type": "response.create"})
-
     async def _create_response_if_idle(self, reason: str) -> bool:
-        if self._tool_work_count > 0:
-            self._deferred_latest_response_needed = True
-            self._deferred_latest_turn_id = self._latest_user_turn_id
-            return False
         if self.current_response_id:
             return False
         self._record_timeline("response.create.sent", reason=reason)
@@ -1751,11 +1599,10 @@ class QwenRealtimeSession:
                 (now - metrics["created_at"]) * 1000,
                 2,
             )
-        metrics["invalidated"] = response_id in self._invalidated_response_ids
+        metrics["interrupted"] = response_id in self._interrupted_response_ids
 
         usage = (response or {}).get("usage") or {}
         if usage:
-            # Official Qwen fields are plural: *_tokens_details.
             input_details = usage.get("input_tokens_details") or {}
             output_details = usage.get("output_tokens_details") or {}
             metrics["usage"] = {

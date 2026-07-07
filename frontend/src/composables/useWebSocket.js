@@ -9,7 +9,6 @@ export function useWebSocket(audioPlayer, options = {}) {
   const store = useDashboardStore();
   const socket = ref(null);
 
-  let suppressCurrentAssistantTranscript = false;
   let activeResponseId = null;
   let activeResponseTurnId = null;
   let latestUserTurnId = null;
@@ -50,6 +49,7 @@ export function useWebSocket(audioPlayer, options = {}) {
       store.connectionStatus = "disconnected";
       store.sessionReady = false;
       activeResponseId = null;
+      activeResponseTurnId = null;
       socket.value = null;
     };
 
@@ -59,6 +59,7 @@ export function useWebSocket(audioPlayer, options = {}) {
       store.connectionStatus = "disconnected";
       store.sessionReady = false;
       activeResponseId = null;
+      activeResponseTurnId = null;
     };
 
     ws.onmessage = (event) => {
@@ -95,7 +96,6 @@ export function useWebSocket(audioPlayer, options = {}) {
         }
         activeResponseId = msg.response_id;
         activeResponseTurnId = msg.turn_id || null;
-        suppressCurrentAssistantTranscript = false;
         if (store.sessionMode === "turn_based_text") {
           store.setTextTurnProcessing(true);
         }
@@ -104,7 +104,8 @@ export function useWebSocket(audioPlayer, options = {}) {
         break;
 
       case "views_update":
-        if (!msg.committed && _isStaleTurn(msg.turn_id)) break;
+        // Tool and dashboard events are committed once the backend receives a
+        // complete function call. Never reject them because a newer turn exists.
         store.updateViews(msg.views);
         break;
 
@@ -137,18 +138,10 @@ export function useWebSocket(audioPlayer, options = {}) {
           if (_isStaleTurn(msg.turn_id) || !_matchesActiveResponseTurn(msg.turn_id)) {
             break;
           }
-          if (!suppressCurrentAssistantTranscript) {
-            store.appendAssistantTranscript(msg.response_id, msg.delta || "");
-          }
+          store.appendAssistantTranscript(msg.response_id, msg.delta || "");
         } else if (msg.role === "user") {
           _handleUserTranscript(msg);
         }
-        break;
-
-      case "suppress_assistant_buffer":
-        if (_isStaleTurn(msg.turn_id)) break;
-        suppressCurrentAssistantTranscript = true;
-        store.suppressAssistantResponse(msg.response_id || activeResponseId);
         break;
 
       case "response_done":
@@ -160,7 +153,6 @@ export function useWebSocket(audioPlayer, options = {}) {
         }
         store.completeAssistantResponse(msg.response_id);
         store.setTextTurnProcessing(false);
-        suppressCurrentAssistantTranscript = false;
         if (audioPlayer) {
           audioPlayer.flush({
             response_id: msg.response_id,
@@ -182,7 +174,6 @@ export function useWebSocket(audioPlayer, options = {}) {
           activeResponseTurnId = null;
         }
         store.setTextTurnProcessing(false);
-        suppressCurrentAssistantTranscript = false;
         break;
 
       case "speech_started":
@@ -230,21 +221,21 @@ export function useWebSocket(audioPlayer, options = {}) {
         break;
 
       case "tool_call":
-        if (_isStaleTurn(msg.turn_id) || !_matchesActiveResponseTurn(msg.turn_id)) break;
+        // Tool calls always belong to the response that emitted them. They are
+        // accepted even when that response's spoken follow-up is now stale.
         console.log(`%c>>> TOOL CALL: ${msg.name}(${msg.arguments})`, "color: #f59e0b; font-weight: bold");
         store.recordToolCall({ name: msg.name, arguments: msg.arguments });
-        if (!msg.committed) {
-          store.addToolActionToTranscript(
-            { name: msg.name, arguments: msg.arguments },
-            msg.response_id || activeResponseId
-          );
-        }
+        store.addToolActionToTranscript(
+          {
+            name: msg.name,
+            arguments: msg.arguments,
+          },
+          msg.response_id || null
+        );
         break;
 
       case "tool_result":
-        if (!msg.committed && (
-          _isStaleTurn(msg.turn_id) || !_matchesActiveResponseTurn(msg.turn_id)
-        )) break;
+        // A submitted tool result is always authoritative for dashboard state.
         store.handleToolResult(msg);
         break;
 
@@ -269,7 +260,6 @@ export function useWebSocket(audioPlayer, options = {}) {
           inputAudioRate: msg.input_audio_rate,
           outputAudioRate: msg.output_audio_rate,
         });
-        // Store session info for recording upload
         window.__verbalvis_session_id = msg.session_id || "";
         break;
 
@@ -314,7 +304,6 @@ export function useWebSocket(audioPlayer, options = {}) {
 
   function _stopAssistantPlayback(responseId, reason) {
     store.isAssistantSpeaking = false;
-    suppressCurrentAssistantTranscript = false;
     store.interruptAssistantResponse(responseId || activeResponseId);
     if (!responseId || activeResponseId === responseId) {
       activeResponseId = null;
