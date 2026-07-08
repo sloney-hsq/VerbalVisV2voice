@@ -54,11 +54,18 @@ QWEN_API_KEY = (
 
 QWEN_MODEL = "qwen3.5-omni-plus-realtime"
 QWEN_VOICE = "Ethan"
+QWEN_REGION = os.getenv("QWEN_REGION", "beijing").strip().lower()
 
-QWEN_WS_URL = (
-    "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
-    f"?model={QWEN_MODEL}"
-)
+def _resolve_qwen_realtime_url() -> str:
+    host = (
+        "dashscope-intl.aliyuncs.com"
+        if QWEN_REGION in {"singapore", "ap-southeast-1"}
+        else "dashscope.aliyuncs.com"
+    )
+    return f"wss://{host}/api-ws/v1/realtime?model={QWEN_MODEL}"
+
+
+QWEN_WS_URL = _resolve_qwen_realtime_url()
 
 QWEN_INPUT_SAMPLE_RATE = 16000
 QWEN_OUTPUT_SAMPLE_RATE = 24000
@@ -202,6 +209,7 @@ class QwenRealtimeSession:
         self.running = False
 
         self.current_response_id: str | None = None
+        self.playback_response_id: str | None = None
         self.interrupted_response_ids: set[str] = set()
 
         self.last_user_transcript = ""
@@ -234,18 +242,8 @@ class QwenRealtimeSession:
         await self._send_client(
             {
                 "type": "init",
-                "session_id": self.session_id,
-                "analysis_id": self.log_scope_id,
                 "views": get_views_for_frontend(),
-                "mode": "barge_in",
-                "input_mode": "semantic_vad",
-                "turn_detection": QWEN_TURN_DETECTION,
-                "condition_code": "fd_voice",
-                "provider": "qwen",
-                "model": self.model,
-                "input_audio_rate": QWEN_INPUT_SAMPLE_RATE,
-                "output_audio_rate": QWEN_OUTPUT_SAMPLE_RATE,
-                "audio_format": QWEN_AUDIO_FORMAT,
+                **self._session_metadata(),
             }
         )
 
@@ -366,19 +364,22 @@ class QwenRealtimeSession:
                 await self._send_client(
                     {
                         "type": "session_updated",
-                        "session_id": self.session_id,
-                        "analysis_id": self.log_scope_id,
-                        "mode": "barge_in",
+                        **self._session_metadata(),
+                    }
+                )
+                self._append_jsonl(
+                    "conversation.jsonl",
+                    {
+                        "event": "session_ready",
                         "input_mode": "semantic_vad",
                         "turn_detection": QWEN_TURN_DETECTION,
-                        "condition_code": "fd_voice",
                         "provider": "qwen",
-                        "model": self.model,
                         "voice": QWEN_VOICE,
                         "input_audio_rate": QWEN_INPUT_SAMPLE_RATE,
                         "output_audio_rate": QWEN_OUTPUT_SAMPLE_RATE,
                         "audio_format": QWEN_AUDIO_FORMAT,
-                    }
+                        "session_ready": True,
+                    },
                 )
                 await self._send_client({"type": "session_ready"})
                 return
@@ -399,6 +400,22 @@ class QwenRealtimeSession:
             f"{state}"
         )
 
+    def _session_metadata(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "analysis_id": self.log_scope_id,
+            "mode": "barge_in",
+            "input_mode": "semantic_vad",
+            "turn_detection": QWEN_TURN_DETECTION,
+            "condition_code": "fd_voice",
+            "provider": "qwen",
+            "model": self.model,
+            "voice": QWEN_VOICE,
+            "input_audio_rate": QWEN_INPUT_SAMPLE_RATE,
+            "output_audio_rate": QWEN_OUTPUT_SAMPLE_RATE,
+            "audio_format": QWEN_AUDIO_FORMAT,
+        }
+
     # ------------------------------------------------------------------
     # Browser -> Qwen
     # ------------------------------------------------------------------
@@ -418,11 +435,6 @@ class QwenRealtimeSession:
                             "audio": audio,
                         }
                     )
-
-            elif message_type == "start_session":
-                # The Qwen connection is already ready. This keeps old
-                # frontends harmless without restarting the upstream session.
-                await self._send_client({"type": "session_ready"})
 
             elif message_type == "playback_stopped":
                 self._handle_playback_stopped(message)
@@ -450,32 +462,16 @@ class QwenRealtimeSession:
                 await self._handle_response_created(event)
                 continue
 
-            if event_type in {
-                "response.audio.delta",
-                "response.output_audio.delta",
-            }:
+            if event_type == "response.audio.delta":
                 await self._handle_audio_delta(event)
                 continue
 
-            if event_type in {
-                "response.audio_transcript.delta",
-                "response.output_audio_transcript.delta",
-            }:
+            if event_type == "response.audio_transcript.delta":
                 await self._handle_assistant_transcript_delta(event)
                 continue
 
-            if event_type in {
-                "response.audio_transcript.done",
-                "response.output_audio_transcript.done",
-            }:
+            if event_type == "response.audio_transcript.done":
                 await self._handle_assistant_transcript_done(event)
-                continue
-
-            if event_type in {
-                "response.audio.done",
-                "response.output_audio.done",
-            }:
-                self._handle_audio_done(event)
                 continue
 
             if event_type == "input_audio_buffer.speech_started":
@@ -496,10 +492,6 @@ class QwenRealtimeSession:
                 "conversation.item.input_audio_transcription.completed"
             ):
                 await self._handle_user_transcript_completed(event)
-                continue
-
-            if event_type == "response.function_call_arguments.done":
-                await self._handle_function_call(event)
                 continue
 
             if event_type == "response.done":
@@ -568,7 +560,7 @@ class QwenRealtimeSession:
                     ttfa_ms,
                 )
 
-        await self._send_client(
+        sent = await self._send_client(
             {
                 "type": "audio",
                 "data": event.get("delta", ""),
@@ -578,6 +570,8 @@ class QwenRealtimeSession:
                 "sample_rate": QWEN_OUTPUT_SAMPLE_RATE,
             }
         )
+        if sent:
+            self.playback_response_id = response_id
 
     async def _handle_assistant_transcript_delta(
         self,
@@ -632,18 +626,6 @@ class QwenRealtimeSession:
             }
         )
 
-    def _handle_audio_done(
-        self,
-        event: dict[str, Any],
-    ) -> None:
-        response_id = self._event_response_id(event)
-
-        if self._event_logger:
-            self._event_logger.info(
-                "AUDIO_GENERATION_DONE response_id=%s",
-                response_id,
-            )
-
     async def _handle_speech_started(
         self,
         event: dict[str, Any],
@@ -660,7 +642,7 @@ class QwenRealtimeSession:
             }
         )
 
-        response_id = self.current_response_id
+        response_id = self.current_response_id or self.playback_response_id
 
         if not response_id:
             return
@@ -669,15 +651,16 @@ class QwenRealtimeSession:
         self.playback_stop_started_at[response_id] = time.perf_counter()
 
         self._log_bargein(
-            "BARGE_IN response_id=%s utterance_id=%s",
+            "BARGE_IN_REQUEST response_id=%s utterance_id=%s",
             response_id,
             utterance_id,
         )
 
-        self.current_response_id = None
-        self.assistant_transcript = ""
+        if response_id == self.current_response_id:
+            self.current_response_id = None
+            self.assistant_transcript = ""
 
-        await self._send_client(
+        sent = await self._send_client(
             {
                 "type": "assistant_playback_stop",
                 "response_id": response_id,
@@ -685,6 +668,13 @@ class QwenRealtimeSession:
                 "clear_queue": True,
             }
         )
+
+        if sent:
+            self._log_bargein(
+                "PLAYBACK_STOP_SENT response_id=%s utterance_id=%s",
+                response_id,
+                utterance_id,
+            )
 
     async def _handle_speech_stopped(
         self,
@@ -750,20 +740,6 @@ class QwenRealtimeSession:
             }
         )
 
-    async def _handle_function_call(
-        self,
-        event: dict[str, Any],
-    ) -> None:
-        if self._tool_logger:
-            self._tool_logger.info(
-                "TOOL_CALL_CREATED response_id=%s call_id=%s "
-                "name=%s arguments=%s",
-                self._event_response_id(event),
-                event.get("call_id"),
-                event.get("name"),
-                event.get("arguments"),
-            )
-
     async def _handle_response_done(
         self,
         event: dict[str, Any],
@@ -776,7 +752,6 @@ class QwenRealtimeSession:
 
         if response_id and response_id in self.interrupted_response_ids:
             self.interrupted_response_ids.discard(response_id)
-            self.assistant_transcript = ""
             self._response_metrics(response_id, response)
 
             if self._event_logger:
@@ -792,24 +767,34 @@ class QwenRealtimeSession:
             and response_id == self.current_response_id
         )
 
+        if not was_active:
+            self._response_metrics(response_id, response)
+            if self._event_logger:
+                self._event_logger.info(
+                    "RESPONSE_DISCARDED response_id=%s "
+                    "reason=stale_response_done status=%s",
+                    response_id,
+                    status,
+                )
+            return
+
         if was_active:
             self.current_response_id = None
 
         if status != "completed":
             self.assistant_transcript = ""
 
-            if was_active:
-                await self._send_client(
-                    {
-                        "type": "response_done",
-                        "response_id": response_id,
-                        "status": status,
-                        "metrics": self._response_metrics(
-                            response_id,
-                            response,
-                        ),
-                    }
-                )
+            await self._send_client(
+                {
+                    "type": "response_done",
+                    "response_id": response_id,
+                    "status": status,
+                    "metrics": self._response_metrics(
+                        response_id,
+                        response,
+                    ),
+                }
+            )
             return
 
         tool_calls = self._tool_calls_from_response(response)
@@ -930,17 +915,15 @@ class QwenRealtimeSession:
             arguments = normalize_tool_arguments(
                 pending.name,
                 raw_arguments,
-                user_transcript=None,
+                user_transcript=self.last_user_transcript,
             )
+            arguments_json = json.dumps(arguments, ensure_ascii=False)
 
             await self._send_client(
                 {
                     "type": "tool_call",
                     "name": pending.name,
-                    "arguments": json.dumps(
-                        arguments,
-                        ensure_ascii=False,
-                    ),
+                    "arguments": arguments_json,
                     "response_id": pending.response_id,
                     "call_id": pending.call_id,
                 }
@@ -948,10 +931,19 @@ class QwenRealtimeSession:
 
             if self._tool_logger:
                 self._tool_logger.info(
-                    "TOOL_START name=%s call_id=%s args=%s",
+                    "TOOL_CALL_CREATED response_id=%s call_id=%s "
+                    "name=%s arguments=%s",
+                    pending.response_id,
+                    pending.call_id,
+                    pending.name,
+                    pending.arguments_raw,
+                )
+                self._tool_logger.info(
+                    "TOOL_START response_id=%s name=%s call_id=%s args=%s",
+                    pending.response_id,
                     pending.name,
                     pending.call_id,
-                    json.dumps(arguments, ensure_ascii=False),
+                    arguments_json,
                 )
 
             try:
@@ -977,8 +969,9 @@ class QwenRealtimeSession:
 
             if self._tool_logger:
                 self._tool_logger.info(
-                    "TOOL_DONE name=%s call_id=%s "
+                    "TOOL_DONE response_id=%s name=%s call_id=%s "
                     "duration_ms=%s success=%s",
+                    pending.response_id,
                     pending.name,
                     pending.call_id,
                     duration_ms,
@@ -1069,14 +1062,6 @@ class QwenRealtimeSession:
             if isinstance(error, dict)
             else None
         )
-
-        # Keep compatibility with older frontends or in-flight upstream races.
-        if code == "response_cancel_not_active":
-            self._log_connection(
-                "IGNORED_CANCEL_RACE %s",
-                message,
-            )
-            return
 
         if self._event_logger:
             self._event_logger.error(
@@ -1204,6 +1189,38 @@ class QwenRealtimeSession:
         if self._bargein_logger:
             self._bargein_logger.info(message, *args)
 
+    @staticmethod
+    def _utc_now() -> str:
+        return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    def _append_jsonl(
+        self,
+        filename: str,
+        event: dict[str, Any],
+    ) -> None:
+        if not self._log_dir:
+            return
+
+        payload = {
+            "ts": self._utc_now(),
+            "session_id": self.session_id,
+            "analysis_id": self.log_scope_id,
+            "mode": "barge_in",
+            "condition_code": "fd_voice",
+            "model": self.model,
+            **event,
+        }
+        path = self._log_dir / filename
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    default=str,
+                )
+                + "\n"
+            )
+
     def _log_conversation(
         self,
         role: str,
@@ -1220,24 +1237,13 @@ class QwenRealtimeSession:
                 clean,
             )
 
-        if self._log_dir:
-            path = self._log_dir / "conversation.jsonl"
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(
-                    json.dumps(
-                        {
-                            "ts": datetime.datetime.now(
-                                datetime.timezone.utc
-                            ).isoformat(),
-                            "session_id": self.session_id,
-                            "analysis_id": self.log_scope_id,
-                            "role": role,
-                            "text": clean,
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
+        self._append_jsonl(
+            "conversation.jsonl",
+            {
+                "role": role,
+                "text": clean,
+            },
+        )
 
     def _handle_playback_stopped(
         self,
@@ -1260,43 +1266,28 @@ class QwenRealtimeSession:
             ensure_ascii=False,
             default=str,
         )
+        if response_id and response_id == self.playback_response_id:
+            self.playback_response_id = None
 
         if self._bargein_logger:
             self._bargein_logger.info(
                 "PLAYBACK_STOPPED response_id=%s "
-                "stop_ack_latency_ms=%s reason=%s cursor=%s "
-                "client_wall_time_ms=%s",
+                "stop_ack_latency_ms=%s reason=%s cursor=%s",
                 response_id,
                 latency_ms,
                 message.get("reason"),
                 cursor_json,
-                message.get("client_wall_time_ms"),
             )
 
-        if self._log_dir:
-            path = self._log_dir / "playback_stopped.jsonl"
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(
-                    json.dumps(
-                        {
-                            "ts": datetime.datetime.now(
-                                datetime.timezone.utc
-                            ).isoformat(),
-                            "session_id": self.session_id,
-                            "analysis_id": self.log_scope_id,
-                            "response_id": response_id,
-                            "reason": message.get("reason"),
-                            "stop_ack_latency_ms": latency_ms,
-                            "playback_cursor": cursor,
-                            "client_wall_time_ms": message.get(
-                                "client_wall_time_ms"
-                            ),
-                        },
-                        ensure_ascii=False,
-                        default=str,
-                    )
-                    + "\n"
-                )
+        self._append_jsonl(
+            "playback_stopped.jsonl",
+            {
+                "response_id": response_id,
+                "reason": message.get("reason"),
+                "stop_ack_latency_ms": latency_ms,
+                "playback_cursor": cursor,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Transport helpers
@@ -1328,14 +1319,16 @@ class QwenRealtimeSession:
     async def _send_client(
         self,
         message: dict[str, Any],
-    ) -> None:
+    ) -> bool:
         try:
             await self.client_ws.send_json(message)
+            return True
         except Exception as exc:
             self._log_connection(
                 "SEND_CLIENT_FAILED %s",
                 exc,
             )
+            return False
 
     async def _close_qwen(self) -> None:
         if self.qwen_ws is None:

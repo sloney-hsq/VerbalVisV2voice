@@ -119,6 +119,9 @@ def _resolve_qwen_chat_completions_url() -> str:
 
 QWEN_CHAT_COMPLETIONS_URL = _resolve_qwen_chat_completions_url()
 
+TEXT_MODE = "turn_based_text"
+TEXT_CONDITION_CODE = "text_cva"
+
 
 class QwenTextTimeoutError(RuntimeError):
     """Raised when DashScope does not return a chat completion in time."""
@@ -284,15 +287,8 @@ class QwenTextConversationSession:
         await self._send_session_snapshot()
 
     async def _send_session_snapshot(self) -> None:
-        payload = {
-            "provider": "qwen",
-            "model": self.model,
-            "mode": "turn_based_text",
-            "input_mode": "text",
-            "turn_detection": "turn_based",
-            "condition": "turn_based_text",
-            "analysis_id": self.log_scope_id,
-        }
+        self._init_session_loggers()
+        payload = self._session_metadata()
         await self._send_client({
             "type": "init",
             "session_id": self.session_id,
@@ -304,7 +300,29 @@ class QwenTextConversationSession:
             "session_id": self.session_id,
             **payload,
         })
+        self._append_jsonl(
+            "conversation.jsonl",
+            {
+                "event": "session_ready",
+                "input_mode": "text",
+                "turn_detection": "turn_based",
+                "provider": "qwen",
+                "session_ready": True,
+            },
+        )
         await self._send_client({"type": "session_ready"})
+
+    def _session_metadata(self) -> dict[str, Any]:
+        return {
+            "provider": "qwen",
+            "model": self.model,
+            "mode": TEXT_MODE,
+            "input_mode": "text",
+            "turn_detection": "turn_based",
+            "condition": TEXT_MODE,
+            "condition_code": TEXT_CONDITION_CODE,
+            "analysis_id": self.log_scope_id,
+        }
 
     async def _begin_text_turn(self, msg: dict[str, Any]) -> None:
         user_text = str(msg.get("text") or "").strip()
@@ -902,6 +920,34 @@ class QwenTextConversationSession:
         if self._dashboard_logger:
             self._dashboard_logger.info(message, *args)
 
+    @staticmethod
+    def _utc_now() -> str:
+        return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    def _append_jsonl(self, filename: str, event: dict[str, Any]) -> None:
+        if not self._log_dir:
+            return
+
+        payload = {
+            "ts": self._utc_now(),
+            "session_id": self.session_id,
+            "analysis_id": self.log_scope_id,
+            "mode": TEXT_MODE,
+            "condition_code": TEXT_CONDITION_CODE,
+            "model": self.model,
+            **event,
+        }
+        jsonl_path = self._log_dir / filename
+        with jsonl_path.open("a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    default=str,
+                )
+                + "\n"
+            )
+
     def _log_conversation(self, role: str, text: str) -> None:
         text = (text or "").strip()
         if text and role.lower() in {"you", "user"}:
@@ -909,16 +955,13 @@ class QwenTextConversationSession:
         if not text or not self._conversation_logger:
             return
         self._conversation_logger.info("%s: %s", role, text)
-        if self._log_dir:
-            jsonl_path = self._log_dir / "conversation.jsonl"
-            with jsonl_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps({
-                    "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                    "session_id": self.session_id,
-                    "analysis_id": self.log_scope_id,
-                    "role": role,
-                    "text": text,
-                }, ensure_ascii=False) + "\n")
+        self._append_jsonl(
+            "conversation.jsonl",
+            {
+                "role": role,
+                "text": text,
+            },
+        )
 
     def _update_analysis_id_from_message(self, msg: dict[str, Any]) -> None:
         if self._log_dir:

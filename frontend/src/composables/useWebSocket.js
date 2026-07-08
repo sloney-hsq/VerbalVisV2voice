@@ -12,8 +12,6 @@ export function useWebSocket(audioPlayer) {
   const socket = ref(null);
 
   let activeResponseId = null;
-  let manualClose = false;
-  let lastUrl = null;
   let analysisId = getOrCreateAnalysisId();
 
   function connect(url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?model=qwen3.5-omni-plus-realtime`) {
@@ -24,8 +22,6 @@ export function useWebSocket(audioPlayer) {
       return;
     }
 
-    manualClose = false;
-    lastUrl = url;
     store.connectionStatus = "connecting";
     const ws = new WebSocket(url);
     socket.value = ws;
@@ -210,26 +206,29 @@ export function useWebSocket(audioPlayer) {
   }
 
   function _stopAssistantPlayback(responseId, reason) {
-    store.isAssistantSpeaking = false;
-    store.interruptAssistantResponse(responseId || activeResponseId);
-    if (!responseId || activeResponseId === responseId) {
-      activeResponseId = null;
-    }
-
-    if (!audioPlayer) return;
+    const wasActive = Boolean(activeResponseId && (!responseId || activeResponseId === responseId));
 
     let result = null;
-    if (audioPlayer.stopAssistantAudio) {
+    if (audioPlayer?.stopAssistantAudio) {
       result = audioPlayer.stopAssistantAudio({
         responseId,
         blockNewAudio: true,
       });
-    } else if (audioPlayer.stop) {
+    } else if (audioPlayer?.stop) {
       const cursor = audioPlayer.stop();
       result = {
         stopped: true,
         cursor,
       };
+    }
+
+    if (wasActive || result?.stopped) {
+      store.isAssistantSpeaking = false;
+      store.interruptAssistantResponse(responseId || activeResponseId);
+    }
+
+    if (wasActive) {
+      activeResponseId = null;
     }
 
     if (
@@ -242,7 +241,6 @@ export function useWebSocket(audioPlayer) {
         response_id: responseId,
         reason,
         playback_cursor: result.cursor || null,
-        client_wall_time_ms: Date.now(),
       }));
     }
   }
@@ -289,18 +287,12 @@ export function useWebSocket(audioPlayer) {
   }
 
   function disconnect() {
-    manualClose = true;
     if (socket.value) {
       socket.value.close();
       socket.value = null;
     }
     activeResponseId = null;
     store.sessionReady = false;
-  }
-
-  function reconnect() {
-    disconnect();
-    connect(lastUrl || undefined);
   }
 
   function getOrCreateAnalysisId() {
@@ -348,6 +340,5 @@ export function useWebSocket(audioPlayer) {
     sendText,
     interruptActiveResponse,
     disconnect,
-    reconnect,
   };
 }

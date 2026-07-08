@@ -435,7 +435,6 @@ async function startListeningMic() {
   isStartingListening.value = true;
   try {
     await audio.startRecording({
-      gateSilence: false,
       onChunk: (base64pcm) => {
         ws.sendAudio(base64pcm);
       },
