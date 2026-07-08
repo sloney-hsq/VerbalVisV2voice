@@ -3,6 +3,11 @@ import { ref, onBeforeUnmount } from "vue";
 const DEFAULT_INPUT_SAMPLE_RATE = 16000; // Qwen realtime input rate
 const DEFAULT_OUTPUT_SAMPLE_RATE = 24000;
 const CHUNK_MS = 40;
+const PREFIX_CHUNKS = 3;
+const TRAILING_SILENCE_CHUNKS = 9;
+const SPEECH_RMS_THRESHOLD = 0.01;
+const SILENCE_RMS_THRESHOLD = 0.006;
+const SPEECH_CONFIRM_CHUNKS = 3;
 
 /**
  * Audio composable – handles microphone capture and PCM16 playback.
@@ -20,8 +25,18 @@ export function useAudio(options = {}) {
   let sourceNode = null;
   let workletNode = null;
   let onAudioChunk = null; // callback: (base64pcm) => void
+  let onSpeechStart = null;
+  let onSpeechEnd = null;
+  let shouldStartSpeech = null;
+  let gateSilence = true;
   let setupPromise = null;
   let recordingRequestId = 0;
+  let speechActive = false;
+  let silenceChunks = 0;
+  let prefixBuffer = [];
+  let speechCandidateChunks = 0;
+  let speechCandidateMaxRms = 0;
+  let speechCandidateMaxPeak = 0;
 
   // ---- Playback state ----
   let playbackCtx = null;
@@ -129,6 +144,7 @@ export function useAudio(options = {}) {
     if (audioCtx?.state === "suspended") {
       await audioCtx.resume();
     }
+    _resetSpeechGate();
     isRecording.value = true;
   }
 
@@ -156,7 +172,12 @@ export function useAudio(options = {}) {
       audioCtx = null;
     }
     onAudioChunk = null;
+    onSpeechStart = null;
+    onSpeechEnd = null;
+    shouldStartSpeech = null;
+    gateSilence = true;
     isMicReady.value = false;
+    _resetSpeechGate();
   }
 
   // ------------------------------------------------------------------
@@ -228,6 +249,17 @@ export function useAudio(options = {}) {
     return true;
   }
 
+  function flush(metadata = {}) {
+    const responseId = metadata?.response_id || metadata?.responseId || null;
+    if (
+      !metadata ||
+      !responseId ||
+      currentPlayback?.responseId === responseId
+    ) {
+      currentPlayback = null;
+    }
+  }
+
   function beginAssistantResponse(responseId) {
     if (!responseId) return;
     assistantAudioBlocked = false;
@@ -244,10 +276,22 @@ export function useAudio(options = {}) {
     return cursor;
   }
 
-  function stopAssistantAudio({ responseId = null, blockNewAudio = false } = {}) {
-    const cursor = getPlaybackCursor();
-    let stoppedCount = 0;
+  async function pauseAssistantAudio({ responseId = null } = {}) {
+    if (responseId && currentPlaybackResponseId && responseId !== currentPlaybackResponseId) return;
+    if (playbackCtx && playbackCtx.state === "running") {
+      await playbackCtx.suspend();
+    }
+  }
 
+  async function resumeAssistantAudio({ responseId = null } = {}) {
+    if (responseId && currentPlaybackResponseId && responseId !== currentPlaybackResponseId) return;
+    assistantAudioBlocked = false;
+    if (playbackCtx && playbackCtx.state === "suspended") {
+      await playbackCtx.resume();
+    }
+  }
+
+  function stopAssistantAudio({ responseId = null, blockNewAudio = false } = {}) {
     if (blockNewAudio) assistantAudioBlocked = true;
     if (playbackCtx?.state === "suspended") {
       playbackCtx.resume().catch(() => {});
@@ -272,7 +316,6 @@ export function useAudio(options = {}) {
           // Already ended.
         }
         activeSources.delete(record);
-        stoppedCount += 1;
       }
     }
 
@@ -286,11 +329,10 @@ export function useAudio(options = {}) {
     if (!responseId || currentPlaybackResponseId === responseId) {
       currentPlaybackResponseId = null;
     }
+  }
 
-    return {
-      stopped: stoppedCount > 0,
-      cursor,
-    };
+  function allowAssistantAudio() {
+    assistantAudioBlocked = false;
   }
 
   function setPlaybackIdleHandler(callback) {
@@ -311,12 +353,21 @@ export function useAudio(options = {}) {
   }
 
   function _configureRecordingCallbacks(callbackConfig) {
+    onSpeechStart = null;
+    onSpeechEnd = null;
+    shouldStartSpeech = null;
+    gateSilence = true;
+
     if (typeof callbackConfig === "function") {
       onAudioChunk = callbackConfig;
       return;
     }
 
     onAudioChunk = callbackConfig?.onChunk || null;
+    onSpeechStart = callbackConfig?.onSpeechStart || null;
+    onSpeechEnd = callbackConfig?.onSpeechEnd || null;
+    shouldStartSpeech = callbackConfig?.shouldStartSpeech || null;
+    gateSilence = callbackConfig?.gateSilence !== false;
   }
 
   function _trackPlayback(metadata, scheduledStart, duration) {
@@ -361,7 +412,111 @@ export function useAudio(options = {}) {
 
   function _handleRecordedChunk(chunk) {
     const buffer = chunk.buffer || chunk;
-    onAudioChunk?.(_arrayBufferToBase64(buffer));
+    const rms = chunk.rms ?? 0;
+    const base64 = _arrayBufferToBase64(buffer);
+
+    if (!gateSilence) {
+      onAudioChunk?.(base64);
+      _updateUngatedSpeechActivity(rms, chunk.peak ?? 0);
+      return;
+    }
+
+    if (!speechActive) {
+      prefixBuffer.push(buffer);
+      if (prefixBuffer.length > PREFIX_CHUNKS) {
+        prefixBuffer.shift();
+      }
+      const speechStart = _confirmedSpeechStart(rms, chunk.peak ?? 0);
+      if (speechStart) {
+        if (shouldStartSpeech && !shouldStartSpeech(speechStart)) {
+          prefixBuffer = [];
+          _resetSpeechCandidate();
+          return;
+        }
+        speechActive = true;
+        silenceChunks = 0;
+        onSpeechStart?.(speechStart);
+        prefixBuffer.forEach((buf) => onAudioChunk?.(_arrayBufferToBase64(buf)));
+        prefixBuffer = [];
+      }
+      return;
+    }
+
+    onAudioChunk?.(base64);
+    if (rms < SILENCE_RMS_THRESHOLD) {
+      silenceChunks += 1;
+      if (silenceChunks >= TRAILING_SILENCE_CHUNKS) {
+        speechActive = false;
+        silenceChunks = 0;
+        prefixBuffer = [];
+        _resetSpeechCandidate();
+        onSpeechEnd?.();
+      }
+    } else {
+      silenceChunks = 0;
+    }
+  }
+
+  function _resetSpeechGate() {
+    speechActive = false;
+    silenceChunks = 0;
+    prefixBuffer = [];
+    _resetSpeechCandidate();
+  }
+
+  function _updateUngatedSpeechActivity(rms, peak) {
+    if (!speechActive) {
+      const speechStart = _confirmedSpeechStart(rms, peak);
+      if (speechStart) {
+        if (shouldStartSpeech && !shouldStartSpeech(speechStart)) {
+          _resetSpeechCandidate();
+          return;
+        }
+        speechActive = true;
+        silenceChunks = 0;
+        onSpeechStart?.(speechStart);
+      }
+      return;
+    }
+
+    if (rms < SILENCE_RMS_THRESHOLD) {
+      silenceChunks += 1;
+      if (silenceChunks >= TRAILING_SILENCE_CHUNKS) {
+        speechActive = false;
+        silenceChunks = 0;
+        _resetSpeechCandidate();
+        onSpeechEnd?.();
+      }
+    } else {
+      silenceChunks = 0;
+    }
+  }
+
+  function _confirmedSpeechStart(rms, peak) {
+    if (rms < SPEECH_RMS_THRESHOLD) {
+      _resetSpeechCandidate();
+      return null;
+    }
+
+    speechCandidateChunks += 1;
+    speechCandidateMaxRms = Math.max(speechCandidateMaxRms, rms);
+    speechCandidateMaxPeak = Math.max(speechCandidateMaxPeak, peak);
+
+    if (speechCandidateChunks < SPEECH_CONFIRM_CHUNKS) return null;
+
+    return {
+      rms: speechCandidateMaxRms,
+      peak: speechCandidateMaxPeak,
+      duration_ms: speechCandidateChunks * CHUNK_MS,
+      chunks: speechCandidateChunks,
+      threshold: SPEECH_RMS_THRESHOLD,
+    };
+  }
+
+  function _resetSpeechCandidate() {
+    speechCandidateChunks = 0;
+    speechCandidateMaxRms = 0;
+    speechCandidateMaxPeak = 0;
   }
 
   onBeforeUnmount(() => {
@@ -369,20 +524,34 @@ export function useAudio(options = {}) {
     stop();
   });
 
+  function getMicStream() {
+    return mediaStream;
+  }
+
+  function resetSpeechGate() {
+    _resetSpeechGate();
+  }
+
   return {
     isRecording,
     isMicReady,
     startRecording,
     stopRecording,
     disposeRecording,
+    getMicStream,
     getPlaybackCursor,
+    resetSpeechGate,
     inputSampleRate,
     outputSampleRate,
     // Playback interface (passed to useWebSocket)
     enqueue,
+    flush,
     beginAssistantResponse,
     stop,
+    pauseAssistantAudio,
+    resumeAssistantAudio,
     stopAssistantAudio,
+    allowAssistantAudio,
     setPlaybackIdleHandler,
   };
 }

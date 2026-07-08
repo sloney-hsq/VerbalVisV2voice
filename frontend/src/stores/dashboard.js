@@ -8,17 +8,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const highlightedViewIds = ref([]);
   const highlightedViewId = computed(() => highlightedViewIds.value[0] || null);
   const highlightElement = ref(null);
-  const activeTranscriptMode = ref("voice");
-  const transcriptExchangesByMode = ref({
-    voice: [],
-    text: [],
-  });
-  const transcriptExchanges = computed({
-    get: () => transcriptExchangesByMode.value[activeTranscriptMode.value] || [],
-    set: (exchanges) => {
-      transcriptExchangesByMode.value[activeTranscriptMode.value] = exchanges;
-    },
-  });
+  const transcriptExchanges = ref([]);
   const transcripts = computed(() => (
     transcriptExchanges.value.flatMap((exchange) => (
       [exchange.user, exchange.assistant].filter(Boolean)
@@ -30,7 +20,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const sessionMode = ref("barge_in"); // barge_in | turn_based
   const inputMode = ref("semantic_vad");
   const turnDetection = ref("semantic_vad");
-  const conditionCode = ref(null);
   const provider = ref("qwen");
   const model = ref("qwen3.5-omni-plus-realtime");
   const inputAudioRate = ref(16000);
@@ -56,22 +45,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
     isTextTurnProcessing.value = false;
   }
 
-  function setTranscriptMode(mode) {
-    const normalizedMode = mode === "text" ? "text" : "voice";
-    if (!transcriptExchangesByMode.value[normalizedMode]) {
-      transcriptExchangesByMode.value[normalizedMode] = [];
-    }
-    activeTranscriptMode.value = normalizedMode;
-    currentUserEntryId.value = null;
-    currentAssistantResponseId.value = null;
-    pendingToolActions.value = [];
-  }
-
   function setSessionInfo(info = {}) {
     if (info.mode) sessionMode.value = info.mode;
     if (info.inputMode) inputMode.value = info.inputMode;
     if (info.turnDetection) turnDetection.value = info.turnDetection;
-    if (info.conditionCode) conditionCode.value = info.conditionCode;
     if (info.provider) provider.value = info.provider;
     if (info.model) model.value = info.model;
     if (info.inputAudioRate) inputAudioRate.value = info.inputAudioRate;
@@ -233,15 +210,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     return message;
   }
 
-  function setAssistantTranscript(responseId, text = "") {
-    const targetResponseId = responseId || currentAssistantResponseId.value || makeTranscriptId("response");
-    currentAssistantResponseId.value = targetResponseId;
-    const message = getOrCreateAssistantMessage(targetResponseId);
-    message.text = String(text || "");
-    message.status = "streaming";
-    return message;
-  }
-
   function completeAssistantResponse(responseId) {
     const message = findAssistantMessageByResponseId(responseId);
     if (message) {
@@ -285,9 +253,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
   function addToolActionToTranscript(call = {}, responseId = null) {
     const action = createToolAction(call);
     const message = findAssistantMessageByResponseId(responseId || currentAssistantResponseId.value);
-    if (message) {
+    if (message && message.text.trim()) {
       message.toolActions.push(action);
-      message.toolActionsExpanded = true;
       return;
     }
     pendingToolActions.value.push(action);
@@ -351,7 +318,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       completedAt: status === "completed" ? startedAt : undefined,
       expanded: false,
       toolActions,
-      toolActionsExpanded: toolActions.length > 0,
+      toolActionsExpanded: false,
     };
   }
 
@@ -480,7 +447,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     highlightedViewId,
     highlightElement,
     transcriptExchanges,
-    activeTranscriptMode,
     transcripts,
     isAssistantSpeaking,
     connectionStatus,
@@ -488,7 +454,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     sessionMode,
     inputMode,
     turnDetection,
-    conditionCode,
     provider,
     model,
     inputAudioRate,
@@ -497,7 +462,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     recentToolCalls,
     viewIds,
     initViews,
-    setTranscriptMode,
     setSessionInfo,
     updateViews,
     appendView,
@@ -512,7 +476,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     completeUserTranscript,
     beginAssistantResponse,
     appendAssistantTranscript,
-    setAssistantTranscript,
     completeAssistantResponse,
     suppressAssistantResponse,
     interruptAssistantResponse,

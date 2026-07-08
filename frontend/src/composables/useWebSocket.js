@@ -4,14 +4,17 @@ import { useDashboardStore } from "../stores/dashboard";
 const ANALYSIS_ID_STORAGE_KEY = "verbalvis.analysisId";
 
 /**
- * WebSocket composable bridges frontend to VerbalVis backend.
+ * WebSocket composable – bridges frontend to VerbalVis backend.
  * Dispatches incoming messages to the Pinia store and audio player.
  */
 export function useWebSocket(audioPlayer) {
   const store = useDashboardStore();
   const socket = ref(null);
 
+  let suppressCurrentAssistantTranscript = false;
   let activeResponseId = null;
+  let manualClose = false;
+  let lastUrl = null;
   let analysisId = getOrCreateAnalysisId();
 
   function connect(url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?model=qwen3.5-omni-plus-realtime`) {
@@ -22,6 +25,8 @@ export function useWebSocket(audioPlayer) {
       return;
     }
 
+    manualClose = false;
+    lastUrl = url;
     store.connectionStatus = "connecting";
     const ws = new WebSocket(url);
     socket.value = ws;
@@ -63,7 +68,6 @@ export function useWebSocket(audioPlayer) {
           mode: msg.mode,
           inputMode: msg.input_mode,
           turnDetection: msg.turn_detection,
-          conditionCode: msg.condition_code,
           provider: msg.provider,
           model: msg.model,
           inputAudioRate: msg.input_audio_rate,
@@ -74,6 +78,7 @@ export function useWebSocket(audioPlayer) {
       case "assistant_response_started":
         if (!msg.response_id) break;
         activeResponseId = msg.response_id;
+        suppressCurrentAssistantTranscript = false;
         if (store.sessionMode === "turn_based_text") {
           store.setTextTurnProcessing(true);
         }
@@ -107,17 +112,17 @@ export function useWebSocket(audioPlayer) {
           if (!msg.response_id || msg.response_id !== activeResponseId) {
             break;
           }
-          store.appendAssistantTranscript(msg.response_id, msg.delta || "");
+          if (!suppressCurrentAssistantTranscript) {
+            store.appendAssistantTranscript(msg.response_id, msg.delta || "");
+          }
         } else if (msg.role === "user") {
           _handleUserTranscript(msg);
         }
         break;
 
-      case "assistant_transcript_done":
-        if (!msg.response_id || msg.response_id !== activeResponseId) {
-          break;
-        }
-        store.setAssistantTranscript(msg.response_id, msg.text || "");
+      case "suppress_assistant_buffer":
+        suppressCurrentAssistantTranscript = true;
+        store.suppressAssistantResponse(msg.response_id || activeResponseId);
         break;
 
       case "response_done":
@@ -126,7 +131,22 @@ export function useWebSocket(audioPlayer) {
         }
         store.completeAssistantResponse(msg.response_id);
         store.setTextTurnProcessing(false);
+        suppressCurrentAssistantTranscript = false;
+        if (audioPlayer) {
+          audioPlayer.flush({
+            response_id: msg.response_id,
+          });
+        }
         activeResponseId = null;
+        break;
+
+      case "assistant_response_done":
+        if (msg.response_id && msg.response_id === activeResponseId) {
+          store.completeAssistantResponse(msg.response_id);
+          activeResponseId = null;
+        }
+        store.setTextTurnProcessing(false);
+        suppressCurrentAssistantTranscript = false;
         break;
 
       case "speech_started":
@@ -138,8 +158,30 @@ export function useWebSocket(audioPlayer) {
         }
         break;
 
+      case "assistant_playback_pause":
+        store.isAssistantSpeaking = false;
+        audioPlayer?.pauseAssistantAudio?.({
+          responseId: msg.response_id || activeResponseId,
+          reason: msg.reason || "assistant_playback_pause",
+        });
+        break;
+
+      case "assistant_playback_resume":
+        store.isAssistantSpeaking = true;
+        audioPlayer?.resumeAssistantAudio?.({
+          responseId: msg.response_id || activeResponseId,
+          reason: msg.reason || "assistant_playback_resume",
+        });
+        break;
+
       case "assistant_playback_stop":
         _stopAssistantPlayback(msg.response_id, msg.reason || "assistant_playback_stop");
+        break;
+
+      case "assistant_playback_invalidated":
+        if (msg.response_id) {
+          _stopAssistantPlayback(msg.response_id, msg.reason || "assistant_playback_invalidated");
+        }
         break;
 
       case "assistant_response_interrupted":
@@ -168,7 +210,6 @@ export function useWebSocket(audioPlayer) {
           mode: msg.mode,
           inputMode: msg.input_mode,
           turnDetection: msg.turn_detection,
-          conditionCode: msg.condition_code,
           provider: msg.provider,
           model: msg.model,
           inputAudioRate: msg.input_audio_rate,
@@ -194,54 +235,43 @@ export function useWebSocket(audioPlayer) {
     }
   }
 
+  function startSession() {
+    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      console.log("%c[WS] sending start_session", "color: #f59e0b; font-weight: bold");
+      store.sessionReady = false;
+      socket.value.send(JSON.stringify({
+        type: "start_session",
+        analysis_id: analysisId,
+      }));
+    } else {
+      console.error("[WS] cannot send start_session — socket not open, readyState:", socket.value?.readyState);
+    }
+  }
+
   function sendAudio(base64pcm) {
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      socket.value.send(JSON.stringify({
-        type: "audio",
-        data: base64pcm,
-      }));
+      socket.value.send(JSON.stringify({ type: "audio", data: base64pcm }));
     } else {
       console.warn("sendAudio: socket not open, readyState =", socket.value?.readyState);
     }
   }
 
   function _stopAssistantPlayback(responseId, reason) {
-    const wasActive = Boolean(activeResponseId && (!responseId || activeResponseId === responseId));
-
-    let result = null;
-    if (audioPlayer?.stopAssistantAudio) {
-      result = audioPlayer.stopAssistantAudio({
-        responseId,
-        blockNewAudio: true,
-      });
-    } else if (audioPlayer?.stop) {
-      const cursor = audioPlayer.stop();
-      result = {
-        stopped: true,
-        cursor,
-      };
-    }
-
-    if (wasActive || result?.stopped) {
-      store.isAssistantSpeaking = false;
-      store.interruptAssistantResponse(responseId || activeResponseId);
-    }
-
-    if (wasActive) {
+    store.isAssistantSpeaking = false;
+    suppressCurrentAssistantTranscript = false;
+    store.interruptAssistantResponse(responseId || activeResponseId);
+    if (!responseId || activeResponseId === responseId) {
       activeResponseId = null;
     }
-
-    if (
-      result?.stopped &&
-      socket.value &&
-      socket.value.readyState === WebSocket.OPEN
-    ) {
-      socket.value.send(JSON.stringify({
-        type: "playback_stopped",
-        response_id: responseId,
+    if (!audioPlayer) return;
+    if (audioPlayer.stopAssistantAudio) {
+      audioPlayer.stopAssistantAudio({
+        responseId,
         reason,
-        playback_cursor: result.cursor || null,
-      }));
+        blockNewAudio: true,
+      });
+    } else {
+      audioPlayer.stop();
     }
   }
 
@@ -253,7 +283,6 @@ export function useWebSocket(audioPlayer) {
         text,
         turn_id: turnId,
         condition: "turn_based_text",
-        condition_code: "text_cva",
         analysis_id: analysisId,
         timestamp: performance.now(),
       }));
@@ -286,13 +315,26 @@ export function useWebSocket(audioPlayer) {
     store.completeUserTranscript(text, { utteranceId });
   }
 
+  function truncateAssistantAudio(assistantAudio) {
+    if (!assistantAudio?.item_id) return;
+    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      socket.value.send(JSON.stringify({ type: "truncate_assistant_audio", assistant_audio: assistantAudio }));
+    }
+  }
+
   function disconnect() {
+    manualClose = true;
     if (socket.value) {
       socket.value.close();
       socket.value = null;
     }
     activeResponseId = null;
     store.sessionReady = false;
+  }
+
+  function reconnect() {
+    disconnect();
+    connect(lastUrl || undefined);
   }
 
   function getOrCreateAnalysisId() {
@@ -336,9 +378,12 @@ export function useWebSocket(audioPlayer) {
   return {
     socket,
     connect,
+    startSession,
+    truncateAssistantAudio,
     sendAudio,
     sendText,
     interruptActiveResponse,
     disconnect,
+    reconnect,
   };
 }

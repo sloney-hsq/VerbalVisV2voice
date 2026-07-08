@@ -281,9 +281,12 @@ const ws = useWebSocket({
   flush: audio.flush,
   beginAssistantResponse: audio.beginAssistantResponse,
   stop: audio.stop,
+  pauseAssistantAudio: audio.pauseAssistantAudio,
+  resumeAssistantAudio: audio.resumeAssistantAudio,
   stopAssistantAudio: audio.stopAssistantAudio,
 });
 
+let sessionPromise = null;
 const isStartingListening = ref(false);
 const interactionMode = ref(getInitialInteractionMode());
 const inputText = ref("");
@@ -308,7 +311,6 @@ const statusClass = computed(() => ({
 const recordButtonDisabled = computed(() => (
   interactionMode.value !== "voice" ||
   store.connectionStatus !== "connected" ||
-  !store.sessionReady ||
   (store.sessionMode === "turn_based" && store.isAssistantSpeaking)
 ));
 
@@ -329,8 +331,8 @@ const modelStatusTitle = computed(() => `${displayModelName.value} ${connectionL
 const voiceStatusLabel = computed(() => {
   if (audio.isRecording.value) return "Listening...";
   if (isStartingListening.value) return "Starting...";
-  if (store.connectionStatus !== "connected") return "Offline";
-  if (!store.sessionReady) return "Initializing...";
+  if (store.connectionStatus === "connecting") return "Connecting...";
+  if (recordButtonDisabled.value) return "offline";
   return "Start mic";
 });
 
@@ -381,7 +383,6 @@ watch(
 
 // Connect backend WS on mount → get views immediately
 onMounted(() => {
-  store.setTranscriptMode(interactionMode.value);
   ws.connect(buildWsUrl());
   window.addEventListener("keydown", handleKeyDown);
   updateTranscriptPanelWidth();
@@ -398,13 +399,14 @@ onBeforeUnmount(() => {
 
 watch(
   interactionMode,
-  async (mode) => {
+  async () => {
     stopListeningMic();
     audio.stopAssistantAudio?.({ blockNewAudio: true });
     store.isAssistantSpeaking = false;
     store.setTextTurnProcessing(false);
-    store.setTranscriptMode(mode);
+    store.clearTranscripts();
     pendingText.value = "";
+    sessionPromise = null;
     ws.disconnect();
     await nextTick();
     ws.connect(buildWsUrl());
@@ -423,21 +425,69 @@ watch(
   }
 );
 
+async function ensureSessionReady({ fresh = false } = {}) {
+  if (fresh) {
+    sessionPromise = null;
+    store.sessionReady = false;
+    await waitForSocketOpen();
+  }
+  if (store.sessionReady) return;
+  if (sessionPromise) return sessionPromise;
+
+  sessionPromise = new Promise((resolve) => {
+    ws.startSession();
+    const check = setInterval(() => {
+      if (store.sessionReady) {
+        clearInterval(check);
+        sessionPromise = null;
+        resolve();
+      }
+    }, 100);
+    setTimeout(() => {
+      clearInterval(check);
+      sessionPromise = null;
+      resolve();
+    }, 15000);
+  });
+
+  return sessionPromise;
+}
+
+function waitForSocketOpen(timeoutMs = 5000) {
+  const start = Date.now();
+  return new Promise((resolve) => {
+    const check = setInterval(() => {
+      if (ws.socket.value?.readyState === WebSocket.OPEN || Date.now() - start >= timeoutMs) {
+        clearInterval(check);
+        resolve();
+      }
+    }, 50);
+  });
+}
+
 async function startListeningMic() {
-  if (
-    isStartingListening.value ||
-    audio.isRecording.value ||
-    recordButtonDisabled.value ||
-    !store.sessionReady
-  ) {
+  if (isStartingListening.value || audio.isRecording.value || recordButtonDisabled.value) {
     return;
   }
 
   isStartingListening.value = true;
+  await ensureSessionReady();
+  if (recordButtonDisabled.value) {
+    isStartingListening.value = false;
+    return;
+  }
+
   try {
     await audio.startRecording({
+      gateSilence: false,
       onChunk: (base64pcm) => {
+        if (store.isAssistantSpeaking && store.sessionMode === "turn_based") {
+          return;
+        }
         ws.sendAudio(base64pcm);
+      },
+      onSpeechStart: () => {
+        audio.pauseAssistantAudio?.();
       },
     });
   } catch (error) {

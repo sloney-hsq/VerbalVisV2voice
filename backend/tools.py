@@ -91,11 +91,6 @@ low_score_threshold: int = LOW_SCORE_THRESHOLD_DEFAULT
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
-CONDITION_CODE_BY_MODE = {
-    "barge_in": "fd_voice",
-    "turn_based_text": "text_cva",
-}
-
 
 # ------------------------------------------------------------------
 # Base views (initialised once)
@@ -2691,7 +2686,6 @@ def log_tool_call(
         "metrics": metrics or {},
         "dashboard_context_snapshot": rebuild_context(),
         "mode": mode,
-        "condition_code": CONDITION_CODE_BY_MODE.get(mode),
     }
     # Per-session dir is the real target; the flat path is kept only as a
     # backward-compat fallback in case any caller forgets to pass log_dir.

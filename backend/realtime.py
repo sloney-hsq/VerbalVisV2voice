@@ -239,17 +239,21 @@ class QwenRealtimeSession:
         self._init_session_loggers()
         self.running = True
 
-        await self._send_client(
+        sent_initial_state = await self._send_client(
             {
                 "type": "init",
                 "views": get_views_for_frontend(),
                 **self._session_metadata(),
             }
         )
+        if not sent_initial_state:
+            return
 
         try:
             await self._connect_qwen()
-            await self._configure_qwen_session()
+            configured = await self._configure_qwen_session()
+            if not configured:
+                return
 
             client_task = asyncio.create_task(
                 self._client_to_qwen(),
@@ -265,17 +269,24 @@ class QwenRealtimeSession:
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
+            error: BaseException | None = None
+
             for task in done:
                 if task.cancelled():
                     continue
-                error = task.exception()
-                if error:
-                    raise error
+                task_error = task.exception()
+                if task_error and error is None:
+                    error = task_error
 
             for task in pending:
                 task.cancel()
+
+            for task in pending:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+
+            if error:
+                raise error
 
         except WebSocketDisconnect:
             self._log_connection("CLIENT_DISCONNECTED")
@@ -325,7 +336,7 @@ class QwenRealtimeSession:
 
         self._log_connection("CONNECTED")
 
-    async def _configure_qwen_session(self) -> None:
+    async def _configure_qwen_session(self) -> bool:
         payload = {
             "type": "session.update",
             "session": {
@@ -361,12 +372,15 @@ class QwenRealtimeSession:
 
             if event_type == "session.updated":
                 self._log_connection("SESSION_UPDATED")
-                await self._send_client(
+                sent_update = await self._send_client(
                     {
                         "type": "session_updated",
                         **self._session_metadata(),
                     }
                 )
+                if not sent_update:
+                    return False
+
                 self._append_jsonl(
                     "conversation.jsonl",
                     {
@@ -381,11 +395,13 @@ class QwenRealtimeSession:
                         "session_ready": True,
                     },
                 )
-                await self._send_client({"type": "session_ready"})
-                return
+                sent_ready = await self._send_client({"type": "session_ready"})
+                return sent_ready
 
             if event_type == "error":
                 raise RuntimeError(self._error_message(event))
+
+        return False
 
     def _build_instructions(self) -> str:
         state = json.dumps(
@@ -422,7 +438,22 @@ class QwenRealtimeSession:
 
     async def _client_to_qwen(self) -> None:
         while self.running:
-            raw = await self.client_ws.receive_text()
+            try:
+                raw = await self.client_ws.receive_text()
+            except WebSocketDisconnect:
+                self.running = False
+                self._log_connection("CLIENT_DISCONNECTED")
+                return
+            except RuntimeError as exc:
+                if self._is_client_disconnect_error(exc):
+                    self.running = False
+                    self._log_connection(
+                        "CLIENT_DISCONNECTED %s",
+                        exc,
+                    )
+                    return
+                raise
+
             message = json.loads(raw)
             message_type = message.get("type", "")
 
@@ -1324,11 +1355,22 @@ class QwenRealtimeSession:
             await self.client_ws.send_json(message)
             return True
         except Exception as exc:
+            self.running = False
             self._log_connection(
                 "SEND_CLIENT_FAILED %s",
                 exc,
             )
+            await self._close_qwen()
             return False
+
+    @staticmethod
+    def _is_client_disconnect_error(exc: RuntimeError) -> bool:
+        message = str(exc)
+        return (
+            "WebSocket is not connected" in message
+            or "Cannot call \"receive\" once a disconnect" in message
+            or "Cannot call \"send\" once a close" in message
+        )
 
     async def _close_qwen(self) -> None:
         if self.qwen_ws is None:
