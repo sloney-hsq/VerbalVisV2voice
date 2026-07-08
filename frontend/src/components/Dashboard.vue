@@ -192,8 +192,11 @@ const statusClass = computed(() => ({
 }));
 
 const recordButtonDisabled = computed(() => (
-  store.connectionStatus !== "connected" ||
-  !store.sessionReady
+  !audio.isRecording.value &&
+  (
+    store.connectionStatus !== "connected" ||
+    !store.sessionReady
+  )
 ));
 
 const recordButtonLabel = computed(() => {
@@ -1061,25 +1064,22 @@ function withAnalysisId(rawUrl) {
   min-width: 0;
   color: inherit;
   line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .transcript-text--collapsed {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  display: block;
 }
 
 .transcript-message--user .transcript-text--collapsed {
-  line-clamp: 1;
-  -webkit-line-clamp: 1;
+  line-clamp: none;
+  -webkit-line-clamp: unset;
 }
 
 .transcript-message--assistant .transcript-text--collapsed {
-  line-clamp: 1;
-  -webkit-line-clamp: 1;
+  line-clamp: none;
+  -webkit-line-clamp: unset;
 }
 
 .transcript-meta {

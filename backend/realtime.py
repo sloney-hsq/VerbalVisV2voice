@@ -72,7 +72,7 @@ QWEN_OUTPUT_SAMPLE_RATE = 24000
 QWEN_AUDIO_FORMAT = "pcm"
 
 QWEN_TURN_DETECTION = "semantic_vad"
-QWEN_VAD_THRESHOLD = 0.5
+QWEN_VAD_THRESHOLD = 0.4
 QWEN_VAD_PREFIX_PADDING_MS = 500
 QWEN_VAD_SILENCE_DURATION_MS = 800
 
@@ -1214,7 +1214,7 @@ class QwenRealtimeSession:
         log_dir, log_scope_id = resolve_session_log_dir(
             _LOG_ROOT,
             session_id=self.session_id,
-            mode="qwen",
+            mode="audio",
             analysis_id=self.analysis_id,
         )
 

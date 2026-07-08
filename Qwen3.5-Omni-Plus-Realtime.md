@@ -1,9 +1,8 @@
-**第一份资料，[help.aliyun.com/zh/model-studio/client-events](https://help.aliyun.com/zh/model-studio/client-events)要求详细查看，[help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77](https://help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77)。**
+**资料，[help.aliyun.com/zh/model-studio/client-events](https://help.aliyun.com/zh/model-studio/client-events)要求详细查看，[help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77](https://help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77)。**
 
 [help.aliyun.com/zh/model-studio/omni-realtime-python-sdk](https://help.aliyun.com/zh/model-studio/omni-realtime-python-sdk)
 
 [help.aliyun.com/zh/model-studio/omni-realtime-interaction-process](https://help.aliyun.com/zh/model-studio/omni-realtime-interaction-process)
-
 
 # 客户端事件
 
