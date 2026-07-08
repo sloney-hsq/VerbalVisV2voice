@@ -8,7 +8,17 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const highlightedViewIds = ref([]);
   const highlightedViewId = computed(() => highlightedViewIds.value[0] || null);
   const highlightElement = ref(null);
-  const transcriptExchanges = ref([]);
+  const activeTranscriptMode = ref("voice");
+  const transcriptExchangesByMode = ref({
+    voice: [],
+    text: [],
+  });
+  const transcriptExchanges = computed({
+    get: () => transcriptExchangesByMode.value[activeTranscriptMode.value] || [],
+    set: (exchanges) => {
+      transcriptExchangesByMode.value[activeTranscriptMode.value] = exchanges;
+    },
+  });
   const transcripts = computed(() => (
     transcriptExchanges.value.flatMap((exchange) => (
       [exchange.user, exchange.assistant].filter(Boolean)
@@ -44,6 +54,17 @@ export const useDashboardStore = defineStore("dashboard", () => {
     highlightElement.value = null;
     recentToolCalls.value = [];
     isTextTurnProcessing.value = false;
+  }
+
+  function setTranscriptMode(mode) {
+    const normalizedMode = mode === "text" ? "text" : "voice";
+    if (!transcriptExchangesByMode.value[normalizedMode]) {
+      transcriptExchangesByMode.value[normalizedMode] = [];
+    }
+    activeTranscriptMode.value = normalizedMode;
+    currentUserEntryId.value = null;
+    currentAssistantResponseId.value = null;
+    pendingToolActions.value = [];
   }
 
   function setSessionInfo(info = {}) {
@@ -264,8 +285,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   function addToolActionToTranscript(call = {}, responseId = null) {
     const action = createToolAction(call);
     const message = findAssistantMessageByResponseId(responseId || currentAssistantResponseId.value);
-    if (message && message.text.trim()) {
+    if (message) {
       message.toolActions.push(action);
+      message.toolActionsExpanded = true;
       return;
     }
     pendingToolActions.value.push(action);
@@ -329,7 +351,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       completedAt: status === "completed" ? startedAt : undefined,
       expanded: false,
       toolActions,
-      toolActionsExpanded: false,
+      toolActionsExpanded: toolActions.length > 0,
     };
   }
 
@@ -458,6 +480,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     highlightedViewId,
     highlightElement,
     transcriptExchanges,
+    activeTranscriptMode,
     transcripts,
     isAssistantSpeaking,
     connectionStatus,
@@ -474,6 +497,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     recentToolCalls,
     viewIds,
     initViews,
+    setTranscriptMode,
     setSessionInfo,
     updateViews,
     appendView,

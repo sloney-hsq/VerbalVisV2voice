@@ -381,6 +381,7 @@ watch(
 
 // Connect backend WS on mount → get views immediately
 onMounted(() => {
+  store.setTranscriptMode(interactionMode.value);
   ws.connect(buildWsUrl());
   window.addEventListener("keydown", handleKeyDown);
   updateTranscriptPanelWidth();
@@ -397,12 +398,12 @@ onBeforeUnmount(() => {
 
 watch(
   interactionMode,
-  async () => {
+  async (mode) => {
     stopListeningMic();
     audio.stopAssistantAudio?.({ blockNewAudio: true });
     store.isAssistantSpeaking = false;
     store.setTextTurnProcessing(false);
-    store.clearTranscripts();
+    store.setTranscriptMode(mode);
     pendingText.value = "";
     ws.disconnect();
     await nextTick();

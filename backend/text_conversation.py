@@ -59,9 +59,10 @@ QWEN_API_KEY = (
 QWEN_REGION = os.getenv("QWEN_REGION", "beijing").strip().lower()
 QWEN_TEXT_MODEL = os.getenv("QWEN_TEXT_MODEL", os.getenv("QWEN_CHAT_MODEL", "qwen3.5-plus")).strip()
 QWEN_TEXT_TEMPERATURE = float(os.getenv("QWEN_TEXT_TEMPERATURE", "0.2"))
-QWEN_TEXT_RETRY_ATTEMPTS = max(1, int(os.getenv("QWEN_TEXT_RETRY_ATTEMPTS", "2")))
+QWEN_TEXT_RETRY_ATTEMPTS = max(1, int(os.getenv("QWEN_TEXT_RETRY_ATTEMPTS", "3")))
 QWEN_TEXT_RETRY_BACKOFF_SECONDS = float(os.getenv("QWEN_TEXT_RETRY_BACKOFF_SECONDS", "1.5"))
 QWEN_TEXT_ENABLE_THINKING = _env_bool("QWEN_TEXT_ENABLE_THINKING", False)
+QWEN_TEXT_REQUEST_TIMEOUT_SECONDS = float(os.getenv("QWEN_TEXT_REQUEST_TIMEOUT_SECONDS", "120"))
 QWEN_CHAT_COMPLETIONS_URL_OVERRIDE = os.getenv("QWEN_CHAT_COMPLETIONS_URL", "").strip()
 
 MODEL_ONLY_TOOLS = {"inspect_visual"}
@@ -127,8 +128,21 @@ class QwenTextTimeoutError(RuntimeError):
     """Raised when DashScope does not return a chat completion in time."""
 
 
+class QwenTextTransientError(RuntimeError):
+    """Raised for retryable transient transport failures."""
+
+
 def _create_turn_id() -> str:
     return f"text-turn-{uuid.uuid4().hex[:10]}"
+
+
+def _is_transient_network_error(exc: BaseException) -> bool:
+    if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, TimeoutError, socket.timeout)):
+        return True
+
+    winerror = getattr(exc, "winerror", None)
+    errno = getattr(exc, "errno", None)
+    return winerror in {10053, 10054, 10060} or errno in {10053, 10054, 10060}
 
 
 def _chat_tool_schemas() -> list[dict[str, Any]]:
@@ -193,7 +207,10 @@ def _post_chat_completion(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     try:
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(
+            request,
+            timeout=QWEN_TEXT_REQUEST_TIMEOUT_SECONDS,
+        ) as response:
             response_body = response.read().decode("utf-8")
             return json.loads(response_body)
     except (TimeoutError, socket.timeout) as exc:
@@ -209,6 +226,10 @@ def _post_chat_completion(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(getattr(exc, "reason", None), (TimeoutError, socket.timeout)):
             raise QwenTextTimeoutError(
                 "DashScope chat completion timed out."
+            ) from exc
+        if _is_transient_network_error(getattr(exc, "reason", exc)):
+            raise QwenTextTransientError(
+                "DashScope chat completion connection was reset."
             ) from exc
         raise RuntimeError(f"DashScope chat completion request failed: {exc}") from exc
 
