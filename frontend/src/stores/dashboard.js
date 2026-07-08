@@ -17,14 +17,13 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const isAssistantSpeaking = ref(false);
   const connectionStatus = ref("disconnected"); // disconnected | connecting | connected
   const sessionReady = ref(false);
-  const sessionMode = ref("barge_in"); // barge_in | turn_based
+  const sessionMode = ref("fd_voice");
   const inputMode = ref("semantic_vad");
   const turnDetection = ref("semantic_vad");
   const provider = ref("qwen");
   const model = ref("qwen3.5-omni-plus-realtime");
   const inputAudioRate = ref(16000);
   const outputAudioRate = ref(24000);
-  const isTextTurnProcessing = ref(false);
   const recentToolCalls = ref([]);
   const currentUserEntryId = ref(null);
   const currentAssistantResponseId = ref(null);
@@ -42,7 +41,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     views.value = viewList.map((v) => ({ ...v, highlighted: highlightedIds.has(v.id) }));
     highlightElement.value = null;
     recentToolCalls.value = [];
-    isTextTurnProcessing.value = false;
   }
 
   function setSessionInfo(info = {}) {
@@ -281,10 +279,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     pendingToolActions.value = [];
   }
 
-  function setTextTurnProcessing(value) {
-    isTextTurnProcessing.value = Boolean(value);
-  }
-
   function normalizeViewIds(value) {
     const source = Array.isArray(value) ? value : [value];
     const seen = new Set();
@@ -458,7 +452,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     model,
     inputAudioRate,
     outputAudioRate,
-    isTextTurnProcessing,
     recentToolCalls,
     viewIds,
     initViews,
@@ -483,6 +476,5 @@ export const useDashboardStore = defineStore("dashboard", () => {
     toggleTranscriptMessage,
     toggleTranscriptActions,
     clearTranscripts,
-    setTextTurnProcessing,
   };
 });

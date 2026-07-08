@@ -211,6 +211,7 @@ class QwenRealtimeSession:
         self.current_response_id: str | None = None
         self.playback_response_id: str | None = None
         self.interrupted_response_ids: set[str] = set()
+        self.cancel_requested_response_ids: set[str] = set()
 
         self.last_user_transcript = ""
         self.assistant_transcript = ""
@@ -673,12 +674,12 @@ class QwenRealtimeSession:
             }
         )
 
-        response_id = self.current_response_id or self.playback_response_id
+        active_response_id = self.current_response_id
+        response_id = active_response_id or self.playback_response_id
 
         if not response_id:
             return
 
-        self.interrupted_response_ids.add(response_id)
         self.playback_stop_started_at[response_id] = time.perf_counter()
 
         self._log_bargein(
@@ -687,7 +688,9 @@ class QwenRealtimeSession:
             utterance_id,
         )
 
-        if response_id == self.current_response_id:
+        if active_response_id:
+            self.interrupted_response_ids.add(active_response_id)
+            self.cancel_requested_response_ids.add(active_response_id)
             self.current_response_id = None
             self.assistant_transcript = ""
 
@@ -705,6 +708,18 @@ class QwenRealtimeSession:
                 "PLAYBACK_STOP_SENT response_id=%s utterance_id=%s",
                 response_id,
                 utterance_id,
+            )
+
+        if active_response_id:
+            cancel_sent = await self._send_qwen(
+                {
+                    "type": "response.cancel",
+                }
+            )
+            self._log_bargein(
+                "RESPONSE_CANCEL_SENT response_id=%s sent=%s",
+                active_response_id,
+                cancel_sent,
             )
 
     async def _handle_speech_stopped(
@@ -780,6 +795,9 @@ class QwenRealtimeSession:
 
         response_id = str(response.get("id") or "") or None
         status = str(response.get("status") or "")
+
+        if response_id:
+            self.cancel_requested_response_ids.discard(response_id)
 
         if response_id and response_id in self.interrupted_response_ids:
             self.interrupted_response_ids.discard(response_id)
@@ -1094,6 +1112,15 @@ class QwenRealtimeSession:
             else None
         )
 
+        if self._is_cancel_race(event):
+            self._log_connection(
+                "IGNORED_CANCEL_RACE code=%s message=%s",
+                code,
+                message,
+            )
+            self.cancel_requested_response_ids.clear()
+            return
+
         if self._event_logger:
             self._event_logger.error(
                 "QWEN_ERROR %s",
@@ -1106,6 +1133,32 @@ class QwenRealtimeSession:
                 "message": message,
                 "code": code,
             }
+        )
+
+    def _is_cancel_race(
+        self,
+        event: dict[str, Any],
+    ) -> bool:
+        error = event.get("error")
+        error = error if isinstance(error, dict) else {}
+
+        code = str(error.get("code") or "").lower()
+        message = str(error.get("message") or "").lower()
+        param = str(error.get("param") or "").lower()
+
+        if not self.cancel_requested_response_ids:
+            return False
+
+        combined = f"{code} {message} {param}"
+
+        return (
+            "cancel" in combined
+            and (
+                "not active" in combined
+                or "no active" in combined
+                or "cannot cancel" in combined
+                or "already completed" in combined
+            )
         )
 
     # ------------------------------------------------------------------

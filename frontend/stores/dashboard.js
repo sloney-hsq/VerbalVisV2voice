@@ -15,7 +15,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const isAssistantSpeaking = ref(false);
   const connectionStatus = ref("disconnected"); // disconnected | connecting | connected
   const sessionReady = ref(false);
-  const sessionMode = ref("barge_in"); // barge_in | turn_based
+  const sessionMode = ref("fd_voice");
   const inputMode = ref("semantic_vad");
   const provider = ref("qwen");
   const model = ref("qwen3.5-omni-plus-realtime");

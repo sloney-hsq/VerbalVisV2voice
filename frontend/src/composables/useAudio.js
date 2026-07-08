@@ -234,13 +234,25 @@ export function useAudio(options = {}) {
       source,
       responseId,
       itemId: metadata?.item_id || metadata?.itemId || null,
+      stoppedManually: false,
     };
     activeSources.add(sourceRecord);
     source.onended = () => {
       activeSources.delete(sourceRecord);
+      if (sourceRecord.stoppedManually) return;
       if (activeSources.size === 0) {
+        const playbackCursor = getPlaybackCursor();
+        const completedResponseId =
+          currentPlayback?.responseId ||
+          sourceRecord.responseId ||
+          currentPlaybackResponseId;
         currentPlayback = null;
-        onPlaybackIdle?.();
+        currentPlaybackResponseId = null;
+        onPlaybackIdle?.({
+          responseId: completedResponseId,
+          playbackCursor,
+          reason: "natural_end",
+        });
       }
     };
     source.start(scheduledStart);
@@ -251,13 +263,7 @@ export function useAudio(options = {}) {
 
   function flush(metadata = {}) {
     const responseId = metadata?.response_id || metadata?.responseId || null;
-    if (
-      !metadata ||
-      !responseId ||
-      currentPlayback?.responseId === responseId
-    ) {
-      currentPlayback = null;
-    }
+    if (responseId) currentPlaybackResponseId = responseId;
   }
 
   function beginAssistantResponse(responseId) {
@@ -292,6 +298,7 @@ export function useAudio(options = {}) {
   }
 
   function stopAssistantAudio({ responseId = null, blockNewAudio = false } = {}) {
+    const playbackCursor = getPlaybackCursor();
     if (blockNewAudio) assistantAudioBlocked = true;
     if (playbackCtx?.state === "suspended") {
       playbackCtx.resume().catch(() => {});
@@ -310,6 +317,7 @@ export function useAudio(options = {}) {
 
     for (const record of Array.from(activeSources)) {
       if (!responseId || record.responseId === responseId) {
+        record.stoppedManually = true;
         try {
           record.source.stop();
         } catch (_) {
@@ -329,6 +337,7 @@ export function useAudio(options = {}) {
     if (!responseId || currentPlaybackResponseId === responseId) {
       currentPlaybackResponseId = null;
     }
+    return playbackCursor;
   }
 
   function allowAssistantAudio() {

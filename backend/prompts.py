@@ -1,9 +1,4 @@
-"""
-VerbalVis system prompts.
-
-Keep the analysis rules shared across interaction conditions. Tool schemas carry
-parameter details, and tool outputs carry the current short dashboard state.
-"""
+"""VerbalVis full-duplex voice system prompt."""
 
 SHARED_ANALYSIS_PROMPT = """\
 ## Role
@@ -113,39 +108,8 @@ acknowledgement alone.
 Always follow the user's latest completed request.
 """
 
-TEXT_INTERACTION_PROMPT = """\
-## Text Interaction
-This condition is text conversation with interruption.
-
-The user may submit a new text message while an assistant response is still
-being generated. That interrupts the unfinished assistant output.
-
-Interruption stops only the unfinished assistant response. It does not erase
-the prior user request from the analytical context.
-
-If the latest submitted message is only a greeting, acknowledgement, or
-continuation cue such as "hi", "你好", "ok", "continue", or "继续", continue
-answering the prior unanswered analytical request.
-
-If the latest submitted message adds a constraint, correction, or redirection,
-answer the updated request using the prior context.
-
-If the latest submitted message is a clearly new unrelated analytical request,
-follow the new request.
-
-Keep text responses concise.
-"""
+def build_system_prompt() -> str:
+    return f"{SHARED_ANALYSIS_PROMPT}\n\n{VOICE_INTERACTION_PROMPT}"
 
 
-def build_system_prompt(condition: str = "full_duplex_voice") -> str:
-    if condition == "full_duplex_voice":
-        interaction_rules = VOICE_INTERACTION_PROMPT
-    elif condition in {"text_conversation", "turn_based_text"}:
-        interaction_rules = TEXT_INTERACTION_PROMPT
-    else:
-        raise ValueError(f"Unknown condition: {condition}")
-
-    return f"{SHARED_ANALYSIS_PROMPT}\n\n{interaction_rules}"
-
-
-SYSTEM_PROMPT = build_system_prompt("full_duplex_voice")
+SYSTEM_PROMPT = build_system_prompt()

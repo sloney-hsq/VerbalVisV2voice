@@ -43,28 +43,7 @@
       </div>
 
       <div class="interaction-control">
-        <div class="mode-switch" aria-label="Interaction mode">
-          <button
-            class="mode-switch__button"
-            :class="{ 'mode-switch__button--active': interactionMode === 'voice' }"
-            type="button"
-            title="Voice mode"
-            @click="setInteractionMode('voice')"
-          >
-            Voice
-          </button>
-          <button
-            class="mode-switch__button"
-            :class="{ 'mode-switch__button--active': interactionMode === 'text' }"
-            type="button"
-            title="Text mode"
-            @click="setInteractionMode('text')"
-          >
-            Text
-          </button>
-        </div>
         <button
-          v-if="interactionMode === 'voice'"
           class="mic-pill"
           :class="{ 'mic-pill--recording': audio.isRecording.value }"
           :disabled="recordButtonDisabled"
@@ -81,13 +60,6 @@
           </span>
           <span>{{ voiceStatusLabel }}</span>
         </button>
-        <div
-          v-else
-          class="text-status"
-          :class="{ 'text-status--busy': store.isTextTurnProcessing }"
-        >
-          {{ textTurnLabel }}
-        </div>
       </div>
     </header>
 
@@ -96,11 +68,7 @@
       <ChartSlot v-for="view in store.views" :key="view.id" :view="view" />
     </section>
 
-    <section
-      v-if="interactionMode === 'voice'"
-      class="dashboard__transcript"
-      aria-label="Session transcript"
-    >
+    <section class="dashboard__transcript" aria-label="Session transcript">
       <div class="transcript-header">
         <h3>Session Transcript</h3>
         <div class="transcript-actions">
@@ -174,80 +142,6 @@
         </div>
       </div>
     </section>
-
-    <section v-else class="dashboard__text-entry" aria-label="Text interaction">
-      <div ref="textHistoryList" class="text-history" aria-live="polite">
-        <div
-          v-for="exchange in transcriptRows"
-          :key="`text-${exchange.id}`"
-          class="text-history__exchange"
-        >
-          <div
-            v-for="message in exchangeMessages(exchange)"
-            :key="`text-${message.id}`"
-            class="text-history__message"
-            :class="`text-history__message--${message.role}`"
-            :title="message.text"
-          >
-            <span class="text-history__role">{{ transcriptRoleLabel(message) }}</span>
-            <span class="text-history__content">
-              {{ transcriptDisplayText(message) }}
-              <span
-                v-if="message.toolActionsExpanded"
-                class="text-history__tools"
-              >
-                <span
-                  v-for="(action, index) in message.toolActions"
-                  :key="`${message.id}-text-tool-${index}`"
-                  class="transcript-tool-item"
-                >
-                  {{ action.summary }}
-                </span>
-              </span>
-            </span>
-            <button
-              v-if="message.toolActions?.length"
-              class="transcript-action-count"
-              type="button"
-              :title="toolActionsTitle(message)"
-              @click.stop="toggleTranscriptActions(message)"
-            >
-              {{ toolActionsLabel(message) }}
-            </button>
-          </div>
-        </div>
-      </div>
-      <div v-if="pendingText" class="text-pending" aria-live="polite">
-        <span class="text-pending__role">YOU</span>
-        <span class="text-pending__content">{{ pendingText }}</span>
-      </div>
-      <form
-        class="text-composer"
-        @submit.prevent="submitText"
-      >
-        <textarea
-          ref="textInput"
-          v-model="inputText"
-          class="text-composer__input"
-          rows="2"
-          spellcheck="false"
-          placeholder="Type a message"
-          @keydown.enter.exact="handleTextEnter"
-        ></textarea>
-        <button
-          class="text-composer__send"
-          type="submit"
-          :disabled="textSendDisabled"
-          :title="textSendLabel"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 12h14" />
-            <path d="m13 6 6 6-6 6" />
-          </svg>
-          <span>{{ textSendLabel }}</span>
-        </button>
-      </form>
-    </section>
   </main>
 </template>
 
@@ -281,26 +175,15 @@ const ws = useWebSocket({
   flush: audio.flush,
   beginAssistantResponse: audio.beginAssistantResponse,
   stop: audio.stop,
-  pauseAssistantAudio: audio.pauseAssistantAudio,
-  resumeAssistantAudio: audio.resumeAssistantAudio,
   stopAssistantAudio: audio.stopAssistantAudio,
+  setPlaybackIdleHandler: audio.setPlaybackIdleHandler,
 });
 
-let sessionPromise = null;
 const isStartingListening = ref(false);
-const interactionMode = ref(getInitialInteractionMode());
-const inputText = ref("");
-const pendingText = ref("");
 const autoScrollTranscripts = ref(true);
 const transcriptList = ref(null);
-const textHistoryList = ref(null);
-const textInput = ref(null);
 const transcriptPanelWidth = ref(0);
 let transcriptResizeObserver = null;
-
-audio.setPlaybackIdleHandler?.(() => {
-  store.isAssistantSpeaking = false;
-});
 
 const statusClass = computed(() => ({
   "status-dot--connected": store.connectionStatus === "connected",
@@ -309,9 +192,8 @@ const statusClass = computed(() => ({
 }));
 
 const recordButtonDisabled = computed(() => (
-  interactionMode.value !== "voice" ||
   store.connectionStatus !== "connected" ||
-  (store.sessionMode === "turn_based" && store.isAssistantSpeaking)
+  !store.sessionReady
 ));
 
 const recordButtonLabel = computed(() => {
@@ -336,23 +218,6 @@ const voiceStatusLabel = computed(() => {
   return "Start mic";
 });
 
-const textTurnLabel = computed(() => {
-  if (store.connectionStatus === "connecting") return "Connecting...";
-  if (store.connectionStatus !== "connected") return "Offline";
-  return store.isTextTurnProcessing ? "Assistant is analyzing..." : "Your turn";
-});
-
-const textSendDisabled = computed(() => (
-  interactionMode.value !== "text" ||
-  store.connectionStatus !== "connected" ||
-  (!inputText.value.trim() && !pendingText.value.trim())
-));
-
-const textSendLabel = computed(() => (
-  pendingText.value.trim() ? "Submit" :
-  store.isTextTurnProcessing ? "Interrupt" : "Send"
-));
-
 const transcriptRows = computed(() => {
   return store.transcriptExchanges.map((exchange, index) => ({
     ...exchange,
@@ -374,9 +239,6 @@ watch(
       if (transcriptList.value) {
         transcriptList.value.scrollTop = transcriptList.value.scrollHeight;
       }
-      if (textHistoryList.value) {
-        textHistoryList.value.scrollTop = textHistoryList.value.scrollHeight;
-      }
     });
   }
 );
@@ -397,97 +259,17 @@ onBeforeUnmount(() => {
   transcriptResizeObserver?.disconnect();
 });
 
-watch(
-  interactionMode,
-  async () => {
-    stopListeningMic();
-    audio.stopAssistantAudio?.({ blockNewAudio: true });
-    store.isAssistantSpeaking = false;
-    store.setTextTurnProcessing(false);
-    store.clearTranscripts();
-    pendingText.value = "";
-    sessionPromise = null;
-    ws.disconnect();
-    await nextTick();
-    ws.connect(buildWsUrl());
-    if (interactionMode.value === "text") {
-      focusTextInput();
-    }
-  }
-);
-
-watch(
-  () => store.isTextTurnProcessing,
-  (isProcessing, wasProcessing) => {
-    if (!isProcessing && wasProcessing && interactionMode.value === "text") {
-      nextTick(focusTextInput);
-    }
-  }
-);
-
-async function ensureSessionReady({ fresh = false } = {}) {
-  if (fresh) {
-    sessionPromise = null;
-    store.sessionReady = false;
-    await waitForSocketOpen();
-  }
-  if (store.sessionReady) return;
-  if (sessionPromise) return sessionPromise;
-
-  sessionPromise = new Promise((resolve) => {
-    ws.startSession();
-    const check = setInterval(() => {
-      if (store.sessionReady) {
-        clearInterval(check);
-        sessionPromise = null;
-        resolve();
-      }
-    }, 100);
-    setTimeout(() => {
-      clearInterval(check);
-      sessionPromise = null;
-      resolve();
-    }, 15000);
-  });
-
-  return sessionPromise;
-}
-
-function waitForSocketOpen(timeoutMs = 5000) {
-  const start = Date.now();
-  return new Promise((resolve) => {
-    const check = setInterval(() => {
-      if (ws.socket.value?.readyState === WebSocket.OPEN || Date.now() - start >= timeoutMs) {
-        clearInterval(check);
-        resolve();
-      }
-    }, 50);
-  });
-}
-
 async function startListeningMic() {
   if (isStartingListening.value || audio.isRecording.value || recordButtonDisabled.value) {
     return;
   }
 
   isStartingListening.value = true;
-  await ensureSessionReady();
-  if (recordButtonDisabled.value) {
-    isStartingListening.value = false;
-    return;
-  }
-
   try {
     await audio.startRecording({
       gateSilence: false,
       onChunk: (base64pcm) => {
-        if (store.isAssistantSpeaking && store.sessionMode === "turn_based") {
-          return;
-        }
         ws.sendAudio(base64pcm);
-      },
-      onSpeechStart: () => {
-        audio.pauseAssistantAudio?.();
       },
     });
   } catch (error) {
@@ -512,7 +294,6 @@ function handleRecordClick() {
 }
 
 function handleKeyDown(event) {
-  if (interactionMode.value !== "voice") return;
   if (event.code !== "Space" || event.repeat || shouldIgnoreShortcut(event.target)) return;
   event.preventDefault();
   handleRecordClick();
@@ -585,10 +366,14 @@ function transcriptRoleLabel(message) {
 }
 
 function transcriptDisplayText(message) {
-  if (message.text) return message.text;
+  if (message.text) return oneLineTranscriptText(message.text);
   if (message.status === "listening") return "Listening...";
   if (message.status === "streaming") return "...";
   return "";
+}
+
+function oneLineTranscriptText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function toggleTranscriptMessage(message) {
@@ -685,87 +470,6 @@ function clearTranscript() {
   store.clearTranscripts();
 }
 
-function submitText() {
-  const text = inputText.value.trim();
-  if (textSendDisabled.value) return;
-
-  if (pendingText.value.trim() && !text) {
-    submitPendingText();
-    return;
-  }
-
-  if (store.isTextTurnProcessing) {
-    if (text) {
-      stagePendingText(text);
-      return;
-    }
-    return;
-  }
-
-  const textToSend = text || pendingText.value.trim();
-  if (!textToSend) return;
-  pendingText.value = "";
-  sendTextToAssistant(textToSend);
-}
-
-function stagePendingText(text) {
-  pendingText.value = text;
-  inputText.value = "";
-  nextTick(focusTextInput);
-}
-
-function submitPendingText() {
-  const text = pendingText.value.trim();
-  if (!text) return;
-  pendingText.value = "";
-  sendTextToAssistant(text);
-}
-
-function sendTextToAssistant(text) {
-  if (store.isTextTurnProcessing) {
-    ws.interruptActiveResponse?.("user_superseded_response");
-  }
-  const turnId = ws.sendText(text);
-  if (!turnId) {
-    pendingText.value = text;
-    return;
-  }
-
-  store.completeUserTranscript(text, { utteranceId: turnId });
-  store.setTextTurnProcessing(true);
-  inputText.value = "";
-  pendingText.value = "";
-  nextTick(focusTextInput);
-}
-
-function handleTextEnter(event) {
-  event.preventDefault();
-  submitText();
-}
-
-function focusTextInput() {
-  textInput.value?.focus?.();
-}
-
-function setInteractionMode(mode) {
-  if (interactionMode.value === mode) return;
-  interactionMode.value = mode;
-  const url = new URL(window.location.href);
-  url.searchParams.set(
-    "condition",
-    mode === "text" ? "turn_based_text" : "full_duplex_voice"
-  );
-  window.history.replaceState(null, "", url);
-}
-
-function getInitialInteractionMode() {
-  const params = new URLSearchParams(window.location.search);
-  const value = (params.get("condition") || params.get("mode") || "").toLowerCase();
-  return ["text", "tbc", "turn_based_text", "turn-based-text"].includes(value)
-    ? "text"
-    : "voice";
-}
-
 function getOrCreateAnalysisId() {
   const params = new URLSearchParams(window.location.search);
   const forceNew = ["1", "true", "yes", "on"].includes(
@@ -810,23 +514,23 @@ function setCurrentAnalysisId(id) {
 
 function buildWsUrl() {
   const params = new URLSearchParams(window.location.search);
-  const explicitUrl = interactionMode.value === "text"
-    ? (params.get("textWs") || import.meta.env.VITE_TEXT_WS_URL)
-    : (params.get("ws") || import.meta.env.VITE_REALTIME_WS_URL);
-  if (explicitUrl) return withAnalysisId(explicitUrl);
+  const explicitUrl =
+    params.get("ws") ||
+    import.meta.env.VITE_REALTIME_WS_URL;
+
+  if (explicitUrl) {
+    return withAnalysisId(explicitUrl);
+  }
 
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const configuredPath = interactionMode.value === "text"
-    ? (params.get("textWsPath") || import.meta.env.VITE_TEXT_WS_PATH || "/ws/text")
-    : (params.get("wsPath") || import.meta.env.VITE_REALTIME_WS_PATH || "/ws");
+  const configuredPath =
+    params.get("wsPath") ||
+    import.meta.env.VITE_REALTIME_WS_PATH ||
+    "/ws";
   const path = configuredPath.startsWith("/") ? configuredPath : `/${configuredPath}`;
   const url = new URL(`${protocol}://${window.location.host}${path}`);
   url.searchParams.set("analysis_id", analysisId);
-  if (interactionMode.value === "voice") {
-    url.searchParams.set("model", QWEN_REALTIME_MODEL);
-  } else {
-    url.searchParams.set("condition", "turn_based_text");
-  }
+  url.searchParams.set("model", QWEN_REALTIME_MODEL);
 
   return url.toString();
 }
@@ -1008,48 +712,6 @@ function withAnalysisId(rawUrl) {
   min-width: 0;
 }
 
-.mode-switch {
-  display: inline-grid;
-  grid-template-columns: 1fr 1fr;
-  flex: 0 0 auto;
-  height: 34px;
-  overflow: hidden;
-  border: 1px solid #ccd6e3;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.mode-switch__button {
-  min-width: 54px;
-  border: 0;
-  border-right: 1px solid #dce4ef;
-  background: transparent;
-  color: #64748b;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 750;
-  line-height: 1;
-}
-
-.mode-switch__button:last-child {
-  border-right: 0;
-}
-
-.mode-switch__button:hover {
-  background: #f1f6ff;
-  color: #1d4ed8;
-}
-
-.mode-switch__button--active {
-  background: #1d4ed8;
-  color: #ffffff;
-}
-
-.mode-switch__button--active:hover {
-  background: #1d4ed8;
-  color: #ffffff;
-}
-
 .mic-pill {
   display: inline-flex;
   align-items: center;
@@ -1112,29 +774,6 @@ function withAnalysisId(rawUrl) {
 .mic-pill--recording .mic-pill__icon {
   background: #1d4ed8;
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12), 0 6px 14px rgba(37, 99, 235, 0.28);
-}
-
-.text-status {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 126px;
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid #d8dee8;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #334155;
-  font-size: 12px;
-  font-weight: 750;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.text-status--busy {
-  border-color: #f3c66d;
-  background: #fff8e8;
-  color: #92400e;
 }
 
 .status-filters {
@@ -1422,7 +1061,9 @@ function withAnalysisId(rawUrl) {
   min-width: 0;
   color: inherit;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .transcript-text--collapsed {
@@ -1437,8 +1078,8 @@ function withAnalysisId(rawUrl) {
 }
 
 .transcript-message--assistant .transcript-text--collapsed {
-  line-clamp: 2;
-  -webkit-line-clamp: 2;
+  line-clamp: 1;
+  -webkit-line-clamp: 1;
 }
 
 .transcript-meta {
@@ -1537,20 +1178,6 @@ function withAnalysisId(rawUrl) {
   box-shadow: none;
 }
 
-.dashboard__text-entry {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  height: 300px;
-  max-height: 300px;
-  min-height: 300px;
-  overflow: hidden;
-  border: 1px solid #d7e1ee;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: none;
-}
-
 .transcript-header {
   min-height: 30px;
   padding: 5px 10px;
@@ -1571,161 +1198,6 @@ function withAnalysisId(rawUrl) {
   min-height: 0;
   max-height: none;
   overflow: auto;
-}
-
-.text-history {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  padding: 8px 10px;
-  border-bottom: 1px solid #e1e8f2;
-  background: #ffffff;
-  font-size: 12px;
-  scrollbar-color: #cbd5e1 #f8fbff;
-}
-
-.text-history__exchange {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 4px 0;
-  border-bottom: 1px solid #edf2f7;
-}
-
-.text-history__exchange:last-child {
-  border-bottom: 0;
-}
-
-.text-history__message {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 6px;
-  min-height: 18px;
-  color: #1f2937;
-  line-height: 1.35;
-}
-
-.text-history__message--user .text-history__role {
-  color: #1d4ed8;
-}
-
-.text-history__message--assistant .text-history__role {
-  color: #0f2f66;
-}
-
-.text-history__role {
-  color: #0f2f66;
-  font-size: 10px;
-  font-weight: 750;
-  line-height: 1.6;
-}
-
-.text-history__content {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.text-history__tools {
-  grid-column: 2 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-
-.text-pending {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  align-items: start;
-  gap: 6px;
-  flex: 0 0 auto;
-  max-height: 58px;
-  overflow: auto;
-  padding: 5px 10px;
-  border-bottom: 1px solid #e1e8f2;
-  background: #eef6ff;
-  color: #1f2937;
-  font-size: 12px;
-  line-height: 1.3;
-}
-
-.text-pending__role {
-  color: #1d4ed8;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1.5;
-}
-
-.text-pending__content {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.text-composer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  height: 35px;
-  flex: 0 0 auto;
-  padding: 4px 8px;
-  background: #f8fbff;
-}
-
-.text-composer__input {
-  width: 100%;
-  min-height: 27px;
-  max-height: 27px;
-  resize: none;
-  border: 1px solid #cbd7e6;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #111827;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.2;
-  outline: none;
-  padding: 4px 8px;
-}
-
-.text-composer__input:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-}
-
-.text-composer__send {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 82px;
-  height: 27px;
-  border: 1px solid #1d4ed8;
-  border-radius: 8px;
-  background: #2563eb;
-  color: #ffffff;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.text-composer__send:hover:not(:disabled) {
-  background: #1d4ed8;
-}
-
-.text-composer__send:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.text-composer__send svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2.3;
 }
 
 .transcript-exchange {
