@@ -24,13 +24,13 @@ export function createSpec(view) {
   const { id, chart_type, title, x_field, y_field, color } = view;
 
   switch (id) {
-    case "view-1":
+    case "view1":
       return trendSpec(title);
-    case "view-2":
+    case "view2":
       return reviewSpec(title);
-    case "view-3":
+    case "view3":
       return mapBarSpec(title);
-    case "view-4":
+    case "view4":
       return categorySpec(title);
     default:
       return dynamicSpec(chart_type, x_field, y_field, color, title, view);

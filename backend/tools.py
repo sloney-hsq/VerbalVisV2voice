@@ -106,7 +106,7 @@ LOG_DIR.mkdir(exist_ok=True)
 
 BASE_VIEWS_DEFS = [
     {
-        "id": "view-1",
+        "id": "view1",
         "label": "view 1",
         "chart_type": "line",
         "title": "Monthly Orders Trend",
@@ -121,7 +121,7 @@ BASE_VIEWS_DEFS = [
         "source_table": "fact_order",
     },
     {
-        "id": "view-2",
+        "id": "view2",
         "label": "view 2",
         "chart_type": "bar",
         "title": "Review Score Distribution",
@@ -136,7 +136,7 @@ BASE_VIEWS_DEFS = [
         "source_table": "fact_order",
     },
     {
-        "id": "view-3",
+        "id": "view3",
         "label": "view 3",
         "chart_type": "bar",
         "title": "Orders by State",
@@ -154,7 +154,7 @@ BASE_VIEWS_DEFS = [
         # NOTE: queries fact_item (item grain). Revenue is SUM of per-item
         # (price + freight) — not the previous "whole-order payment misallocated
         # to alphabetically-first category" bug.
-        "id": "view-4",
+        "id": "view4",
         "label": "view 4",
         "chart_type": "bar",
         "title": "Category Revenue (Top 15)",
@@ -241,12 +241,12 @@ TOOL_SCHEMAS = [
                 },
                 "view_id": {
                     "type": ["string", "null"],
-                    "description": "Single view id to highlight, e.g. view-1 or view-5. Use view_ids for simultaneous multi-view highlighting.",
+                    "description": "Single view id to highlight, e.g. view1 or view5. Use view_ids for simultaneous multi-view highlighting.",
                 },
                 "view_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Multiple view ids to highlight together, e.g. ['view-3', 'view-5', 'view-10']. Use when the user asks to highlight several views simultaneously.",
+                    "description": "Multiple view ids to highlight together, e.g. ['view3', 'view5', 'view10']. Use when the user asks to highlight several views simultaneously.",
                 },
                 "highlight_element": {
                     "type": ["string", "null"],
@@ -445,7 +445,7 @@ TOOL_SCHEMAS = [
                 "view_id": {
                     "type": "string",
                     "description": (
-                        "ID of the dashboard view to inspect, such as view-1 or view-5. "
+                        "ID of the dashboard view to inspect, such as view1 or view5. "
                         "Use the highlighted view when the user says 'this chart'."
                     ),
                 },
@@ -462,7 +462,7 @@ TOOL_SCHEMAS = [
             "properties": {
                 "view_id": {
                     "type": "string",
-                    "description": "ID of the view to delete, e.g. view-5.",
+                    "description": "ID of the view to delete, e.g. view5.",
                 },
             },
             "required": ["view_id"],
@@ -754,7 +754,7 @@ def _exec_set_low_score_threshold(args: dict) -> dict:
 
 def _view_label(view_id: Any) -> str:
     text = str(view_id or "").strip()
-    match = re.fullmatch(r"view-(\d+)", text, flags=re.IGNORECASE)
+    match = re.fullmatch(r"view(\d+)", text, flags=re.IGNORECASE)
     if match:
         return f"view {int(match.group(1))}"
     return text
@@ -772,19 +772,19 @@ def _resolve_view_id(value: Any) -> Any:
             return view["id"]
 
     compact = re.sub(r"[\s_]+", "-", raw.lower())
-    compact = re.sub(r"^view-?0*(\d+)$", r"view-\1", compact)
-    if re.fullmatch(r"view-\d+", compact):
+    compact = re.sub(r"^view?0*(\d+)$", r"view\1", compact)
+    if re.fullmatch(r"view\d+", compact):
         return compact
 
     match = re.search(r"(?:view|视图|图)\s*[-#：:]?\s*([0-9]+)", raw, flags=re.IGNORECASE)
     if match:
-        return f"view-{int(match.group(1))}"
+        return f"view{int(match.group(1))}"
 
     match = re.search(r"(?:视图|图)\s*[-#：:]?\s*([一二两三四五六七八九十百零〇]+)", raw)
     if match:
         parsed = _parse_chinese_int(match.group(1))
         if parsed is not None:
-            return f"view-{parsed}"
+            return f"view{parsed}"
 
     return raw
 
@@ -1047,7 +1047,7 @@ def _exec_append_visual(args: dict) -> dict:
         }
 
     view_counter += 1
-    view_id = f"view-{view_counter}"
+    view_id = f"view{view_counter}"
     view_label = _view_label(view_id)
 
     # Route to fact_item whenever product_category is involved (x / y / color);
@@ -1792,7 +1792,7 @@ def _compute_view_stats(view: dict) -> dict:
             stats["includes_overall"] = True
 
     try:
-        if vid == "view-1" or view["chart_type"] == "line":
+        if vid == "view1" or view["chart_type"] == "line":
             values = [(d.get(view["x_field"]), d.get(y, 0)) for d in data if d.get(y) is not None]
             if values:
                 peak = max(values, key=lambda t: t[1])
@@ -1804,7 +1804,7 @@ def _compute_view_stats(view: dict) -> dict:
                     stats["peak_month"] = str(peak[0])
                     stats["avg_monthly"] = round(avg_val, 1)
 
-        elif vid == "view-2":
+        elif vid == "view2":
             total = sum(d.get(y, 0) for d in data)
             if total > 0:
                 low = sum(d.get(y, 0) for d in data if d.get("review_score") is not None and d["review_score"] <= 2)
@@ -1812,7 +1812,7 @@ def _compute_view_stats(view: dict) -> dict:
                 dominant = max(data, key=lambda d: d.get(y, 0))
                 stats["dominant_score"] = dominant.get("review_score")
 
-        elif vid == "view-3":
+        elif vid == "view3":
             if data:
                 top = data[0]
                 bottom = min(data, key=lambda d: d.get(y, 0))
@@ -1824,7 +1824,7 @@ def _compute_view_stats(view: dict) -> dict:
                 stats["bottom_state_count"] = bottom.get(y)
                 stats["state_count"] = len(data)
 
-        elif vid == "view-4":
+        elif vid == "view4":
             if data:
                 top = data[0]
                 stats["top_category"] = top.get("product_category")
