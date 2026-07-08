@@ -36,6 +36,14 @@ DERIVED_MEASURES = [LOW_SCORE_RATIO, LATE_RATIO, ON_TIME_RATIO, HIGH_SCORE_RATIO
 APPEND_Y_FIELDS = FIELDS + [COUNT_MEASURE, *DERIVED_MEASURES]
 SORT_FIELDS = APPEND_Y_FIELDS
 TIME_FIELDS = {"order_month", "order_week", "order_date", "order_dow", "order_hour"}
+OPERATOR_ALIASES = {
+    "=": "eq",
+    "==": "eq",
+    "!=": "neq",
+    "<>": "neq",
+    ">=": "gte",
+    "<=": "lte",
+}
 NUMERIC_AVG_FIELDS = {
     "estimated_delivery_days",
     "delivery_delay_days",
@@ -2422,7 +2430,8 @@ def _normalize_filter(args: dict[str, Any], *, tool_name: str) -> tuple[dict[str
             "success": False,
             "error": f"Unknown field: '{field}'. Available: {', '.join(FIELDS)}",
         }
-    operator = args.get("operator", "eq")
+    operator = str(args.get("operator", "eq") or "eq").strip().lower()
+    operator = OPERATOR_ALIASES.get(operator, operator)
     if operator not in OPERATORS:
         return None, {
             "tool": tool_name,

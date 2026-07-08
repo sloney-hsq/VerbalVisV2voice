@@ -60,6 +60,10 @@ charts. It does not change the dashboard.
 
 Use set_low_score_threshold when the user changes the definition of low score.
 
+For aggregated count-vs-ratio comparisons by state or category, prefer existing
+bar views, highlight_visual, inspect_visual, or separate bar/table views.
+Do not create a scatter plot with order_count or derived ratios.
+
 ## Data Semantics
 Use low_score_ratio for low-score share, late_ratio for delay share,
 on_time_ratio for on-time share, high_score_ratio for high-rating share, and

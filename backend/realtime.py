@@ -1310,7 +1310,7 @@ class QwenRealtimeSession:
         role: str,
         text: str,
     ) -> None:
-        clean = str(text or "").strip()
+        clean = " ".join(str(text or "").split())
         if not clean:
             return
 
