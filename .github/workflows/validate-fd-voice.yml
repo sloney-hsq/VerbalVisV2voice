@@ -25,7 +25,7 @@ jobs:
       - name: Compile backend
         run: python -m compileall backend
 
-      - name: Validate Task A and Task B
+      - name: Validate all tools and study tasks
         working-directory: backend
         run: python demo_validation.py
 
@@ -43,6 +43,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm install
+
+      - name: Validate in-chart highlights
+        working-directory: frontend
+        run: npm run validate:highlight
 
       - name: Build frontend
         working-directory: frontend
