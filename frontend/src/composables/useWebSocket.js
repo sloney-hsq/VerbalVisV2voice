@@ -3,8 +3,6 @@ import { storeToRefs } from "pinia";
 import { useDashboardStore } from "../stores/dashboard";
 import { useRuntimeStore } from "../stores/runtime";
 
-const ANALYSIS_ID_STORAGE_KEY = "verbalvis.analysisId";
-
 /**
  * Browser-side FD-Voice protocol adapter.
  *
@@ -19,7 +17,7 @@ export function useWebSocket(audioPlayer) {
   const socket = ref(null);
 
   let activeResponseId = null;
-  let analysisId = getOrCreateAnalysisId();
+  let analysisId = createAnalysisId();
 
   audioPlayer?.setPlaybackIdleHandler?.((event = {}) => {
     dashboard.isAssistantSpeaking = false;
@@ -98,7 +96,7 @@ export function useWebSocket(audioPlayer) {
       case "session_updated":
         syncSessionInfo(message);
         analysisId = normalizeAnalysisId(message.analysis_id) || analysisId;
-        persistAnalysisId(analysisId);
+        window.__verbalvis_analysis_id = analysisId;
         break;
 
       case "session_ready":
@@ -339,38 +337,16 @@ export function useWebSocket(audioPlayer) {
     return url.toString();
   }
 
-  function getOrCreateAnalysisId() {
+  function createAnalysisId() {
     const params = new URLSearchParams(window.location.search);
-    const forceNew = ["1", "true", "yes", "on"].includes(
-      String(params.get("new_analysis") || params.get("newAnalysis") || "").toLowerCase(),
-    );
     const explicit = normalizeAnalysisId(
       params.get("analysis_id") || params.get("analysisId"),
     );
-    let stored = "";
-    if (!forceNew) {
-      try {
-        stored = normalizeAnalysisId(
-          window.localStorage?.getItem(ANALYSIS_ID_STORAGE_KEY),
-        );
-      } catch (_) {
-        stored = "";
-      }
-    }
-    const id = explicit || stored || (
+    const generated = (
       `analysis-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`
     );
-    return persistAnalysisId(id);
-  }
-
-  function persistAnalysisId(value) {
-    const id = normalizeAnalysisId(value);
+    const id = explicit || generated;
     window.__verbalvis_analysis_id = id;
-    try {
-      window.localStorage?.setItem(ANALYSIS_ID_STORAGE_KEY, id);
-    } catch (_) {
-      // Private browsing may disable storage; the in-memory id is sufficient.
-    }
     return id;
   }
 
