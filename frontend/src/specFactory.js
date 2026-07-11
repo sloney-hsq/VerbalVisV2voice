@@ -1,7 +1,6 @@
 import { applyHighlightToSpec } from "./highlightSpec";
+import { chartHeightForView } from "./chartLayout";
 
-const CHART_WIDTH = 360;
-const CHART_HEIGHT = 240;
 const TIME_FIELDS = new Set(["order_month", "order_week", "order_date"]);
 const DIMENSION_FIELDS = new Set([
   "order_month",
@@ -13,13 +12,17 @@ const DIMENSION_FIELDS = new Set([
 ]);
 const RATIO_FIELDS = new Set(["low_score_ratio", "late_ratio"]);
 
-/** Build one Vega-Lite specification from backend view metadata. */
+/** Build one responsive Vega-Lite specification from backend view metadata. */
 export function createSpec(view, highlightElement = null) {
   const spec = {
     $schema: "https://vega.github.io/schema/vega-lite/v5.json",
-    title: view.title,
-    width: CHART_WIDTH,
-    height: CHART_HEIGHT,
+    width: "container",
+    height: chartHeightForView(view),
+    autosize: {
+      type: "fit",
+      contains: "padding",
+      resize: true,
+    },
     encoding: {},
   };
 
