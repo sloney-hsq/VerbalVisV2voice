@@ -102,12 +102,16 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "session_ready":
+        audioPlayer?.setCaptureBlocked?.(false);
         dashboard.sessionReady = true;
         runtime.setPhase("ready");
         break;
 
       case "assistant_response_started":
         if (!message.response_id) break;
+        // A tool-follow-up response is now active. Reopen capture here—not at
+        // tool_execution_finished—so user audio cannot race response.create.
+        audioPlayer?.setCaptureBlocked?.(false);
         activeResponseId = message.response_id;
         dashboard.beginAssistantResponse(activeResponseId);
         audioPlayer?.beginAssistantResponse?.(activeResponseId);
@@ -162,7 +166,10 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "tool_execution_finished":
-        audioPlayer?.setCaptureBlocked?.(false);
+        // Keep capture blocked while waiting for the explicit post-tool
+        // response.create to produce response.created. If no follow-up was
+        // requested, there is no response race and capture may reopen now.
+        audioPlayer?.setCaptureBlocked?.(Boolean(message.followup_requested));
         runtime.finishToolBatch(message);
         break;
 
@@ -284,7 +291,7 @@ export function useWebSocket(audioPlayer) {
   }
 
   function sendAudio(base64Pcm) {
-    if (toolRunning.value) return false;
+    if (toolRunning.value || audioPlayer?.captureBlocked?.value) return false;
     if (!socket.value || socket.value.readyState !== WebSocket.OPEN) return false;
     socket.value.send(JSON.stringify({ type: "audio", data: base64Pcm }));
     return true;
