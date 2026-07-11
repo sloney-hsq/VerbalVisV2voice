@@ -1,23 +1,50 @@
 """VerbalVis FastAPI entry point.
 
-The current dashboard state is intentionally single-session. A second browser is
-rejected instead of sharing filters and views with the active participant.
+One browser page owns one backend WebSocket and one Qwen Realtime session. The
+microphone may be started and stopped repeatedly without creating another model
+session. Dashboard state is intentionally single-participant and in-memory.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 from pathlib import Path
 import uuid
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from db import initialize_db
-from realtime import QWEN_MODEL, QWEN_TURN_DETECTION, QwenRealtimeSession
+# Load backend/.env (or a parent .env) before realtime.py reads configuration.
+load_dotenv()
+if not os.getenv("QWEN_WORKSPACE_ID"):
+    workspace_alias = (
+        os.getenv("DASHSCOPE_WORKSPACE_ID")
+        or os.getenv("WORKSPACE_ID")
+        or ""
+    ).strip()
+    if workspace_alias:
+        os.environ["QWEN_WORKSPACE_ID"] = workspace_alias
+
+from db import initialize_db  # noqa: E402
+from realtime import (  # noqa: E402
+    QWEN_API_KEY,
+    QWEN_AUDIO_FORMAT,
+    QWEN_INPUT_SAMPLE_RATE,
+    QWEN_MODEL,
+    QWEN_OUTPUT_SAMPLE_RATE,
+    QWEN_REALTIME_URL,
+    QWEN_TURN_DETECTION,
+    QWEN_VOICE,
+    QWEN_WORKSPACE_ID,
+    QwenRealtimeSession,
+)
+from tools import get_views_for_frontend, init_views  # noqa: E402
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
@@ -39,19 +66,44 @@ _active_session_lock = asyncio.Lock()
 _active_session_id: str | None = None
 
 
+def qwen_configuration_error() -> str | None:
+    """Return an actionable configuration message, or None when ready."""
+    if not QWEN_API_KEY:
+        return (
+            "Qwen Realtime is not configured: set DASHSCOPE_API_KEY in "
+            "backend/.env and restart the backend."
+        )
+    if not QWEN_REALTIME_URL and not QWEN_WORKSPACE_ID:
+        return (
+            "Qwen Realtime is not configured: set QWEN_WORKSPACE_ID to the "
+            "Bailian business-space ID, or set QWEN_REALTIME_URL to the full "
+            "regional WebSocket endpoint, then restart the backend."
+        )
+    return None
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
     log.info("Initialising DuckDB...")
     initialize_db()
+    config_error = qwen_configuration_error()
+    if config_error:
+        log.error(config_error)
+    else:
+        endpoint_mode = "QWEN_REALTIME_URL" if QWEN_REALTIME_URL else "QWEN_WORKSPACE_ID"
+        log.info("Qwen Realtime configuration ready via %s.", endpoint_mode)
     log.info("Ready.")
 
 
 @app.get("/health")
 async def health_check() -> dict[str, str | bool | None]:
+    config_error = qwen_configuration_error()
     return {
         "status": "ok",
         "single_session": True,
         "active_session_id": _active_session_id,
+        "qwen_configured": qwen_configuration_error() is None,
+        "qwen_configuration_error": config_error,
     }
 
 
@@ -83,13 +135,23 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         QWEN_TURN_DETECTION,
     )
 
-    session = QwenRealtimeSession(
-        client_ws=websocket,
-        session_id=session_id,
-        model=QWEN_MODEL,
-        analysis_id=analysis_id,
-    )
     try:
+        config_error = qwen_configuration_error()
+        if config_error:
+            await _serve_configuration_error(
+                websocket,
+                session_id=session_id,
+                analysis_id=analysis_id,
+                message=config_error,
+            )
+            return
+
+        session = QwenRealtimeSession(
+            client_ws=websocket,
+            session_id=session_id,
+            model=QWEN_MODEL,
+            analysis_id=analysis_id,
+        )
         await session.start()
     except WebSocketDisconnect:
         log.info("Client disconnected: %s", session_id)
@@ -99,6 +161,66 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         async with _active_session_lock:
             if _active_session_id == session_id:
                 _active_session_id = None
+
+
+async def _serve_configuration_error(
+    websocket: WebSocket,
+    *,
+    session_id: str,
+    analysis_id: str | None,
+    message: str,
+) -> None:
+    """Keep the dashboard visible and report one non-retrying config error."""
+    init_views()
+    await websocket.send_json(
+        {
+            "type": "init",
+            "views": get_views_for_frontend(),
+            "session_id": session_id,
+            "analysis_id": analysis_id or session_id,
+            "mode": "barge_in",
+            "condition_code": "fd_voice",
+            "input_mode": "semantic_vad",
+            "turn_detection": QWEN_TURN_DETECTION,
+            "provider": "qwen",
+            "model": QWEN_MODEL,
+            "voice": QWEN_VOICE,
+            "input_audio_rate": QWEN_INPUT_SAMPLE_RATE,
+            "output_audio_rate": QWEN_OUTPUT_SAMPLE_RATE,
+            "audio_format": QWEN_AUDIO_FORMAT,
+        }
+    )
+    await websocket.send_json(
+        {
+            "type": "configuration_error",
+            "message": message,
+            "required": ["DASHSCOPE_API_KEY", "QWEN_WORKSPACE_ID"],
+            "alternative": "QWEN_REALTIME_URL",
+        }
+    )
+    await websocket.send_json(
+        {
+            "type": "runtime_state",
+            "phase": "configuration_error",
+            "tool_running": False,
+            "tools": [],
+        }
+    )
+    log.error("Session %s cannot start Qwen: %s", session_id, message)
+
+    while True:
+        try:
+            raw = await websocket.receive_text()
+        except WebSocketDisconnect:
+            return
+        except RuntimeError:
+            return
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("type") in {"close", "disconnect"}:
+            return
 
 
 def _analysis_id_from_query(websocket: WebSocket) -> str | None:
