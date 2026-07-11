@@ -4,13 +4,13 @@ import { useDashboardStore } from "../stores/dashboard";
 import { useRuntimeStore } from "../stores/runtime";
 
 const ANALYSIS_ID_STORAGE_KEY = "verbalvis.analysisId";
-const REALTIME_MODEL = "qwen3.5-omni-plus-realtime";
 
 /**
- * One browser WebSocket for FD-Voice.
+ * Browser-side FD-Voice protocol adapter.
  *
- * The backend is the authority for turn detection and tool execution. The
- * frontend only routes audio, transcript, dashboard, and lifecycle events.
+ * The backend owns Semantic VAD, response cancellation, tool execution, and
+ * dashboard truth. The browser only transports PCM audio and applies the
+ * compact events emitted by backend/realtime.py.
  */
 export function useWebSocket(audioPlayer) {
   const dashboard = useDashboardStore();
@@ -54,7 +54,10 @@ export function useWebSocket(audioPlayer) {
     ws.onclose = () => {
       if (socket.value !== ws) return;
       audioPlayer?.setCaptureBlocked?.(false);
-      audioPlayer?.stopAssistantAudio?.({ blockNewAudio: true, reason: "socket_closed" });
+      audioPlayer?.stopAssistantAudio?.({
+        blockNewAudio: true,
+        reason: "socket_closed",
+      });
       activeResponseId = null;
       dashboard.isAssistantSpeaking = false;
       dashboard.connectionStatus = "disconnected";
@@ -65,6 +68,7 @@ export function useWebSocket(audioPlayer) {
 
     ws.onerror = () => {
       if (socket.value !== ws) return;
+      stopAssistantPlayback(activeResponseId, "socket_error", false);
       dashboard.connectionStatus = "disconnected";
       dashboard.sessionReady = false;
       runtime.setPhase("error", { toolRunning: false, tools: [] });
@@ -127,7 +131,9 @@ export function useWebSocket(audioPlayer) {
         dashboard.completeAssistantResponse(message.response_id);
         audioPlayer?.flush?.(message);
         activeResponseId = null;
-        if (!toolRunning.value && !dashboard.isAssistantSpeaking) runtime.setPhase("ready");
+        if (!toolRunning.value && !dashboard.isAssistantSpeaking) {
+          runtime.setPhase("ready");
+        }
         break;
 
       case "speech_started":
@@ -143,10 +149,10 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "assistant_playback_stop":
-      case "assistant_response_interrupted":
         stopAssistantPlayback(
           message.response_id,
           message.reason || "user_interruption",
+          true,
         );
         break;
 
@@ -196,6 +202,7 @@ export function useWebSocket(audioPlayer) {
 
       case "error":
         audioPlayer?.setCaptureBlocked?.(false);
+        stopAssistantPlayback(activeResponseId, "realtime_error", false);
         runtime.setPhase("error", { toolRunning: false, tools: [] });
         runtime.recordToolResult({
           success: false,
@@ -209,7 +216,10 @@ export function useWebSocket(audioPlayer) {
   function handleTranscript(message) {
     if (message.role === "assistant") {
       if (!message.response_id || message.response_id !== activeResponseId) return;
-      dashboard.appendAssistantTranscript(message.response_id, message.delta || message.text || "");
+      dashboard.appendAssistantTranscript(
+        message.response_id,
+        message.delta || message.text || "",
+      );
       return;
     }
     if (message.role !== "user") return;
@@ -230,7 +240,7 @@ export function useWebSocket(audioPlayer) {
     }
   }
 
-  function stopAssistantPlayback(responseId, reason) {
+  function stopAssistantPlayback(responseId, reason, acknowledge) {
     const stoppedId = responseId || activeResponseId;
     dashboard.isAssistantSpeaking = false;
     dashboard.interruptAssistantResponse(stoppedId);
@@ -242,7 +252,7 @@ export function useWebSocket(audioPlayer) {
     }) || null;
 
     if (!responseId || responseId === activeResponseId) activeResponseId = null;
-    sendPlaybackStopped(stoppedId, reason, playbackCursor);
+    if (acknowledge) sendPlaybackStopped(stoppedId, reason, playbackCursor);
   }
 
   function syncDashboardState(state = {}) {
@@ -292,7 +302,10 @@ export function useWebSocket(audioPlayer) {
 
   function disconnect() {
     audioPlayer?.setCaptureBlocked?.(false);
-    audioPlayer?.stopAssistantAudio?.({ blockNewAudio: true, reason: "disconnect" });
+    audioPlayer?.stopAssistantAudio?.({
+      blockNewAudio: true,
+      reason: "disconnect",
+    });
     activeResponseId = null;
     dashboard.sessionReady = false;
     socket.value?.close();
@@ -316,7 +329,6 @@ export function useWebSocket(audioPlayer) {
     const path = pathValue.startsWith("/") ? pathValue : `/${pathValue}`;
     const url = new URL(`${protocol}//${window.location.host}${path}`);
     url.searchParams.set("analysis_id", analysisId);
-    url.searchParams.set("model", REALTIME_MODEL);
     return url.toString();
   }
 
@@ -325,16 +337,22 @@ export function useWebSocket(audioPlayer) {
     const forceNew = ["1", "true", "yes", "on"].includes(
       String(params.get("new_analysis") || params.get("newAnalysis") || "").toLowerCase(),
     );
-    const explicit = normalizeAnalysisId(params.get("analysis_id") || params.get("analysisId"));
+    const explicit = normalizeAnalysisId(
+      params.get("analysis_id") || params.get("analysisId"),
+    );
     let stored = "";
     if (!forceNew) {
       try {
-        stored = normalizeAnalysisId(window.localStorage?.getItem(ANALYSIS_ID_STORAGE_KEY));
+        stored = normalizeAnalysisId(
+          window.localStorage?.getItem(ANALYSIS_ID_STORAGE_KEY),
+        );
       } catch (_) {
         stored = "";
       }
     }
-    const id = explicit || stored || `analysis-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
+    const id = explicit || stored || (
+      `analysis-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`
+    );
     return persistAnalysisId(id);
   }
 
@@ -350,18 +368,19 @@ export function useWebSocket(audioPlayer) {
   }
 
   function normalizeAnalysisId(value) {
-    return String(value || "").trim().replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 80);
+    return String(value || "")
+      .trim()
+      .replace(/[^A-Za-z0-9_.-]/g, "-")
+      .slice(0, 80);
   }
 
   onBeforeUnmount(disconnect);
 
   return {
-    socket,
     toolRunning,
     runtime,
     connect,
     sendAudio,
-    sendPlaybackStopped,
     disconnect,
   };
 }
