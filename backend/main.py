@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from db import initialize_db
-from realtime_tool_gate import QWEN_TURN_DETECTION, QwenRealtimeSession
+from realtime_nonpreemptive import QWEN_TURN_DETECTION, QwenRealtimeSession
 
 QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime"
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
