@@ -84,7 +84,7 @@ export function useWebSocket(audioPlayer) {
       case "init":
         activeResponseId = null;
         runtime.setPhase("connecting", { toolRunning: false, tools: [] });
-        runtime.updateDashboardState({
+        _syncDashboardState({
           ...runtime.dashboardState,
           views: msg.views || [],
         });
@@ -118,7 +118,7 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "dashboard_state":
-        runtime.updateDashboardState(msg.state || {});
+        _syncDashboardState(msg.state || {});
         break;
 
       case "runtime_state":
@@ -250,6 +250,9 @@ export function useWebSocket(audioPlayer) {
       case "tool_result":
         store.handleToolResult(msg);
         runtime.recordToolResult(msg);
+        if (Array.isArray(msg.payload?.active_filters)) {
+          store.activeFilters = msg.payload.active_filters;
+        }
         break;
 
       case "session_ready":
@@ -280,6 +283,20 @@ export function useWebSocket(audioPlayer) {
         });
         console.error("Server error:", msg.message);
         break;
+    }
+  }
+
+  function _syncDashboardState(state = {}) {
+    runtime.updateDashboardState(state);
+    if (Array.isArray(state.filters)) {
+      store.activeFilters = state.filters;
+    }
+    if (Array.isArray(state.highlighted)) {
+      if (state.highlighted.length) {
+        store.highlightViews(state.highlighted, null, true);
+      } else {
+        store.clearHighlight();
+      }
     }
   }
 
