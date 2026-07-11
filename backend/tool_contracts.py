@@ -1,23 +1,32 @@
-"""Runtime contracts for the small VerbalVis tool set.
+"""Runtime contracts for VerbalVis tools.
 
-The contracts do not implement cancellation, rollback, transactions, or stale
-result invalidation. They only describe each tool's role, provide user-facing
-labels, and keep a single conservative limit on the number of calls accepted in
-one model response.
+The contracts describe tool roles and provide user-facing labels. They do not
+limit the number of tool calls and do not implement cancellation, rollback,
+transactions, epochs, or stale-result invalidation.
 """
 
 from __future__ import annotations
 
 from typing import Any, Iterable
 
-MAX_TOOL_CALLS_PER_BATCH = 4
-
 TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
+    "set_analysis_scope": {
+        "label": "Set analysis scope",
+        "category": "data_scope",
+        "changes_dashboard": True,
+        "description": "Apply several global scope filters together.",
+    },
+    "compare_category_metrics": {
+        "label": "Compare category metrics",
+        "category": "analytical_comparison",
+        "changes_dashboard": True,
+        "description": "Create coordinated views for one common Top-N category set.",
+    },
     "filter_data": {
         "label": "Apply data filter",
         "category": "data_scope",
         "changes_dashboard": True,
-        "description": "Replace or extend the global analysis scope.",
+        "description": "Replace or extend the global analysis scope with one filter.",
     },
     "remove_filter": {
         "label": "Remove data filter",
@@ -97,10 +106,17 @@ def result_summary(name: str, result: dict[str, Any]) -> str:
     if result.get("success"):
         payload = result.get("payload")
         if isinstance(payload, dict):
-            if name in {"filter_data", "remove_filter"}:
+            if name in {"filter_data", "remove_filter", "set_analysis_scope"}:
                 rows = payload.get("filtered_rows")
                 if rows is not None:
                     return f"{label} completed · {_format_count(rows)} rows in scope"
+            if name == "compare_category_metrics":
+                views = payload.get("view_ids") or []
+                top_n = payload.get("top_n")
+                return (
+                    f"{label} completed · {len(views)} views"
+                    + (f" for Top {top_n}" if top_n else "")
+                )
             if name == "append_visual" and payload.get("view_id"):
                 return f"{label} completed · {payload['view_id']}"
             if name == "delete_visual" and payload.get("view_id"):
