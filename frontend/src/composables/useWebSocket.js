@@ -1,205 +1,141 @@
-import { ref, onBeforeUnmount } from "vue";
+import { onBeforeUnmount, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useDashboardStore } from "../stores/dashboard";
 import { useRuntimeStore } from "../stores/runtime";
 
 const ANALYSIS_ID_STORAGE_KEY = "verbalvis.analysisId";
+const REALTIME_MODEL = "qwen3.5-omni-plus-realtime";
 
 /**
- * WebSocket composable for the VerbalVis backend.
- * Dispatches incoming messages to the dashboard/runtime stores and audio player.
+ * One browser WebSocket for FD-Voice.
+ *
+ * The backend is the authority for turn detection and tool execution. The
+ * frontend only routes audio, transcript, dashboard, and lifecycle events.
  */
 export function useWebSocket(audioPlayer) {
-  const store = useDashboardStore();
+  const dashboard = useDashboardStore();
   const runtime = useRuntimeStore();
   const { toolRunning } = storeToRefs(runtime);
   const socket = ref(null);
 
-  let suppressCurrentAssistantTranscript = false;
   let activeResponseId = null;
-  let manualClose = false;
-  let lastUrl = null;
   let analysisId = getOrCreateAnalysisId();
 
   audioPlayer?.setPlaybackIdleHandler?.((event = {}) => {
-    const responseId = event.responseId || event.response_id || null;
-    store.isAssistantSpeaking = false;
+    dashboard.isAssistantSpeaking = false;
     if (!toolRunning.value) runtime.setPhase("ready");
     sendPlaybackStopped(
-      responseId,
+      event.responseId || event.response_id || null,
       event.reason || "natural_end",
-      event.playbackCursor || event.playback_cursor || null
+      event.playbackCursor || event.playback_cursor || null,
     );
   });
 
-  function connect(url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?model=qwen3.5-omni-plus-realtime`) {
+  function connect() {
     if (
       socket.value &&
-      (socket.value.readyState === WebSocket.OPEN || socket.value.readyState === WebSocket.CONNECTING)
-    ) {
-      return;
-    }
+      [WebSocket.OPEN, WebSocket.CONNECTING].includes(socket.value.readyState)
+    ) return;
 
-    manualClose = false;
-    lastUrl = url;
     runtime.resetRuntime();
     runtime.setPhase("connecting");
-    store.connectionStatus = "connecting";
-    store.sessionReady = false;
-    const ws = new WebSocket(url);
+    dashboard.connectionStatus = "connecting";
+    dashboard.sessionReady = false;
+
+    const ws = new WebSocket(buildWebSocketUrl());
     socket.value = ws;
 
     ws.onopen = () => {
-      store.connectionStatus = "connected";
+      if (socket.value !== ws) return;
+      dashboard.connectionStatus = "connected";
       runtime.setPhase("connecting");
-      console.log("%c[WS] connected to backend", "color: #22c55e; font-weight: bold");
     };
 
     ws.onclose = () => {
       if (socket.value !== ws) return;
-      store.connectionStatus = "disconnected";
-      store.sessionReady = false;
+      audioPlayer?.setCaptureBlocked?.(false);
+      audioPlayer?.stopAssistantAudio?.({ blockNewAudio: true, reason: "socket_closed" });
       activeResponseId = null;
+      dashboard.isAssistantSpeaking = false;
+      dashboard.connectionStatus = "disconnected";
+      dashboard.sessionReady = false;
       runtime.setPhase("disconnected", { toolRunning: false, tools: [] });
       socket.value = null;
     };
 
-    ws.onerror = (event) => {
+    ws.onerror = () => {
       if (socket.value !== ws) return;
-      console.warn("[WS] backend connection error", event);
-      store.connectionStatus = "disconnected";
-      store.sessionReady = false;
-      activeResponseId = null;
+      dashboard.connectionStatus = "disconnected";
+      dashboard.sessionReady = false;
       runtime.setPhase("error", { toolRunning: false, tools: [] });
     };
 
     ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      _dispatch(msg);
+      try {
+        dispatch(JSON.parse(event.data));
+      } catch (error) {
+        console.error("Invalid realtime message", error);
+      }
     };
   }
 
-  function _dispatch(msg) {
-    switch (msg.type) {
+  function dispatch(message = {}) {
+    switch (message.type) {
       case "init":
         activeResponseId = null;
-        runtime.setPhase("connecting", { toolRunning: false, tools: [] });
-        _syncDashboardState({
+        dashboard.initViews(message.views || []);
+        syncSessionInfo(message);
+        runtime.updateDashboardState({
           ...runtime.dashboardState,
-          views: msg.views || [],
+          views: message.views || [],
         });
-        store.initViews(msg.views);
-        store.setSessionInfo({
-          mode: msg.mode,
-          inputMode: msg.input_mode,
-          turnDetection: msg.turn_detection,
-          provider: msg.provider,
-          model: msg.model,
-          inputAudioRate: msg.input_audio_rate,
-          outputAudioRate: msg.output_audio_rate,
-        });
+        break;
+
+      case "session_updated":
+        syncSessionInfo(message);
+        analysisId = normalizeAnalysisId(message.analysis_id) || analysisId;
+        persistAnalysisId(analysisId);
+        break;
+
+      case "session_ready":
+        dashboard.sessionReady = true;
+        runtime.setPhase("ready");
         break;
 
       case "assistant_response_started":
-        if (!msg.response_id) break;
-        activeResponseId = msg.response_id;
-        suppressCurrentAssistantTranscript = false;
+        if (!message.response_id) break;
+        activeResponseId = message.response_id;
+        dashboard.beginAssistantResponse(activeResponseId);
+        audioPlayer?.beginAssistantResponse?.(activeResponseId);
         runtime.setPhase("processing");
-        store.beginAssistantResponse(msg.response_id);
-        audioPlayer?.beginAssistantResponse?.(msg.response_id);
-        break;
-
-      case "views_update":
-        store.updateViews(msg.views);
-        runtime.updateDashboardState({
-          ...runtime.dashboardState,
-          views: msg.views || [],
-        });
-        break;
-
-      case "dashboard_state":
-        _syncDashboardState(msg.state || {});
-        break;
-
-      case "runtime_state":
-        runtime.setPhase(msg.phase || "ready", {
-          toolRunning: Boolean(msg.tool_running),
-          tools: msg.tools || [],
-        });
         break;
 
       case "audio":
-        if (!msg.response_id || msg.response_id !== activeResponseId) {
-          break;
-        }
-        runtime.setPhase("assistant_speaking");
-        if (audioPlayer) {
-          const didEnqueue = audioPlayer.enqueue(msg.data, {
-            response_id: msg.response_id,
-            item_id: msg.item_id,
-            content_index: msg.content_index,
-            sample_rate: msg.sample_rate,
-          });
-          if (didEnqueue !== false) {
-            store.isAssistantSpeaking = true;
-          }
+        if (!message.response_id || message.response_id !== activeResponseId) break;
+        if (audioPlayer?.enqueue?.(message.data, message) !== false) {
+          dashboard.isAssistantSpeaking = true;
+          runtime.setPhase("assistant_speaking");
         }
         break;
 
       case "transcript":
-        if (msg.role === "assistant") {
-          if (!msg.response_id || msg.response_id !== activeResponseId) {
-            break;
-          }
-          if (!suppressCurrentAssistantTranscript) {
-            store.appendAssistantTranscript(msg.response_id, msg.delta || "");
-          }
-        } else if (msg.role === "user") {
-          _handleUserTranscript(msg);
-        }
-        break;
-
-      case "suppress_assistant_buffer":
-        suppressCurrentAssistantTranscript = true;
-        store.suppressAssistantResponse(msg.response_id || activeResponseId);
+        handleTranscript(message);
         break;
 
       case "response_done":
-        if (!msg.response_id || msg.response_id !== activeResponseId) {
-          break;
-        }
-        store.completeAssistantResponse(msg.response_id);
-        suppressCurrentAssistantTranscript = false;
-        if (audioPlayer) {
-          audioPlayer.flush({
-            response_id: msg.response_id,
-          });
-        }
+        if (!message.response_id || message.response_id !== activeResponseId) break;
+        dashboard.completeAssistantResponse(message.response_id);
+        audioPlayer?.flush?.(message);
         activeResponseId = null;
-        if (!toolRunning.value && !store.isAssistantSpeaking) {
-          runtime.setPhase("ready");
-        }
-        break;
-
-      case "assistant_response_done":
-        if (msg.response_id && msg.response_id === activeResponseId) {
-          store.completeAssistantResponse(msg.response_id);
-          activeResponseId = null;
-        }
-        suppressCurrentAssistantTranscript = false;
-        if (!toolRunning.value && !store.isAssistantSpeaking) {
-          runtime.setPhase("ready");
-        }
+        if (!toolRunning.value && !dashboard.isAssistantSpeaking) runtime.setPhase("ready");
         break;
 
       case "speech_started":
         runtime.setPhase("listening");
-        if (msg.text || msg.utterance_id) {
-          store.beginUserTranscript({
-            utteranceId: msg.utterance_id,
-            text: msg.text || "",
-          });
-        }
+        dashboard.beginUserTranscript({
+          utteranceId: message.utterance_id,
+          text: message.text || "",
+        });
         break;
 
       case "speech_stopped":
@@ -207,216 +143,214 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "assistant_playback_stop":
-        _stopAssistantPlayback(msg.response_id, msg.reason || "assistant_playback_stop");
-        break;
-
-      case "assistant_playback_invalidated":
-        if (msg.response_id) {
-          _stopAssistantPlayback(msg.response_id, msg.reason || "assistant_playback_invalidated");
-        }
-        break;
-
       case "assistant_response_interrupted":
-        _stopAssistantPlayback(msg.response_id, msg.reason || "assistant_response_interrupted");
-        break;
-
-      case "tool_execution_started":
-        runtime.startToolBatch(msg);
-        console.log("%c[TOOLS] dashboard operation started", "color: #f59e0b; font-weight: bold");
-        break;
-
-      case "tool_execution_finished":
-        runtime.finishToolBatch(msg);
-        console.log("%c[TOOLS] dashboard operation finished", "color: #22c55e; font-weight: bold");
-        break;
-
-      case "tool_call":
-        console.log(`%c>>> TOOL CALL: ${msg.name}(${msg.arguments})`, "color: #f59e0b; font-weight: bold");
-        store.recordToolCall({
-          name: msg.name,
-          arguments: msg.arguments,
-          contract: msg.contract,
-        });
-        store.addToolActionToTranscript(
-          {
-            name: msg.name,
-            arguments: msg.arguments,
-            summary: msg.contract?.label,
-          },
-          msg.response_id || activeResponseId
+        stopAssistantPlayback(
+          message.response_id,
+          message.reason || "user_interruption",
         );
         break;
 
-      case "tool_result":
-        store.handleToolResult(msg);
-        runtime.recordToolResult(msg);
-        if (Array.isArray(msg.payload?.active_filters)) {
-          store.activeFilters = msg.payload.active_filters;
-        }
+      case "tool_execution_started":
+        audioPlayer?.setCaptureBlocked?.(true);
+        runtime.startToolBatch(message);
         break;
 
-      case "session_ready":
-        store.sessionReady = true;
-        runtime.setPhase("ready");
+      case "tool_execution_finished":
+        audioPlayer?.setCaptureBlocked?.(false);
+        runtime.finishToolBatch(message);
         break;
 
-      case "session_updated":
-        store.setSessionInfo({
-          mode: msg.mode,
-          inputMode: msg.input_mode,
-          turnDetection: msg.turn_detection,
-          provider: msg.provider,
-          model: msg.model,
-          inputAudioRate: msg.input_audio_rate,
-          outputAudioRate: msg.output_audio_rate,
+      case "tool_call":
+        dashboard.addToolItem({
+          name: message.name,
+          arguments: message.arguments,
+          summary: message.contract?.label,
+          callId: message.call_id,
+          responseId: message.response_id,
         });
-        window.__verbalvis_session_id = msg.session_id || "";
-        analysisId = normalizeAnalysisId(msg.analysis_id) || analysisId;
-        setCurrentAnalysisId(analysisId);
+        break;
+
+      case "tool_result":
+        dashboard.handleToolResult(message);
+        runtime.recordToolResult(message);
+        break;
+
+      case "views_update":
+        dashboard.updateViews(message.views || []);
+        runtime.updateDashboardState({
+          ...runtime.dashboardState,
+          views: message.views || [],
+        });
+        break;
+
+      case "dashboard_state":
+        syncDashboardState(message.state || {});
+        break;
+
+      case "runtime_state":
+        runtime.setPhase(message.phase || "ready", {
+          toolRunning: Boolean(message.tool_running),
+          tools: message.tools || [],
+        });
         break;
 
       case "error":
+        audioPlayer?.setCaptureBlocked?.(false);
         runtime.setPhase("error", { toolRunning: false, tools: [] });
         runtime.recordToolResult({
           success: false,
-          error: msg.message || "Realtime server error",
+          error: message.message || "Realtime server error",
         });
-        console.error("Server error:", msg.message);
+        console.error("Realtime server error", message.message);
         break;
     }
   }
 
-  function _syncDashboardState(state = {}) {
-    runtime.updateDashboardState(state);
-    if (Array.isArray(state.filters)) {
-      store.activeFilters = state.filters;
+  function handleTranscript(message) {
+    if (message.role === "assistant") {
+      if (!message.response_id || message.response_id !== activeResponseId) return;
+      dashboard.appendAssistantTranscript(message.response_id, message.delta || message.text || "");
+      return;
     }
+    if (message.role !== "user") return;
+
+    const utteranceId = message.utterance_id || message.item_id || null;
+    const hasDelta = typeof message.delta === "string";
+    const text = hasDelta ? message.delta : message.text;
+    const partial = (
+      message.status === "partial" ||
+      message.completed === false ||
+      message.is_final === false ||
+      hasDelta
+    );
+    if (partial) {
+      dashboard.updateUserTranscript({ utteranceId, text, status: "listening" });
+    } else {
+      dashboard.completeUserTranscript(text, { utteranceId });
+    }
+  }
+
+  function stopAssistantPlayback(responseId, reason) {
+    const stoppedId = responseId || activeResponseId;
+    dashboard.isAssistantSpeaking = false;
+    dashboard.interruptAssistantResponse(stoppedId);
+
+    const playbackCursor = audioPlayer?.stopAssistantAudio?.({
+      responseId: stoppedId,
+      blockNewAudio: true,
+      reason,
+    }) || null;
+
+    if (!responseId || responseId === activeResponseId) activeResponseId = null;
+    sendPlaybackStopped(stoppedId, reason, playbackCursor);
+  }
+
+  function syncDashboardState(state = {}) {
+    runtime.updateDashboardState(state);
+    if (Array.isArray(state.filters)) dashboard.activeFilters = state.filters;
     if (Array.isArray(state.highlighted)) {
       if (state.highlighted.length) {
-        store.highlightViews(state.highlighted, null, true);
+        dashboard.highlightViews(
+          state.highlighted,
+          state.highlight_element ?? null,
+          state.dim_others ?? true,
+        );
       } else {
-        store.clearHighlight();
+        dashboard.clearHighlight();
       }
     }
   }
 
-  function sendAudio(base64pcm) {
-    if (toolRunning.value) return;
-    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      socket.value.send(JSON.stringify({ type: "audio", data: base64pcm }));
-    } else {
-      console.warn("sendAudio: socket not open, readyState =", socket.value?.readyState);
-    }
+  function syncSessionInfo(message = {}) {
+    dashboard.setSessionInfo({
+      mode: message.mode,
+      inputMode: message.input_mode,
+      turnDetection: message.turn_detection,
+      provider: message.provider,
+      model: message.model,
+      inputAudioRate: message.input_audio_rate,
+      outputAudioRate: message.output_audio_rate,
+    });
+  }
+
+  function sendAudio(base64Pcm) {
+    if (toolRunning.value) return false;
+    if (!socket.value || socket.value.readyState !== WebSocket.OPEN) return false;
+    socket.value.send(JSON.stringify({ type: "audio", data: base64Pcm }));
+    return true;
   }
 
   function sendPlaybackStopped(responseId, reason, playbackCursor) {
-    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
-      socket.value.send(JSON.stringify({
-        type: "playback_stopped",
-        response_id: responseId,
-        reason,
-        playback_cursor: playbackCursor || null,
-      }));
-    }
-  }
-
-  function _stopAssistantPlayback(responseId, reason) {
-    store.isAssistantSpeaking = false;
-    suppressCurrentAssistantTranscript = false;
-    const stoppedResponseId = responseId || activeResponseId;
-
-    store.interruptAssistantResponse(stoppedResponseId);
-
-    if (!responseId || activeResponseId === responseId) {
-      activeResponseId = null;
-    }
-
-    let playbackCursor = null;
-    if (audioPlayer?.stopAssistantAudio) {
-      playbackCursor = audioPlayer.stopAssistantAudio({
-        responseId: stoppedResponseId,
-        reason,
-        blockNewAudio: true,
-      });
-    } else if (audioPlayer?.stop) {
-      playbackCursor = audioPlayer.stop();
-    }
-
-    sendPlaybackStopped(
-      stoppedResponseId,
-      reason || "assistant_playback_stop",
-      playbackCursor
-    );
-  }
-
-  function _handleUserTranscript(msg) {
-    const utteranceId = msg.utterance_id || msg.item_id || null;
-    const hasDelta = typeof msg.delta === "string";
-    const text = hasDelta ? msg.delta : msg.text;
-    const isPartial = msg.status === "partial" || msg.completed === false || msg.is_final === false || hasDelta;
-
-    if (isPartial) {
-      store.updateUserTranscript({
-        utteranceId,
-        text,
-        status: "listening",
-      });
-      return;
-    }
-
-    store.completeUserTranscript(text, { utteranceId });
+    if (!socket.value || socket.value.readyState !== WebSocket.OPEN) return;
+    socket.value.send(JSON.stringify({
+      type: "playback_stopped",
+      response_id: responseId,
+      reason,
+      playback_cursor: playbackCursor || null,
+    }));
   }
 
   function disconnect() {
-    manualClose = true;
-    if (socket.value) {
-      socket.value.close();
-      socket.value = null;
-    }
+    audioPlayer?.setCaptureBlocked?.(false);
+    audioPlayer?.stopAssistantAudio?.({ blockNewAudio: true, reason: "disconnect" });
     activeResponseId = null;
-    store.sessionReady = false;
+    dashboard.sessionReady = false;
+    socket.value?.close();
+    socket.value = null;
     runtime.setPhase("disconnected", { toolRunning: false, tools: [] });
   }
 
-  function reconnect() {
-    disconnect();
-    connect(lastUrl || undefined);
+  function buildWebSocketUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const explicit = params.get("ws") || import.meta.env.VITE_REALTIME_WS_URL;
+    if (explicit) {
+      const url = new URL(explicit, window.location.href);
+      if (url.protocol === "http:") url.protocol = "ws:";
+      if (url.protocol === "https:") url.protocol = "wss:";
+      url.searchParams.set("analysis_id", analysisId);
+      return url.toString();
+    }
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const pathValue = params.get("wsPath") || import.meta.env.VITE_REALTIME_WS_PATH || "/ws";
+    const path = pathValue.startsWith("/") ? pathValue : `/${pathValue}`;
+    const url = new URL(`${protocol}//${window.location.host}${path}`);
+    url.searchParams.set("analysis_id", analysisId);
+    url.searchParams.set("model", REALTIME_MODEL);
+    return url.toString();
   }
 
   function getOrCreateAnalysisId() {
-    const fromWindow = normalizeAnalysisId(window.__verbalvis_analysis_id);
-    if (fromWindow) return fromWindow;
-
     const params = new URLSearchParams(window.location.search);
     const forceNew = ["1", "true", "yes", "on"].includes(
-      String(params.get("new_analysis") || params.get("newAnalysis") || "").toLowerCase()
+      String(params.get("new_analysis") || params.get("newAnalysis") || "").toLowerCase(),
     );
-    const fromUrl = normalizeAnalysisId(params.get("analysis_id") || params.get("analysisId"));
-    const fromStorage = forceNew ? "" : normalizeAnalysisId(readStoredAnalysisId());
-    const id = fromUrl || fromStorage || `analysis-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
-    return setCurrentAnalysisId(id);
-  }
-
-  function normalizeAnalysisId(value) {
-    return String(value || "").trim().replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 80);
-  }
-
-  function readStoredAnalysisId() {
-    try {
-      return window.localStorage?.getItem(ANALYSIS_ID_STORAGE_KEY) || "";
-    } catch (_) {
-      return "";
+    const explicit = normalizeAnalysisId(params.get("analysis_id") || params.get("analysisId"));
+    let stored = "";
+    if (!forceNew) {
+      try {
+        stored = normalizeAnalysisId(window.localStorage?.getItem(ANALYSIS_ID_STORAGE_KEY));
+      } catch (_) {
+        stored = "";
+      }
     }
+    const id = explicit || stored || `analysis-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
+    return persistAnalysisId(id);
   }
 
-  function setCurrentAnalysisId(id) {
+  function persistAnalysisId(value) {
+    const id = normalizeAnalysisId(value);
     window.__verbalvis_analysis_id = id;
     try {
       window.localStorage?.setItem(ANALYSIS_ID_STORAGE_KEY, id);
     } catch (_) {
-      // Storage can be disabled in private modes; the in-memory id still works.
+      // Private browsing may disable storage; the in-memory id is sufficient.
     }
     return id;
+  }
+
+  function normalizeAnalysisId(value) {
+    return String(value || "").trim().replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 80);
   }
 
   onBeforeUnmount(disconnect);
@@ -429,6 +363,5 @@ export function useWebSocket(audioPlayer) {
     sendAudio,
     sendPlaybackStopped,
     disconnect,
-    reconnect,
   };
 }
