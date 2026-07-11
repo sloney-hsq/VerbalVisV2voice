@@ -1,47 +1,114 @@
 # VerbalVis FD-Voice
 
-# VerbalVis-FD-Voice
-
-**资料，[help.aliyun.com/zh/model-studio/client-events](https://help.aliyun.com/zh/model-studio/client-events)要求详细查看，[help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77](https://help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77)。**
-
-[help.aliyun.com/zh/model-studio/omni-realtime-python-sdk](https://help.aliyun.com/zh/model-studio/omni-realtime-python-sdk)
-
-[help.aliyun.com/zh/model-studio/omni-realtime-interaction-process](https://help.aliyun.com/zh/model-studio/omni-realtime-interaction-process)
-
-# 客户端事件
-
-**更新时间：2026-06-16 23:00:39**
-
-**复制 MD 格式**[产品详情](https://www.aliyun.com/product/bailian)
-
-[我的收藏](https://help.aliyun.com/my_favorites.html)
-
-Qwen-Omni-Realtime API的客户端事件参考。
-
-> 另请参见： [实时（Qwen-Omni-Realtime）](https://help.aliyun.com/zh/model-studio/realtime) 。
-
-## **session.update**
-
-建立 WebSocket 连接后，发送此事件更新会话的默认配置。服务端收到 `session.update` 事件后校验参数，若参数不合法则返回错误，若参数合法则应用更改并返回完整配置。
-
-[help.aliyun.com/zh/model-studio/server-events](https://help.aliyun.com/zh/model-studio/server-events)
-
-**Qwen-Omni-Realtime
-更新时间：2026-06-12 15:05:06**
-
-VerbalVis FD-Voice is a voice-only conversational visual analytics prototype for
-the Olist Brazilian E-Commerce dataset. It combines Qwen Omni-Realtime, a shared
-Vega-Lite dashboard, structured analytical tools, compact conversation provenance,
+VerbalVis is a full-duplex voice-driven conversational visual analytics prototype
+for the Olist Brazilian E-Commerce dataset. The FD-Voice condition combines one
+Qwen-Omni-Realtime conversation, a shared Vega-Lite dashboard, structured tools,
 and immediate speech interruption.
 
-This repository implements the **FD-Voice** study condition. Text-CVA is maintained
-as a separate condition. Results should be described as differences between the
-complete FD-Voice and Text-CVA configurations, not as an isolated causal effect of
-full-duplex speech.
+## Session lifecycle
 
-## Final Architecture
+One browser page lifecycle owns one analysis conversation:
 
-The production path is deliberately small:
+```text
+open or refresh page
+→ create one browser WebSocket
+→ create one backend session
+→ connect and configure one Qwen Realtime session
+→ initialize the dashboard and conversation context
+```
+
+The microphone is only an input switch inside that existing session:
+
+```text
+Start mic
+→ begin 16 kHz PCM capture
+→ send audio to the existing Qwen session
+
+Stop mic
+→ stop PCM transmission
+→ keep the WebSocket, Qwen session, conversation history, and dashboard state
+
+Start mic again
+→ resume audio transmission to the same Qwen session
+```
+
+A new Qwen session is created only when the page is refreshed, the WebSocket is
+closed, or the backend/model connection fails. Clicking Start mic repeatedly does
+not create additional model sessions.
+
+The backend is intentionally single-participant because dashboard state and undo
+history are held in memory. A second browser is rejected while one page session is
+active.
+
+## Qwen Realtime configuration
+
+Current Qwen-Omni-Realtime WebSocket access requires both an API Key and a Bailian
+business-space ID for the selected region.
+
+Create the local configuration file:
+
+```bat
+cd /d F:\VerbalVis2\backend
+copy .env.example .env
+```
+
+Edit `backend/.env`:
+
+```env
+DASHSCOPE_API_KEY=sk-your-api-key
+QWEN_WORKSPACE_ID=your-bailian-workspace-id
+QWEN_REGION=beijing
+QWEN_REALTIME_MODEL=qwen3.5-omni-plus-realtime
+QWEN_VOICE=Ethan
+```
+
+For Singapore:
+
+```env
+QWEN_REGION=singapore
+```
+
+A complete endpoint may be supplied instead of `QWEN_WORKSPACE_ID`:
+
+```env
+QWEN_REALTIME_URL=wss://your-workspace-id.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime
+```
+
+`QWEN_REALTIME_URL` takes priority. The code also accepts
+`DASHSCOPE_WORKSPACE_ID` or `WORKSPACE_ID` as aliases, but
+`QWEN_WORKSPACE_ID` is the recommended name.
+
+After changing `.env`, restart Uvicorn. Environment variables are read when the
+backend process starts.
+
+### Configuration-error behavior
+
+When credentials or the workspace ID are missing:
+
+- the page still receives the initial dashboard;
+- the backend sends one `configuration_error` event;
+- the UI shows `Qwen configuration required`;
+- Start mic remains disabled;
+- the WebSocket stays open so the page does not enter a reconnect loop;
+- the backend no longer raises the repeated `QWEN_WORKSPACE_ID ... required`
+  session traceback.
+
+Use the health endpoint to inspect configuration without opening a conversation:
+
+```text
+http://127.0.0.1:8000/health
+```
+
+Relevant fields:
+
+```json
+{
+  "qwen_configured": true,
+  "qwen_configuration_error": null
+}
+```
+
+## Runtime architecture
 
 ```text
 Browser microphone
@@ -56,174 +123,63 @@ Qwen function call
 → backend/tools.py
 → DuckDB
 → views_update / dashboard_state
-→ Pinia dashboard store
-→ Vega-Lite ChartSlot
+→ Pinia
+→ Vega-Lite dashboard
 ```
 
-There is one realtime implementation and one tool implementation:
+There is one Realtime implementation and one tool implementation:
 
 ```text
 backend/realtime.py
 backend/tools.py
 ```
 
-The backend is intentionally **single-session** because dashboard state is held in
-memory for one study participant. A second browser is rejected instead of sharing
-filters, views, or undo history with the active participant.
+## Voice interruption
 
-## Realtime Boundary
-
-The system uses the simple R-A interruption policy:
+The system uses the simple R-A policy:
 
 ```text
 Qwen Semantic VAD speech_started
-→ stop all audio from the current assistant response
+→ stop the current Assistant audio queue
 → reject late audio from that response
-→ send response.cancel when generation is still active
+→ send response.cancel while generation is active
 → process the newest completed user utterance
 ```
 
-The browser enforces a single-response playback invariant: audio from two assistant
-responses can never remain scheduled together. A new response stops the old queue
-before becoming current.
+The browser enforces that audio from at most one Assistant `response_id` may be
+scheduled at a time.
 
-A local dashboard tool batch is a non-preemptive input-closed window:
+A tool batch that has already started is non-preemptive:
 
 ```text
 tool call selected
-→ close the tool-selection response in the browser
-→ block microphone forwarding in the browser
-→ reject audio again in the backend
-→ clear Qwen's partial input buffer
-→ execute all tool calls sequentially
-→ return every function_call_output
-→ send one response.create
-→ reopen microphone forwarding
+→ block microphone forwarding
+→ clear Qwen partial input audio
+→ execute tool calls sequentially
+→ return all function_call_output items
+→ inject the latest dashboard state
+→ request one final spoken response
 ```
 
-Running tools are never cancelled or rolled back. The prototype does not implement
-stale-result epochs, transactional cancellation, or multi-agent planning.
+Running tools are not cancelled or rolled back.
 
-## Qwen Realtime Compliance
-
-The implementation follows the current Qwen-Omni-Realtime WebSocket flow:
-
-- `session.update` configures text+audio output, PCM formats, Semantic VAD,
-  transcription, instructions, and tools;
-- browser PCM is sent with `input_audio_buffer.append`;
-- audio is received from `response.audio.delta`;
-- assistant text is received from `response.audio_transcript.delta`;
-- user text is received from
-  `conversation.item.input_audio_transcription.delta/completed`;
-- interruption sends `response.cancel`;
-- tool results are returned with `conversation.item.create` using
-  `function_call_output`;
-- after all tool outputs, one `response.create` requests the final spoken answer;
-- `response.done` closes each model response.
-
-Tools and Qwen WebSearch are not enabled together.
-
-## Browser Event Contract
-
-### Backend → browser
+## Model-facing tools
 
 ```text
-init
-session_updated
-session_ready
-assistant_response_started
-audio
-transcript
-response_done
-speech_started
-speech_stopped
-assistant_playback_stop
-tool_execution_started
-tool_call
-tool_result
-views_update
-dashboard_state
-tool_execution_finished
-runtime_state
-error
+update_analysis_scope
+aggregate_data
+compare_selected_groups
+compare_category_metrics
+create_visual
+update_visual
+delete_visual
+highlight_visual
+inspect_visual
+summarize_dashboard
+undo_last_action
 ```
 
-### Browser → backend
-
-```text
-audio
-playback_stopped
-disconnect
-```
-
-`response_id` is the authority for assistant audio and transcript routing.
-`call_id` is the authority for matching a TOOL timeline row with its result.
-The backend is the authority for filters, views, highlights, and tool execution.
-
-## Compact Transcript
-
-The transcript is a flat chronological timeline:
-
-```text
-11:28:53  YOU   Compare week 48 with the actual category peaks
-11:28:54  TOOL  Compare category metrics
-11:29:01  AI    Week 48 is not a synchronized peak across all categories…
-```
-
-One assistant `response_id` owns one row; streaming deltas append to that row. YOU
-and AI rows use at most two visible lines. An interrupted AI row keeps a small `×`.
-TOOL rows use one line by default. Clicking a TOOL row expands only:
-
-- the exact tool name;
-- the JSON parameters.
-
-Internal IDs, result payloads, durations, and contracts are not shown.
-
-## Eleven Model-Facing Tools
-
-### Scope
-
-1. `update_analysis_scope`
-   - replace, add, remove, or clear global filters.
-
-### Data analysis
-
-2. `aggregate_data`
-   - return grouped metrics without creating a chart.
-3. `compare_selected_groups`
-   - compare explicitly selected states, categories, scores, weeks, or months.
-4. `compare_category_metrics`
-   - select one common Top-N category set, create coordinated views, and return
-     compact evidence.
-
-### Visualization
-
-5. `create_visual`
-   - create one line, bar, or scatter view.
-6. `update_visual`
-   - change an existing view while preserving its `view_id`.
-7. `delete_visual`
-   - remove one view.
-
-### Attention and evidence
-
-8. `highlight_visual`
-   - focus views and highlight a week, category, or their intersection.
-9. `inspect_visual`
-   - read one view, optionally restricted to a series, X values, and Top-K rows.
-10. `summarize_dashboard`
-    - return current filters, views, encodings, statistics, and highlights.
-
-### Recovery
-
-11. `undo_last_action`
-    - restore the state before the most recent completed dashboard-changing action.
-
-Schemas and implementations have one source of truth: `backend/tools.py`.
-
-## Supported Visual and Metric Vocabulary
-
-Charts:
+Supported chart types:
 
 ```text
 line
@@ -242,147 +198,22 @@ late_ratio
 review_score
 ```
 
-Dimensions and series include month, week, date, state, product category, and
-review score.
+Fixed semantics:
 
-## Fixed Metric Semantics
-
-Low-score orders are fixed as:
-
-```text
-review_score <= 2
-```
-
-Product-category revenue is:
-
-```sql
-SUM(price)
-```
-
-Freight is excluded. Category delivery and service metrics deduplicate to one row
-per `order_id + product_category`, so multiple same-category items in one order do
-not receive extra weight.
-
-## Study Task Coverage
-
-### Task A: SP weekly operational risk
-
-Reliable path:
-
-1. `update_analysis_scope` with SP and 2017-10-01 through 2018-05-31;
-2. `compare_category_metrics` with:
-   - `mode="weekly_trends"`;
-   - `top_n=5`;
-   - `rank_by="product_revenue"`;
-   - `metrics=["order_count", "low_score_ratio", "delivery_days", "late_ratio"]`;
-   - `focus_week="2017-W48"`.
-
-The four multi-series line charts use exactly the same Top-5 categories. Evidence
-contains each category's focus-week value, peak week/value, and top weeks.
-
-### Task B: RJ delivery-resource allocation
-
-Reliable path:
-
-1. `update_analysis_scope` with RJ and the same date range;
-2. `compare_category_metrics` with:
-   - `mode="category_summary"`;
-   - `top_n=15`;
-   - `rank_by="product_revenue"`;
-   - `metrics=["low_score_ratio", "delivery_days", "product_revenue", "order_count"]`.
-
-The result contains four bar charts and one evidence row per category for evaluating
-`office_furniture` and alternatives.
-
-These paths are recommendations, not hard-coded conversations. The model can use
-all eleven tools for free exploration, revision, comparison, evidence inspection,
-and recovery.
-
-## Main Files
-
-```text
-frontend/src/composables/useAudio.js
-  16 kHz PCM capture, single-response 24 kHz playback, interruption cursor
-
-frontend/src/composables/useWebSocket.js
-  browser protocol, response filtering, transcript and dashboard routing
-
-frontend/src/components/Dashboard.vue
-  compact top bar, chart grid, flat transcript timeline
-
-frontend/src/stores/dashboard.js
-  views, highlights, and timeline state
-
-frontend/src/stores/runtime.js
-  connection, listening, processing, speaking, and tool-running phases
-
-frontend/src/specFactory.js
-  line/bar/scatter Vega-Lite specifications
-
-frontend/src/highlightSpec.js
-  in-chart value and intersection highlighting
-
-backend/main.py
-  FastAPI entry point and single-session guard
-
-backend/realtime.py
-  Qwen session, Semantic VAD, R-A interruption, tool boundary, logs
-
-backend/tools.py
-  dashboard state, metric queries, eleven tools, undo
-
-backend/demo_validation.py
-  offline validation for all tools and both study tasks
-```
-
-## Qwen Connection
-
-A current Bailian workspace endpoint is required:
-
-```env
-DASHSCOPE_API_KEY=your_api_key
-QWEN_WORKSPACE_ID=your_workspace_id
-QWEN_REGION=beijing
-QWEN_VOICE=Ethan
-```
-
-For a custom gateway or complete WebSocket endpoint:
-
-```env
-QWEN_REALTIME_URL=wss://your-host/api-ws/v1/realtime
-```
-
-`QWEN_REALTIME_URL` has priority over `QWEN_WORKSPACE_ID`. The backend does not fall
-back to the retired generic DashScope realtime host.
-
-## Validation
-
-Backend validation does not call Qwen:
-
-```bat
-cd /d F:\VerbalVis2\backend
-python -m compileall .
-python demo_validation.py
-```
-
-Frontend validation:
-
-```bat
-cd /d F:\VerbalVis2\frontend
-npm install
-npm run validate:highlight
-npm run build
-```
-
-GitHub Actions runs backend compilation and tool/task validation, highlight
-validation, and the frontend production build for pushes to `fd-voice`.
+- low score: `review_score <= 2`;
+- product revenue: `SUM(price)`, excluding freight;
+- category service metrics: one row per `order_id + product_category`.
 
 ## Start
 
+Backend:
+
 ```bat
 cd /d F:\VerbalVis2\backend
-uvicorn main:app --reload --port 8000
+uvicorn main:app --host 127.0.0.1 --port 8000
 ```
+
+Frontend:
 
 ```bat
 cd /d F:\VerbalVis2\frontend
@@ -390,34 +221,30 @@ npm install
 npm run dev -- --port 5173
 ```
 
-Open `http://localhost:5173` and press **Start mic**. Space toggles the microphone
-when focus is not inside an input element.
+Open `http://localhost:5173`. Wait until the top status becomes `Ready`, then
+press **Start mic**. Start/Stop mic may be toggled repeatedly within the same
+conversation session.
 
-# VerbalVis-FD-Voice
+## Validation
 
-**资料，[help.aliyun.com/zh/model-studio/client-events](https://help.aliyun.com/zh/model-studio/client-events)要求详细查看，[help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77](https://help.aliyun.com/zh/model-studio/realtime?spm=a2ty_o06.30285417.0.0.71d2c921CJ5d6U#d6f3ba031di77)。**
+Backend:
 
-[help.aliyun.com/zh/model-studio/omni-realtime-python-sdk](https://help.aliyun.com/zh/model-studio/omni-realtime-python-sdk)
+```bat
+cd /d F:\VerbalVis2\backend
+python -m compileall .
+python demo_validation.py
+```
 
-[help.aliyun.com/zh/model-studio/omni-realtime-interaction-process](https://help.aliyun.com/zh/model-studio/omni-realtime-interaction-process)
+Frontend:
 
-# 客户端事件
+```bat
+cd /d F:\VerbalVis2\frontend
+npm install
+npm run validate:highlight
+npm run validate:layout
+npm run validate:session
+npm run build
+```
 
-**更新时间：2026-06-16 23:00:39**
-
-**复制 MD 格式**[产品详情](https://www.aliyun.com/product/bailian)
-
-[我的收藏](https://help.aliyun.com/my_favorites.html)
-
-Qwen-Omni-Realtime API的客户端事件参考。
-
-> 另请参见： [实时（Qwen-Omni-Realtime）](https://help.aliyun.com/zh/model-studio/realtime) 。
-
-## **session.update**
-
-建立 WebSocket 连接后，发送此事件更新会话的默认配置。服务端收到 `session.update` 事件后校验参数，若参数不合法则返回错误，若参数合法则应用更改并返回完整配置。
-
-[help.aliyun.com/zh/model-studio/server-events](https://help.aliyun.com/zh/model-studio/server-events)
-
-**Qwen-Omni-Realtime
-更新时间：2026-06-12 15:05:06**
+The session validation guards the central contract: page load creates the Qwen
+session once; microphone toggles only control PCM transmission.
