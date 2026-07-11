@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "validate:highlight": "node scripts/validate-highlight.mjs"
   },
   "dependencies": {
     "pinia": "^2.1.0",
