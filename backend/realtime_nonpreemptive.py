@@ -19,11 +19,11 @@ from typing import Any
 from fastapi import WebSocketDisconnect
 
 from realtime import (
+    DASHBOARD_TOOLS,
     QWEN_TURN_DETECTION,
     QwenRealtimeSession as BaseQwenRealtimeSession,
 )
 from tools import (
-    DASHBOARD_TOOLS,
     execute_tool,
     get_views_for_frontend,
     log_tool_call,
