@@ -5,6 +5,7 @@ export const useRuntimeStore = defineStore("runtime", () => {
   const phase = ref("connecting");
   const toolRunning = ref(false);
   const activeTools = ref([]);
+  const configurationError = ref("");
   const dashboardState = ref({
     filters: [],
     highlighted: [],
@@ -31,6 +32,8 @@ export const useRuntimeStore = defineStore("runtime", () => {
         return "Reading dashboard";
       case "updating_dashboard":
         return "Updating dashboard";
+      case "configuration_error":
+        return "Qwen configuration required";
       case "error":
         return "Runtime error";
       case "disconnected":
@@ -41,6 +44,7 @@ export const useRuntimeStore = defineStore("runtime", () => {
   });
 
   const phaseDetail = computed(() => {
+    if (configurationError.value) return configurationError.value;
     if (toolRunning.value && activeTools.value.length) {
       return activeTools.value.map((tool) => tool.label || tool.name).join(" · ");
     }
@@ -66,11 +70,20 @@ export const useRuntimeStore = defineStore("runtime", () => {
     phase.value = nextPhase || "ready";
     if (Array.isArray(options.tools)) {
       activeTools.value = options.tools;
-    } else if (["ready", "listening", "assistant_speaking", "disconnected", "error"].includes(phase.value)) {
+    } else if (["ready", "listening", "assistant_speaking", "disconnected", "error", "configuration_error"].includes(phase.value)) {
       activeTools.value = [];
     }
     if (typeof options.toolRunning === "boolean") {
       toolRunning.value = options.toolRunning;
+    }
+  }
+
+  function setConfigurationError(message = "") {
+    configurationError.value = String(message || "").trim();
+    if (configurationError.value) {
+      phase.value = "configuration_error";
+      toolRunning.value = false;
+      activeTools.value = [];
     }
   }
 
@@ -120,6 +133,7 @@ export const useRuntimeStore = defineStore("runtime", () => {
     phase.value = "connecting";
     toolRunning.value = false;
     activeTools.value = [];
+    configurationError.value = "";
     dashboardState.value = {
       filters: [],
       highlighted: [],
@@ -137,6 +151,7 @@ export const useRuntimeStore = defineStore("runtime", () => {
     phase,
     toolRunning,
     activeTools,
+    configurationError,
     dashboardState,
     filteredRows,
     lastToolSummary,
@@ -148,6 +163,7 @@ export const useRuntimeStore = defineStore("runtime", () => {
     activeFilterCount,
     viewCount,
     setPhase,
+    setConfigurationError,
     startToolBatch,
     finishToolBatch,
     recordToolResult,
