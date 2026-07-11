@@ -383,12 +383,15 @@ function filterLabel(filter) {
 
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-flow: row;
+  grid-auto-rows: minmax(270px, auto);
   flex: 1 1 auto;
   min-height: 0;
   gap: 8px;
   overflow: auto;
   align-content: start;
+  align-items: stretch;
 }
 
 .timeline {
@@ -520,11 +523,19 @@ function filterLabel(filter) {
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1799px) {
+  .chart-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1279px) {
+  .chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 899px) {
   .topbar { grid-template-columns: 1fr auto; }
   .session-state { grid-column: 1 / -1; grid-row: 2; }
   .brand p { display: none; }
-  .chart-grid { grid-template-columns: 1fr; }
+  .chart-grid { grid-template-columns: minmax(0, 1fr); }
   .timeline { flex-basis: 170px; }
 }
 </style>
