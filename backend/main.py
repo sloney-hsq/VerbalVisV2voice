@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from db import initialize_db
+import tool_runtime_patch  # noqa: F401 - installs managed-view refresh ownership
 from realtime_nonpreemptive import QWEN_TURN_DETECTION, QwenRealtimeSession
 
 QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime"
