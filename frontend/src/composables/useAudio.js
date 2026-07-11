@@ -1,16 +1,17 @@
-import { ref, onBeforeUnmount } from "vue";
+import { onBeforeUnmount, ref } from "vue";
 
-const DEFAULT_INPUT_SAMPLE_RATE = 16000; // Qwen realtime input rate
+const DEFAULT_INPUT_SAMPLE_RATE = 16000;
 const DEFAULT_OUTPUT_SAMPLE_RATE = 24000;
 const CHUNK_MS = 40;
-const PREFIX_CHUNKS = 3;
-const TRAILING_SILENCE_CHUNKS = 9;
-const SPEECH_RMS_THRESHOLD = 0.01;
-const SILENCE_RMS_THRESHOLD = 0.006;
-const SPEECH_CONFIRM_CHUNKS = 3;
 
 /**
- * Audio composable – handles microphone capture and PCM16 playback.
+ * Microphone PCM capture and assistant PCM playback.
+ *
+ * Hard playback invariant:
+ *   audio from at most one assistant response may be scheduled at any time.
+ *
+ * Turn detection belongs to Qwen Semantic VAD. This composable intentionally
+ * does not implement a second browser-side VAD or backchannel classifier.
  */
 export function useAudio(options = {}) {
   const inputSampleRate = Number(options.inputSampleRate) || DEFAULT_INPUT_SAMPLE_RATE;
@@ -19,92 +20,84 @@ export function useAudio(options = {}) {
 
   const isRecording = ref(false);
   const isMicReady = ref(false);
+  const captureBlocked = ref(false);
 
-  let audioCtx = null;
+  let captureContext = null;
   let mediaStream = null;
   let sourceNode = null;
   let workletNode = null;
-  let onAudioChunk = null; // callback: (base64pcm) => void
-  let onSpeechStart = null;
-  let onSpeechEnd = null;
-  let shouldStartSpeech = null;
-  let gateSilence = true;
   let setupPromise = null;
-  let recordingRequestId = 0;
-  let speechActive = false;
-  let silenceChunks = 0;
-  let prefixBuffer = [];
-  let speechCandidateChunks = 0;
-  let speechCandidateMaxRms = 0;
-  let speechCandidateMaxPeak = 0;
+  let onAudioChunk = null;
 
-  // ---- Playback state ----
-  let playbackCtx = null;
-  let playbackGainNode = null;
+  let playbackContext = null;
+  let playbackGain = null;
+  let nextPlayTime = 0;
+  let currentResponseId = null;
+  let currentPlayback = null;
+  let assistantAudioBlocked = false;
+  let onPlaybackIdle = null;
   const activeSources = new Set();
   const invalidatedResponseIds = new Set();
-  let assistantAudioBlocked = false;
-  let currentPlaybackResponseId = null;
-  let nextPlayTime = 0;
-  let currentPlayback = null;
-  let onPlaybackIdle = null;
 
   // ------------------------------------------------------------------
-  // Recording (mic → PCM16 base64 chunks)
+  // Microphone capture
   // ------------------------------------------------------------------
 
-  async function _ensureMicCapture() {
+  async function startRecording(callback) {
+    onAudioChunk = typeof callback === "function" ? callback : callback?.onChunk || null;
+    await ensureCapture();
+    if (captureContext?.state === "suspended") await captureContext.resume();
+    isRecording.value = true;
+  }
+
+  function stopRecording() {
+    isRecording.value = false;
+  }
+
+  function setCaptureBlocked(blocked) {
+    captureBlocked.value = Boolean(blocked);
+  }
+
+  async function ensureCapture() {
+    if (captureContext && mediaStream && workletNode) return;
     if (setupPromise) return setupPromise;
-    if (audioCtx && mediaStream && workletNode) return;
 
     setupPromise = (async () => {
-      audioCtx = new AudioContext({ sampleRate: inputSampleRate });
-
-      // Register worklet for PCM capture
-      const workletCode = `
+      captureContext = new AudioContext({ sampleRate: inputSampleRate });
+      const code = `
         const CHUNK_SIZE = ${chunkSize};
-        class PCMProcessor extends AudioWorkletProcessor {
+        class VerbalVisPCMProcessor extends AudioWorkletProcessor {
           constructor() {
             super();
             this.chunk = new Int16Array(CHUNK_SIZE);
             this.offset = 0;
-            this.squareSum = 0;
-            this.peak = 0;
           }
-
           process(inputs) {
-            const input = inputs[0];
-            if (input && input[0]) {
-              const float32 = input[0];
-              for (let i = 0; i < float32.length; i++) {
-                const s = Math.max(-1, Math.min(1, float32[i]));
-                this.chunk[this.offset++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                this.squareSum += s * s;
-                this.peak = Math.max(this.peak, Math.abs(s));
-
-                if (this.offset >= CHUNK_SIZE) {
-                  const out = this.chunk;
-                  this.port.postMessage({
-                    buffer: out.buffer,
-                    rms: Math.sqrt(this.squareSum / CHUNK_SIZE),
-                    peak: this.peak,
-                  }, [out.buffer]);
-                  this.chunk = new Int16Array(CHUNK_SIZE);
-                  this.offset = 0;
-                  this.squareSum = 0;
-                  this.peak = 0;
-                }
+            const channel = inputs[0] && inputs[0][0];
+            if (!channel) return true;
+            for (let i = 0; i < channel.length; i += 1) {
+              const sample = Math.max(-1, Math.min(1, channel[i]));
+              this.chunk[this.offset++] = sample < 0
+                ? sample * 0x8000
+                : sample * 0x7fff;
+              if (this.offset >= CHUNK_SIZE) {
+                const output = this.chunk;
+                this.port.postMessage(output.buffer, [output.buffer]);
+                this.chunk = new Int16Array(CHUNK_SIZE);
+                this.offset = 0;
               }
             }
             return true;
           }
         }
-        registerProcessor('pcm-processor', PCMProcessor);
+        registerProcessor("verbalvis-pcm", VerbalVisPCMProcessor);
       `;
-      const blob = new Blob([workletCode], { type: "application/javascript" });
-      const url = URL.createObjectURL(blob);
-      await audioCtx.audioWorklet.addModule(url);
-      URL.revokeObjectURL(url);
+      const blobUrl = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
+      try {
+        await captureContext.audioWorklet.addModule(blobUrl);
+      } finally {
+        URL.revokeObjectURL(blobUrl);
+      }
 
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -115,18 +108,18 @@ export function useAudio(options = {}) {
           autoGainControl: true,
         },
       });
-
-      sourceNode = audioCtx.createMediaStreamSource(mediaStream);
-      workletNode = new AudioWorkletNode(audioCtx, "pcm-processor");
-
+      sourceNode = captureContext.createMediaStreamSource(mediaStream);
+      workletNode = new AudioWorkletNode(captureContext, "verbalvis-pcm");
       workletNode.port.onmessage = (event) => {
-        if (isRecording.value && onAudioChunk) {
-          _handleRecordedChunk(event.data);
-        }
+        if (!isRecording.value || captureBlocked.value || !onAudioChunk) return;
+        onAudioChunk(arrayBufferToBase64(event.data));
       };
-
       sourceNode.connect(workletNode);
-      workletNode.connect(audioCtx.destination); // needed to keep processing
+      // A zero-gain sink keeps the AudioWorklet alive without monitoring the mic.
+      const silentGain = captureContext.createGain();
+      silentGain.gain.value = 0;
+      workletNode.connect(silentGain);
+      silentGain.connect(captureContext.destination);
       isMicReady.value = true;
     })().finally(() => {
       setupPromise = null;
@@ -135,282 +128,194 @@ export function useAudio(options = {}) {
     return setupPromise;
   }
 
-  async function startRecording(chunkCallback) {
-    const requestId = ++recordingRequestId;
-    _configureRecordingCallbacks(chunkCallback);
-    await _ensureMicCapture();
-    if (requestId !== recordingRequestId) return;
-
-    if (audioCtx?.state === "suspended") {
-      await audioCtx.resume();
-    }
-    _resetSpeechGate();
-    isRecording.value = true;
-  }
-
-  function stopRecording() {
-    recordingRequestId += 1;
-    isRecording.value = false;
-  }
-
   function disposeRecording() {
     stopRecording();
-    if (workletNode) {
-      workletNode.disconnect();
-      workletNode = null;
-    }
-    if (sourceNode) {
-      sourceNode.disconnect();
-      sourceNode = null;
-    }
-    if (mediaStream) {
-      mediaStream.getTracks().forEach((t) => t.stop());
-      mediaStream = null;
-    }
-    if (audioCtx) {
-      audioCtx.close();
-      audioCtx = null;
-    }
+    workletNode?.disconnect();
+    sourceNode?.disconnect();
+    mediaStream?.getTracks().forEach((track) => track.stop());
+    captureContext?.close().catch(() => {});
+    workletNode = null;
+    sourceNode = null;
+    mediaStream = null;
+    captureContext = null;
     onAudioChunk = null;
-    onSpeechStart = null;
-    onSpeechEnd = null;
-    shouldStartSpeech = null;
-    gateSilence = true;
     isMicReady.value = false;
-    _resetSpeechGate();
   }
 
   // ------------------------------------------------------------------
-  // Playback (base64 PCM16 → speakers)
+  // Assistant playback
   // ------------------------------------------------------------------
-
-  function _ensurePlaybackCtx() {
-    if (!playbackCtx || playbackCtx.state === "closed") {
-      playbackCtx = new AudioContext({ sampleRate: outputSampleRate });
-      playbackGainNode = playbackCtx.createGain();
-      playbackGainNode.gain.value = 1;
-      playbackGainNode.connect(playbackCtx.destination);
-    } else if (!playbackGainNode) {
-      playbackGainNode = playbackCtx.createGain();
-      playbackGainNode.gain.value = 1;
-      playbackGainNode.connect(playbackCtx.destination);
-    }
-    return playbackCtx;
-  }
-
-  function enqueue(base64pcm, metadata = {}) {
-    const responseId = metadata?.response_id || metadata?.responseId || null;
-    if (assistantAudioBlocked) return false;
-    if (responseId && invalidatedResponseIds.has(responseId)) return false;
-    if (responseId && currentPlaybackResponseId && responseId !== currentPlaybackResponseId) {
-      stopAssistantAudio({ responseId: currentPlaybackResponseId });
-    }
-    if (responseId) {
-      currentPlaybackResponseId = responseId;
-    }
-
-    const ctx = _ensurePlaybackCtx();
-    const raw = atob(base64pcm);
-    const bytes = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-
-    const int16 = new Int16Array(bytes.buffer);
-    const float32 = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i++) {
-      float32[i] = int16[i] / 0x8000;
-    }
-
-    const buffer = ctx.createBuffer(1, float32.length, outputSampleRate);
-    buffer.getChannelData(0).set(float32);
-
-    const now = ctx.currentTime;
-    if (nextPlayTime < now) nextPlayTime = now;
-    const scheduledStart = nextPlayTime;
-
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(playbackGainNode || ctx.destination);
-    const sourceRecord = {
-      source,
-      responseId,
-      itemId: metadata?.item_id || metadata?.itemId || null,
-      stoppedManually: false,
-    };
-    activeSources.add(sourceRecord);
-    source.onended = () => {
-      activeSources.delete(sourceRecord);
-      if (sourceRecord.stoppedManually) return;
-      if (activeSources.size === 0) {
-        const playbackCursor = getPlaybackCursor();
-        const completedResponseId =
-          currentPlayback?.responseId ||
-          sourceRecord.responseId ||
-          currentPlaybackResponseId;
-        currentPlayback = null;
-        currentPlaybackResponseId = null;
-        onPlaybackIdle?.({
-          responseId: completedResponseId,
-          playbackCursor,
-          reason: "natural_end",
-        });
-      }
-    };
-    source.start(scheduledStart);
-    nextPlayTime += buffer.duration;
-    _trackPlayback(metadata, scheduledStart, buffer.duration);
-    return true;
-  }
-
-  function flush(metadata = {}) {
-    const responseId = metadata?.response_id || metadata?.responseId || null;
-    if (responseId) currentPlaybackResponseId = responseId;
-  }
 
   function beginAssistantResponse(responseId) {
     if (!responseId) return;
-    assistantAudioBlocked = false;
-    invalidatedResponseIds.delete(responseId);
-    currentPlaybackResponseId = responseId;
-    if (playbackCtx?.state === "suspended") {
-      playbackCtx.resume().catch(() => {});
+
+    // Stop B before C becomes the current response. Setting the id first was
+    // the original cause of B and C audio playing simultaneously.
+    if (currentResponseId && currentResponseId !== responseId) {
+      stopAssistantAudio({
+        responseId: currentResponseId,
+        blockNewAudio: false,
+        reason: "superseded_by_new_response",
+      });
     }
+    stopSourcesExcept(responseId);
+
+    currentResponseId = responseId;
+    invalidatedResponseIds.delete(responseId);
+    assistantAudioBlocked = false;
+    const context = ensurePlaybackContext();
+    nextPlayTime = Math.max(nextPlayTime, context.currentTime);
+  }
+
+  function enqueue(base64Pcm, metadata = {}) {
+    const responseId = metadata.response_id || metadata.responseId || null;
+    if (!responseId || assistantAudioBlocked) return false;
+    if (invalidatedResponseIds.has(responseId)) return false;
+
+    if (!currentResponseId) beginAssistantResponse(responseId);
+    if (responseId !== currentResponseId) return false;
+
+    const context = ensurePlaybackContext();
+    const samples = decodePcm16(base64Pcm);
+    if (!samples.length) return false;
+
+    const buffer = context.createBuffer(1, samples.length, outputSampleRate);
+    buffer.getChannelData(0).set(samples);
+
+    const startAt = Math.max(context.currentTime, nextPlayTime);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(playbackGain || context.destination);
+
+    const record = {
+      source,
+      responseId,
+      itemId: metadata.item_id || metadata.itemId || null,
+      contentIndex: metadata.content_index ?? metadata.contentIndex ?? 0,
+      startAt,
+      endAt: startAt + buffer.duration,
+      stoppedManually: false,
+    };
+    activeSources.add(record);
+    trackPlayback(record);
+
+    source.onended = () => {
+      activeSources.delete(record);
+      if (record.stoppedManually) return;
+      if (responseId !== currentResponseId) return;
+      if (hasActiveSource(responseId)) return;
+
+      const playbackCursor = getPlaybackCursor();
+      currentResponseId = null;
+      currentPlayback = null;
+      nextPlayTime = context.currentTime;
+      onPlaybackIdle?.({
+        responseId,
+        playbackCursor,
+        reason: "natural_end",
+      });
+    };
+
+    source.start(startAt);
+    nextPlayTime = record.endAt;
+    return true;
+  }
+
+  function flush() {
+    // Chunks are already scheduled as they arrive. Kept as a stable interface.
+  }
+
+  function stopAssistantAudio({ responseId = null, blockNewAudio = true, reason = "interrupted" } = {}) {
+    const targetResponseId = responseId || currentResponseId;
+    const playbackCursor = getPlaybackCursor();
+
+    if (targetResponseId) invalidatedResponseIds.add(targetResponseId);
+    if (blockNewAudio) assistantAudioBlocked = true;
+
+    for (const record of Array.from(activeSources)) {
+      if (targetResponseId && record.responseId !== targetResponseId) continue;
+      record.stoppedManually = true;
+      try {
+        record.source.stop();
+      } catch (_) {
+        // The source may already have ended.
+      }
+      activeSources.delete(record);
+    }
+
+    if (!targetResponseId || currentResponseId === targetResponseId) {
+      currentResponseId = null;
+      currentPlayback = null;
+    }
+    const context = playbackContext;
+    nextPlayTime = context && context.state !== "closed" ? context.currentTime : 0;
+
+    return {
+      ...playbackCursor,
+      reason,
+    };
   }
 
   function stop() {
-    const cursor = getPlaybackCursor();
-    stopAssistantAudio({});
-    return cursor;
+    return stopAssistantAudio({ blockNewAudio: true, reason: "manual_stop" });
   }
 
-  async function pauseAssistantAudio({ responseId = null } = {}) {
-    if (responseId && currentPlaybackResponseId && responseId !== currentPlaybackResponseId) return;
-    if (playbackCtx && playbackCtx.state === "running") {
-      await playbackCtx.suspend();
-    }
-  }
-
-  async function resumeAssistantAudio({ responseId = null } = {}) {
-    if (responseId && currentPlaybackResponseId && responseId !== currentPlaybackResponseId) return;
-    assistantAudioBlocked = false;
-    if (playbackCtx && playbackCtx.state === "suspended") {
-      await playbackCtx.resume();
-    }
-  }
-
-  function stopAssistantAudio({ responseId = null, blockNewAudio = false } = {}) {
-    const playbackCursor = getPlaybackCursor();
-    if (blockNewAudio) assistantAudioBlocked = true;
-    if (playbackCtx?.state === "suspended") {
-      playbackCtx.resume().catch(() => {});
-    }
-
-    if (responseId) {
-      invalidatedResponseIds.add(responseId);
-    } else {
-      for (const record of activeSources) {
-        if (record.responseId) invalidatedResponseIds.add(record.responseId);
-      }
-      if (currentPlayback?.responseId) {
-        invalidatedResponseIds.add(currentPlayback.responseId);
-      }
-    }
-
+  function stopSourcesExcept(responseId) {
     for (const record of Array.from(activeSources)) {
-      if (!responseId || record.responseId === responseId) {
-        record.stoppedManually = true;
-        try {
-          record.source.stop();
-        } catch (_) {
-          // Already ended.
-        }
-        activeSources.delete(record);
+      if (record.responseId === responseId) continue;
+      invalidatedResponseIds.add(record.responseId);
+      record.stoppedManually = true;
+      try {
+        record.source.stop();
+      } catch (_) {
+        // Already ended.
       }
+      activeSources.delete(record);
     }
-
-    if (
-      !responseId ||
-      currentPlayback?.responseId === responseId
-    ) {
-      nextPlayTime = playbackCtx && playbackCtx.state !== "closed" ? playbackCtx.currentTime : 0;
-      currentPlayback = null;
-    }
-    if (!responseId || currentPlaybackResponseId === responseId) {
-      currentPlaybackResponseId = null;
-    }
-    return playbackCursor;
   }
 
-  function allowAssistantAudio() {
-    assistantAudioBlocked = false;
-  }
-
-  function setPlaybackIdleHandler(callback) {
-    onPlaybackIdle = typeof callback === "function" ? callback : null;
-  }
-
-  // ------------------------------------------------------------------
-  // Helpers
-  // ------------------------------------------------------------------
-
-  function _arrayBufferToBase64(buffer) {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
+  function ensurePlaybackContext() {
+    if (!playbackContext || playbackContext.state === "closed") {
+      playbackContext = new AudioContext({ sampleRate: outputSampleRate });
+      playbackGain = playbackContext.createGain();
+      playbackGain.gain.value = 1;
+      playbackGain.connect(playbackContext.destination);
+      nextPlayTime = playbackContext.currentTime;
+    } else if (playbackContext.state === "suspended") {
+      playbackContext.resume().catch(() => {});
     }
-    return btoa(binary);
+    return playbackContext;
   }
 
-  function _configureRecordingCallbacks(callbackConfig) {
-    onSpeechStart = null;
-    onSpeechEnd = null;
-    shouldStartSpeech = null;
-    gateSilence = true;
-
-    if (typeof callbackConfig === "function") {
-      onAudioChunk = callbackConfig;
-      return;
-    }
-
-    onAudioChunk = callbackConfig?.onChunk || null;
-    onSpeechStart = callbackConfig?.onSpeechStart || null;
-    onSpeechEnd = callbackConfig?.onSpeechEnd || null;
-    shouldStartSpeech = callbackConfig?.shouldStartSpeech || null;
-    gateSilence = callbackConfig?.gateSilence !== false;
+  function hasActiveSource(responseId) {
+    return Array.from(activeSources).some((record) => record.responseId === responseId);
   }
 
-  function _trackPlayback(metadata, scheduledStart, duration) {
-    const itemId = metadata?.item_id || metadata?.itemId;
-    const responseId = metadata?.response_id || metadata?.responseId || null;
-    if (!itemId) return;
-
-    const contentIndex = metadata?.content_index ?? metadata?.contentIndex ?? 0;
+  function trackPlayback(record) {
     if (
       !currentPlayback ||
-      currentPlayback.itemId !== itemId ||
-      currentPlayback.contentIndex !== contentIndex
+      currentPlayback.responseId !== record.responseId ||
+      currentPlayback.itemId !== record.itemId ||
+      currentPlayback.contentIndex !== record.contentIndex
     ) {
       currentPlayback = {
-        itemId,
-        responseId,
-        contentIndex,
-        startTime: scheduledStart,
-        endTime: scheduledStart,
+        responseId: record.responseId,
+        itemId: record.itemId,
+        contentIndex: record.contentIndex,
+        startAt: record.startAt,
+        endAt: record.endAt,
       };
+      return;
     }
-    currentPlayback.endTime = Math.max(currentPlayback.endTime, scheduledStart + duration);
+    currentPlayback.endAt = Math.max(currentPlayback.endAt, record.endAt);
   }
 
   function getPlaybackCursor() {
-    if (!playbackCtx || playbackCtx.state === "closed" || !currentPlayback?.itemId) {
-      return null;
-    }
+    if (!playbackContext || !currentPlayback?.itemId) return null;
+    const totalMs = Math.max(0, (currentPlayback.endAt - currentPlayback.startAt) * 1000);
     const elapsedMs = Math.max(
       0,
-      Math.min(
-        (currentPlayback.endTime - currentPlayback.startTime) * 1000,
-        (playbackCtx.currentTime - currentPlayback.startTime) * 1000
-      )
+      Math.min(totalMs, (playbackContext.currentTime - currentPlayback.startAt) * 1000),
     );
     return {
       item_id: currentPlayback.itemId,
@@ -419,148 +324,62 @@ export function useAudio(options = {}) {
     };
   }
 
-  function _handleRecordedChunk(chunk) {
-    const buffer = chunk.buffer || chunk;
-    const rms = chunk.rms ?? 0;
-    const base64 = _arrayBufferToBase64(buffer);
-
-    if (!gateSilence) {
-      onAudioChunk?.(base64);
-      _updateUngatedSpeechActivity(rms, chunk.peak ?? 0);
-      return;
-    }
-
-    if (!speechActive) {
-      prefixBuffer.push(buffer);
-      if (prefixBuffer.length > PREFIX_CHUNKS) {
-        prefixBuffer.shift();
-      }
-      const speechStart = _confirmedSpeechStart(rms, chunk.peak ?? 0);
-      if (speechStart) {
-        if (shouldStartSpeech && !shouldStartSpeech(speechStart)) {
-          prefixBuffer = [];
-          _resetSpeechCandidate();
-          return;
-        }
-        speechActive = true;
-        silenceChunks = 0;
-        onSpeechStart?.(speechStart);
-        prefixBuffer.forEach((buf) => onAudioChunk?.(_arrayBufferToBase64(buf)));
-        prefixBuffer = [];
-      }
-      return;
-    }
-
-    onAudioChunk?.(base64);
-    if (rms < SILENCE_RMS_THRESHOLD) {
-      silenceChunks += 1;
-      if (silenceChunks >= TRAILING_SILENCE_CHUNKS) {
-        speechActive = false;
-        silenceChunks = 0;
-        prefixBuffer = [];
-        _resetSpeechCandidate();
-        onSpeechEnd?.();
-      }
-    } else {
-      silenceChunks = 0;
-    }
+  function setPlaybackIdleHandler(callback) {
+    onPlaybackIdle = typeof callback === "function" ? callback : null;
   }
 
-  function _resetSpeechGate() {
-    speechActive = false;
-    silenceChunks = 0;
-    prefixBuffer = [];
-    _resetSpeechCandidate();
+  function disposePlayback() {
+    stopAssistantAudio({ blockNewAudio: true, reason: "dispose" });
+    playbackContext?.close().catch(() => {});
+    playbackContext = null;
+    playbackGain = null;
+    invalidatedResponseIds.clear();
+    onPlaybackIdle = null;
   }
 
-  function _updateUngatedSpeechActivity(rms, peak) {
-    if (!speechActive) {
-      const speechStart = _confirmedSpeechStart(rms, peak);
-      if (speechStart) {
-        if (shouldStartSpeech && !shouldStartSpeech(speechStart)) {
-          _resetSpeechCandidate();
-          return;
-        }
-        speechActive = true;
-        silenceChunks = 0;
-        onSpeechStart?.(speechStart);
-      }
-      return;
-    }
+  // ------------------------------------------------------------------
+  // Encoding helpers
+  // ------------------------------------------------------------------
 
-    if (rms < SILENCE_RMS_THRESHOLD) {
-      silenceChunks += 1;
-      if (silenceChunks >= TRAILING_SILENCE_CHUNKS) {
-        speechActive = false;
-        silenceChunks = 0;
-        _resetSpeechCandidate();
-        onSpeechEnd?.();
-      }
-    } else {
-      silenceChunks = 0;
+  function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+      binary += String.fromCharCode(bytes[i]);
     }
+    return btoa(binary);
   }
 
-  function _confirmedSpeechStart(rms, peak) {
-    if (rms < SPEECH_RMS_THRESHOLD) {
-      _resetSpeechCandidate();
-      return null;
-    }
-
-    speechCandidateChunks += 1;
-    speechCandidateMaxRms = Math.max(speechCandidateMaxRms, rms);
-    speechCandidateMaxPeak = Math.max(speechCandidateMaxPeak, peak);
-
-    if (speechCandidateChunks < SPEECH_CONFIRM_CHUNKS) return null;
-
-    return {
-      rms: speechCandidateMaxRms,
-      peak: speechCandidateMaxPeak,
-      duration_ms: speechCandidateChunks * CHUNK_MS,
-      chunks: speechCandidateChunks,
-      threshold: SPEECH_RMS_THRESHOLD,
-    };
-  }
-
-  function _resetSpeechCandidate() {
-    speechCandidateChunks = 0;
-    speechCandidateMaxRms = 0;
-    speechCandidateMaxPeak = 0;
+  function decodePcm16(base64Pcm) {
+    const binary = atob(base64Pcm || "");
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    const int16 = new Int16Array(bytes.buffer);
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i += 1) float32[i] = int16[i] / 0x8000;
+    return float32;
   }
 
   onBeforeUnmount(() => {
     disposeRecording();
-    stop();
+    disposePlayback();
   });
-
-  function getMicStream() {
-    return mediaStream;
-  }
-
-  function resetSpeechGate() {
-    _resetSpeechGate();
-  }
 
   return {
     isRecording,
     isMicReady,
-    startRecording,
-    stopRecording,
-    disposeRecording,
-    getMicStream,
-    getPlaybackCursor,
-    resetSpeechGate,
+    captureBlocked,
     inputSampleRate,
     outputSampleRate,
-    // Playback interface (passed to useWebSocket)
+    startRecording,
+    stopRecording,
+    setCaptureBlocked,
+    beginAssistantResponse,
     enqueue,
     flush,
-    beginAssistantResponse,
     stop,
-    pauseAssistantAudio,
-    resumeAssistantAudio,
     stopAssistantAudio,
-    allowAssistantAudio,
+    getPlaybackCursor,
     setPlaybackIdleHandler,
   };
 }
