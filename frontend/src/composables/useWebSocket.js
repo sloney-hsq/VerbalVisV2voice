@@ -10,6 +10,7 @@ const ANALYSIS_ID_STORAGE_KEY = "verbalvis.analysisId";
 export function useWebSocket(audioPlayer) {
   const store = useDashboardStore();
   const socket = ref(null);
+  const toolRunning = ref(false);
 
   let suppressCurrentAssistantTranscript = false;
   let activeResponseId = null;
@@ -39,6 +40,7 @@ export function useWebSocket(audioPlayer) {
     lastUrl = url;
     store.connectionStatus = "connecting";
     store.sessionReady = false;
+    toolRunning.value = false;
     const ws = new WebSocket(url);
     socket.value = ws;
 
@@ -52,6 +54,7 @@ export function useWebSocket(audioPlayer) {
       store.connectionStatus = "disconnected";
       store.sessionReady = false;
       activeResponseId = null;
+      toolRunning.value = false;
       socket.value = null;
     };
 
@@ -61,6 +64,7 @@ export function useWebSocket(audioPlayer) {
       store.connectionStatus = "disconnected";
       store.sessionReady = false;
       activeResponseId = null;
+      toolRunning.value = false;
     };
 
     ws.onmessage = (event) => {
@@ -73,6 +77,7 @@ export function useWebSocket(audioPlayer) {
     switch (msg.type) {
       case "init":
         activeResponseId = null;
+        toolRunning.value = false;
         store.initViews(msg.views);
         store.setSessionInfo({
           mode: msg.mode,
@@ -177,6 +182,16 @@ export function useWebSocket(audioPlayer) {
         _stopAssistantPlayback(msg.response_id, msg.reason || "assistant_response_interrupted");
         break;
 
+      case "tool_execution_started":
+        toolRunning.value = true;
+        console.log("%c[TOOLS] dashboard update started", "color: #f59e0b; font-weight: bold");
+        break;
+
+      case "tool_execution_finished":
+        toolRunning.value = false;
+        console.log("%c[TOOLS] dashboard update finished", "color: #22c55e; font-weight: bold");
+        break;
+
       case "tool_call":
         console.log(`%c>>> TOOL CALL: ${msg.name}(${msg.arguments})`, "color: #f59e0b; font-weight: bold");
         store.recordToolCall({ name: msg.name, arguments: msg.arguments });
@@ -213,11 +228,11 @@ export function useWebSocket(audioPlayer) {
       case "error":
         console.error("Server error:", msg.message);
         break;
-
     }
   }
 
   function sendAudio(base64pcm) {
+    if (toolRunning.value) return;
     if (socket.value && socket.value.readyState === WebSocket.OPEN) {
       socket.value.send(JSON.stringify({ type: "audio", data: base64pcm }));
     } else {
@@ -290,6 +305,7 @@ export function useWebSocket(audioPlayer) {
       socket.value = null;
     }
     activeResponseId = null;
+    toolRunning.value = false;
     store.sessionReady = false;
   }
 
@@ -338,6 +354,7 @@ export function useWebSocket(audioPlayer) {
 
   return {
     socket,
+    toolRunning,
     connect,
     sendAudio,
     sendPlaybackStopped,
@@ -345,4 +362,3 @@ export function useWebSocket(audioPlayer) {
     reconnect,
   };
 }
-
