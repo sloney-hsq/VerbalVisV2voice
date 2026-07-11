@@ -20,7 +20,11 @@
       </div>
       <h2>{{ view.title }}</h2>
     </header>
-    <div ref="vegaContainer" class="chart-card__body"></div>
+    <div
+      ref="vegaContainer"
+      class="chart-card__body"
+      :style="chartBodyStyle"
+    ></div>
   </article>
 </template>
 
@@ -28,6 +32,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import vegaEmbed from "vega-embed";
 import { createSpec } from "../specFactory";
+import { chartHeightForView } from "../chartLayout";
 import { resolveHighlight } from "../highlightSpec";
 import { useDashboardStore } from "../stores/dashboard";
 
@@ -65,6 +70,9 @@ const usesLowScore = computed(() => (
     (filter) => filter.field === "review_score",
   )
 ));
+const chartBodyStyle = computed(() => ({
+  minHeight: `${chartHeightForView(props.view)}px`,
+}));
 
 watch(
   () => props.view,
@@ -108,9 +116,12 @@ function clearChart() {
 
 <style scoped>
 .chart-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   min-width: 0;
-  min-height: 300px;
-  padding: 9px 10px 7px;
+  min-height: 270px;
+  padding: 8px 9px 7px;
   overflow: hidden;
   border: 1px solid #d9e1ec;
   border-radius: 10px;
@@ -131,8 +142,8 @@ function clearChart() {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  min-height: 42px;
-  gap: 4px 8px;
+  min-height: 36px;
+  gap: 3px 7px;
 }
 
 .chart-card__identity,
@@ -153,7 +164,7 @@ function clearChart() {
 .chart-card__badges span {
   display: inline-flex;
   align-items: center;
-  min-height: 20px;
+  min-height: 19px;
   padding: 2px 6px;
   overflow: hidden;
   border: 1px solid #dbe3ee;
@@ -186,20 +197,27 @@ function clearChart() {
   margin: 0;
   overflow: hidden;
   color: #1f2937;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 650;
-  line-height: 1.25;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chart-card__body {
-  min-height: 240px;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
   overflow: hidden;
 }
 
-.chart-card__body :deep(.vega-embed),
+.chart-card__body :deep(.vega-embed) {
+  width: 100%;
+  max-width: 100%;
+}
+
 .chart-card__body :deep(svg) {
+  display: block;
   max-width: 100%;
 }
 </style>
