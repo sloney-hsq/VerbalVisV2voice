@@ -1,11 +1,9 @@
 <template>
   <Dashboard />
-  <RuntimeStatus />
 </template>
 
 <script setup>
 import Dashboard from "./components/Dashboard.vue";
-import RuntimeStatus from "./components/RuntimeStatus.vue";
 </script>
 
 <style>
@@ -17,17 +15,16 @@ import RuntimeStatus from "./components/RuntimeStatus.vue";
   padding: 0;
 }
 
-body {
-  background: #fff;
-  width: 100vw;
-  height: 100dvh;
-  min-height: 100dvh;
-  overflow: hidden;
-}
-
+html,
+body,
 #app {
   width: 100%;
   height: 100%;
+  min-height: 100%;
   overflow: hidden;
+}
+
+body {
+  background: #f7f9fc;
 }
 </style>
