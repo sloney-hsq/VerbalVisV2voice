@@ -19,14 +19,17 @@ def resolve_session_log_dir(
     mode: str,
     analysis_id: str | None = None,
 ) -> tuple[Path, str]:
-    """Return a fresh log directory for this realtime connection."""
+    """Return a fresh, participant-identifiable directory per connection."""
     log_root.mkdir(parents=True, exist_ok=True)
     safe_session_id = safe_log_token(session_id, "session")
     safe_analysis_id = safe_log_token(analysis_id)
     safe_mode = safe_log_token(mode, "audio")
 
     if safe_analysis_id:
-        return _new_log_dir(log_root, safe_mode), safe_analysis_id
+        return (
+            _new_log_dir(log_root, f"{safe_analysis_id}_{safe_mode}"),
+            safe_analysis_id,
+        )
 
     return _new_log_dir(log_root, f"{safe_session_id}_{safe_mode}"), safe_session_id
 
