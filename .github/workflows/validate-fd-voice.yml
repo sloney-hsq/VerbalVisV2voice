@@ -48,6 +48,10 @@ jobs:
         working-directory: frontend
         run: npm run validate:highlight
 
+      - name: Validate responsive dashboard layout
+        working-directory: frontend
+        run: npm run validate:layout
+
       - name: Build frontend
         working-directory: frontend
         run: npm run build
