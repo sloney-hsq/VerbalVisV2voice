@@ -1,12 +1,16 @@
-"""Small runtime patch for dashboard refresh ownership.
+"""Small runtime patches for model-facing tool semantics.
 
 Managed comparison views are queried by ``demo_tools`` because they use fixed
 study semantics (product revenue and order-category delivery grain). The legacy
 generic refresh function must not try to rebuild those views with its generic
 aggregation expressions.
 
-This module only separates refresh ownership. It does not add cancellation,
-rollback, epochs, transactions, or stale-result handling.
+The module also registers ``product_revenue`` as a model-facing alias before
+``demo_tools`` constructs its schemas. The wrapper converts that alias back to
+the frontend-compatible internal field ``revenue`` before execution.
+
+These patches do not add cancellation, rollback, epochs, transactions, or stale
+result handling.
 """
 
 from __future__ import annotations
@@ -17,6 +21,14 @@ import tools
 
 
 _ORIGINAL_REFRESH: Callable[[], None] | None = None
+
+
+def install_product_revenue_alias() -> None:
+    """Expose the precise study term without changing the internal data field."""
+    if "product_revenue" not in tools.APPEND_Y_FIELDS:
+        tools.APPEND_Y_FIELDS.append("product_revenue")
+    if "product_revenue" not in tools.SORT_FIELDS:
+        tools.SORT_FIELDS.append("product_revenue")
 
 
 def install_tool_refresh_patch() -> None:
@@ -45,4 +57,5 @@ def install_tool_refresh_patch() -> None:
     tools._verbalvis_managed_refresh_patch = True
 
 
+install_product_revenue_alias()
 install_tool_refresh_patch()
