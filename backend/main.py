@@ -1,12 +1,10 @@
-"""
-VerbalVis FastAPI entry point.
-"""
+"""VerbalVis FastAPI entry point."""
 
 from __future__ import annotations
 
 import logging
-import uuid
 from pathlib import Path
+import uuid
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,8 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from db import initialize_db
-import tool_runtime_patch  # noqa: F401 - installs managed-view refresh ownership
-from realtime_nonpreemptive import QWEN_TURN_DETECTION, QwenRealtimeSession
+from realtime import QWEN_TURN_DETECTION, QwenRealtimeSession
 
 QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime"
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
@@ -27,7 +24,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="VerbalVis API")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -50,16 +46,11 @@ async def health_check() -> dict[str, str]:
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    """Default VerbalVis realtime endpoint: Qwen only."""
-    await _run_qwen_session(websocket)
-
-
-async def _run_qwen_session(websocket: WebSocket) -> None:
     await websocket.accept()
     session_id = f"session-{uuid.uuid4().hex[:8]}"
     analysis_id = _analysis_id_from_query(websocket)
     log.info(
-        "Client connected (qwen): %s analysis=%s model=%s turn_detection=%s",
+        "Client connected: %s analysis=%s model=%s turn_detection=%s",
         session_id,
         analysis_id or "-",
         QWEN_REALTIME_MODEL,
