@@ -59,11 +59,27 @@ streaming assistant transcript, and sends `response.cancel`. If Qwen generation
 has already completed and only buffered browser audio is still playing, the
 backend stops frontend playback without sending `response.cancel`.
 
+## Non-preemptive Tool Boundary
+
+Dashboard tool execution is intentionally non-preemptive. Once a tool batch has
+started, the batch is allowed to finish normally. The project does not implement
+stale-tool invalidation, rollback, transactions, epochs, or thread cancellation.
+
+While a tool batch is running:
+
+- the backend ignores new browser audio chunks;
+- the frontend also stops sending microphone chunks;
+- all calls in the current batch use the user transcript captured when the batch
+  started;
+- the backend emits `tool_execution_started` and `tool_execution_finished` so the
+  client can track the boundary;
+- after the batch finishes, microphone streaming resumes and Qwen generates the
+  natural-language/audio result.
+
 Tools are extracted only from `response.done`. Before tool execution, the
-backend discards interrupted responses, stale responses, and non-completed
-responses. A tool that has already entered `execute_tool()` is allowed to finish;
-the project does not implement tool rollback, transactions, epochs, or thread
-cancellation.
+backend still discards interrupted responses, stale response completions, and
+non-completed responses. A tool that has already entered `execute_tool()` is
+allowed to finish and update the dashboard.
 
 Frontend playback completion is reported with `playback_stopped`, including
 `reason=natural_end` for normal playback completion. The backend uses that
