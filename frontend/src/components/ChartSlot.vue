@@ -41,7 +41,14 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(row, rowIndex) in tableRows" :key="rowKey(row, rowIndex)">
+          <tr
+            v-for="(row, rowIndex) in tableRows"
+            :key="rowKey(row, rowIndex)"
+            :class="{
+              'chart-slot__table-row--highlighted': isHighlightedTableRow(row),
+              'chart-slot__table-row--dimmed': hasResolvedHighlight && !isHighlightedTableRow(row),
+            }"
+          >
             <td
               v-for="column in tableColumns"
               :key="column.key"
@@ -64,6 +71,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import vegaEmbed from "vega-embed";
 import { createSpec } from "../specFactory";
+import { datumMatchesHighlight, resolveHighlight } from "../highlightSpec";
 import { useDashboardStore } from "../stores/dashboard";
 
 const props = defineProps({
@@ -132,6 +140,16 @@ const isTableView = computed(() => props.view.chart_type === "table");
 const viewLabel = computed(() => formatViewLabel(props.view.label || props.view.id));
 const chartTypeLabel = computed(() => CHART_TYPE_LABELS[props.view.chart_type] || humanizeField(props.view.chart_type));
 const tableRows = computed(() => (Array.isArray(props.view.data) ? props.view.data : []));
+const activeHighlightElement = computed(() => (
+  props.view.highlighted ? store.highlightElement : null
+));
+const resolvedHighlight = computed(() => (
+  resolveHighlight(props.view, activeHighlightElement.value)
+));
+const hasResolvedHighlight = computed(() => (
+  Boolean(resolvedHighlight.value?.matchedCount)
+));
+
 const tableColumns = computed(() => {
   const configured = normalizeConfiguredColumns(props.view.table_columns);
   if (configured.length) return configured;
@@ -202,6 +220,16 @@ const viewBadges = computed(() => {
     });
   }
 
+  if (hasResolvedHighlight.value) {
+    badges.push({
+      key: "element-highlight",
+      label: "Highlighted data",
+      value: resolvedHighlight.value.label,
+      tone: "highlight",
+      title: `${resolvedHighlight.value.matchedCount} data mark(s) match this highlight.`,
+    });
+  }
+
   return badges;
 });
 
@@ -216,6 +244,14 @@ watch(
 
 watch(
   () => props.view,
+  () => {
+    nextTick(render);
+  },
+  { deep: true }
+);
+
+watch(
+  activeHighlightElement,
   () => {
     nextTick(render);
   },
@@ -239,7 +275,7 @@ async function render() {
   if (!vegaContainer.value) return;
 
   clearVega();
-  const spec = createSpec(props.view);
+  const spec = createSpec(props.view, activeHighlightElement.value);
   spec.data = { values: props.view.data || [] };
 
   try {
@@ -262,6 +298,10 @@ function clearVega() {
   if (vegaContainer.value) {
     vegaContainer.value.innerHTML = "";
   }
+}
+
+function isHighlightedTableRow(row) {
+  return hasResolvedHighlight.value && datumMatchesHighlight(row, resolvedHighlight.value);
 }
 
 function scopeBadge(scope, view) {
@@ -590,6 +630,12 @@ function humanizeField(field) {
   color: #be123c;
 }
 
+.chart-slot__badge--highlight {
+  border-color: #fbbf24;
+  background: #fffbeb;
+  color: #92400e;
+}
+
 .chart-slot__badge--neutral {
   border-color: #d7e1ee;
   background: #f8fafc;
@@ -655,6 +701,15 @@ function humanizeField(field) {
 
 .chart-slot__table tbody tr:hover {
   background: #eff6ff;
+}
+
+.chart-slot__table-row--highlighted {
+  background: #fef3c7 !important;
+  box-shadow: inset 4px 0 0 #f59e0b;
+}
+
+.chart-slot__table-row--dimmed {
+  opacity: 0.28;
 }
 
 .chart-slot__table-cell--numeric {
