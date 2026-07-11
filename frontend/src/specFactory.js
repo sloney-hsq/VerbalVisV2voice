@@ -1,3 +1,5 @@
+import { applyHighlightToSpec } from "./highlightSpec";
+
 /**
  * Vega-Lite spec factory.
  * Generates specs from view metadata; data is injected separately via vega-embed.
@@ -20,21 +22,29 @@ const RATIO_COUNT_FIELDS = {
   high_score_ratio: { field: "high_score_count", title: "High-score orders" },
 };
 
-export function createSpec(view) {
+export function createSpec(view, highlightElement = null) {
   const { id, chart_type, title, x_field, y_field, color } = view;
+  let spec;
 
   switch (id) {
     case "view1":
-      return trendSpec(title);
+      spec = trendSpec(title);
+      break;
     case "view2":
-      return reviewSpec(title);
+      spec = reviewSpec(title);
+      break;
     case "view3":
-      return mapBarSpec(title);
+      spec = mapBarSpec(title);
+      break;
     case "view4":
-      return categorySpec(title);
+      spec = categorySpec(title);
+      break;
     default:
-      return dynamicSpec(chart_type, x_field, y_field, color, title, view);
+      spec = dynamicSpec(chart_type, x_field, y_field, color, title, view);
+      break;
   }
+
+  return applyHighlightToSpec(spec, view, highlightElement);
 }
 
 // ------------------------------------------------------------------
