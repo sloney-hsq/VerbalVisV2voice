@@ -6,9 +6,8 @@ import { useRuntimeStore } from "../stores/runtime";
 /**
  * Browser-side FD-Voice protocol adapter.
  *
- * The backend owns Semantic VAD, response cancellation, tool execution, and
- * dashboard truth. The browser only transports PCM audio and applies the
- * compact events emitted by backend/realtime.py.
+ * One page lifecycle owns one backend WebSocket and one Qwen Realtime session.
+ * Start/Stop mic only controls PCM capture; it never creates another session.
  */
 export function useWebSocket(audioPlayer) {
   const dashboard = useDashboardStore();
@@ -21,7 +20,7 @@ export function useWebSocket(audioPlayer) {
 
   audioPlayer?.setPlaybackIdleHandler?.((event = {}) => {
     dashboard.isAssistantSpeaking = false;
-    if (!toolRunning.value) runtime.setPhase("ready");
+    if (!toolRunning.value && !runtime.configurationError) runtime.setPhase("ready");
     sendPlaybackStopped(
       event.responseId || event.response_id || null,
       event.reason || "natural_end",
@@ -39,6 +38,7 @@ export function useWebSocket(audioPlayer) {
     runtime.setPhase("connecting");
     dashboard.connectionStatus = "connecting";
     dashboard.sessionReady = false;
+    audioPlayer?.setCaptureBlocked?.(true);
 
     const ws = new WebSocket(buildWebSocketUrl());
     socket.value = ws;
@@ -51,16 +51,21 @@ export function useWebSocket(audioPlayer) {
 
     ws.onclose = () => {
       if (socket.value !== ws) return;
-      audioPlayer?.setCaptureBlocked?.(false);
+      audioPlayer?.setCaptureBlocked?.(true);
       audioPlayer?.stopAssistantAudio?.({
         blockNewAudio: true,
         reason: "socket_closed",
       });
       activeResponseId = null;
       dashboard.isAssistantSpeaking = false;
-      dashboard.connectionStatus = "disconnected";
       dashboard.sessionReady = false;
-      runtime.setPhase("disconnected", { toolRunning: false, tools: [] });
+      if (runtime.configurationError) {
+        dashboard.connectionStatus = "configuration_error";
+        runtime.setPhase("configuration_error", { toolRunning: false, tools: [] });
+      } else {
+        dashboard.connectionStatus = "disconnected";
+        runtime.setPhase("disconnected", { toolRunning: false, tools: [] });
+      }
       socket.value = null;
     };
 
@@ -93,6 +98,19 @@ export function useWebSocket(audioPlayer) {
         });
         break;
 
+      case "configuration_error":
+        activeResponseId = null;
+        audioPlayer?.setCaptureBlocked?.(true);
+        audioPlayer?.stopAssistantAudio?.({
+          blockNewAudio: true,
+          reason: "configuration_error",
+        });
+        dashboard.sessionReady = false;
+        dashboard.connectionStatus = "configuration_error";
+        runtime.setConfigurationError(message.message || "Qwen configuration required.");
+        console.error("Qwen configuration error", message.message);
+        break;
+
       case "session_updated":
         syncSessionInfo(message);
         analysisId = normalizeAnalysisId(message.analysis_id) || analysisId;
@@ -100,15 +118,15 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "session_ready":
+        runtime.setConfigurationError("");
         audioPlayer?.setCaptureBlocked?.(false);
+        dashboard.connectionStatus = "connected";
         dashboard.sessionReady = true;
         runtime.setPhase("ready");
         break;
 
       case "assistant_response_started":
         if (!message.response_id) break;
-        // A tool-follow-up response is now active. Reopen capture here—not at
-        // tool_execution_finished—so user audio cannot race response.create.
         audioPlayer?.setCaptureBlocked?.(false);
         activeResponseId = message.response_id;
         dashboard.beginAssistantResponse(activeResponseId);
@@ -164,9 +182,6 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "tool_execution_finished":
-        // Keep capture blocked while waiting for the explicit post-tool
-        // response.create to produce response.created. If no follow-up was
-        // requested, there is no response race and capture may reopen now.
         audioPlayer?.setCaptureBlocked?.(Boolean(message.followup_requested));
         runtime.finishToolBatch(message);
         break;
@@ -199,14 +214,21 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "runtime_state":
-        runtime.setPhase(message.phase || "ready", {
-          toolRunning: Boolean(message.tool_running),
-          tools: message.tools || [],
-        });
+        if (message.phase === "configuration_error") {
+          runtime.setPhase("configuration_error", {
+            toolRunning: false,
+            tools: [],
+          });
+        } else {
+          runtime.setPhase(message.phase || "ready", {
+            toolRunning: Boolean(message.tool_running),
+            tools: message.tools || [],
+          });
+        }
         break;
 
       case "error":
-        audioPlayer?.setCaptureBlocked?.(false);
+        audioPlayer?.setCaptureBlocked?.(true);
         stopAssistantPlayback(activeResponseId, "realtime_error", false);
         runtime.setPhase("error", { toolRunning: false, tools: [] });
         runtime.recordToolResult({
@@ -289,6 +311,7 @@ export function useWebSocket(audioPlayer) {
   }
 
   function sendAudio(base64Pcm) {
+    if (!dashboard.sessionReady) return false;
     if (toolRunning.value || audioPlayer?.captureBlocked?.value) return false;
     if (!socket.value || socket.value.readyState !== WebSocket.OPEN) return false;
     socket.value.send(JSON.stringify({ type: "audio", data: base64Pcm }));
@@ -306,7 +329,7 @@ export function useWebSocket(audioPlayer) {
   }
 
   function disconnect() {
-    audioPlayer?.setCaptureBlocked?.(false);
+    audioPlayer?.setCaptureBlocked?.(true);
     audioPlayer?.stopAssistantAudio?.({
       blockNewAudio: true,
       reason: "disconnect",
