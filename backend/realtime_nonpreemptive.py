@@ -9,6 +9,7 @@ runtime boundary around local tools:
 - microphone chunks are ignored while that batch is running;
 - tool arguments are bound to the user utterance that produced the batch;
 - the browser receives explicit runtime and dashboard-state events;
+- high-level comparison tools coexist with the primitive dashboard tools;
 - there is no stale-tool invalidation, rollback, transaction, epoch, or thread
   cancellation.
 """
@@ -23,12 +24,16 @@ from typing import Any
 
 from fastapi import WebSocketDisconnect
 
+from demo_tools import (
+    execute_demo_tool,
+    is_demo_tool,
+    register_demo_tool_schemas,
+)
 from realtime import (
     QWEN_TURN_DETECTION,
     QwenRealtimeSession as BaseQwenRealtimeSession,
 )
 from tool_contracts import (
-    MAX_TOOL_CALLS_PER_BATCH,
     batch_metadata,
     changes_dashboard,
     contract_for,
@@ -63,6 +68,7 @@ class QwenRealtimeSession(BaseQwenRealtimeSession):
         self._ignored_audio_chunks_during_tool = 0
 
     async def _configure_qwen_session(self) -> bool:
+        register_demo_tool_schemas()
         configured = await super()._configure_qwen_session()
         if not configured:
             return False
@@ -167,13 +173,11 @@ class QwenRealtimeSession(BaseQwenRealtimeSession):
         if not calls:
             return
 
-        accepted_calls = calls[:MAX_TOOL_CALLS_PER_BATCH]
-        skipped_calls = calls[MAX_TOOL_CALLS_PER_BATCH:]
         batch_response_id = calls[0].response_id
         batch_started_at = time.perf_counter()
         tool_meta = batch_metadata(call.name for call in calls)
         dashboard_will_change = any(
-            changes_dashboard(call.name) for call in accepted_calls
+            changes_dashboard(call.name) for call in calls
         )
 
         self.tool_running = True
@@ -187,7 +191,6 @@ class QwenRealtimeSession(BaseQwenRealtimeSession):
                 "type": "tool_execution_started",
                 "response_id": batch_response_id,
                 "tool_count": len(calls),
-                "accepted_tool_count": len(accepted_calls),
                 "tools": tool_meta,
                 "changes_dashboard": dashboard_will_change,
             }
@@ -203,37 +206,17 @@ class QwenRealtimeSession(BaseQwenRealtimeSession):
                 "event": "tool_execution_started",
                 "response_id": batch_response_id,
                 "tool_count": len(calls),
-                "accepted_tool_count": len(accepted_calls),
                 "tools": tool_meta,
                 "changes_dashboard": dashboard_will_change,
             },
         )
 
         try:
-            for pending in accepted_calls:
+            for pending in calls:
                 result = await self._execute_one_tool(pending)
                 completed_count += 1
                 if result.get("success"):
                     successful_count += 1
-
-            for pending in skipped_calls:
-                result = {
-                    "tool": pending.name,
-                    "success": False,
-                    "payload": None,
-                    "error": (
-                        "This response requested too many tools. "
-                        f"At most {MAX_TOOL_CALLS_PER_BATCH} calls are accepted "
-                        "in one batch; ask for the remaining operation next."
-                    ),
-                }
-                await self._relay_tool_result(
-                    pending,
-                    result,
-                    duration_ms=0.0,
-                    skipped=True,
-                )
-                completed_count += 1
 
             if self.running:
                 # Keep the input gate closed until the post-tool response has
@@ -342,11 +325,18 @@ class QwenRealtimeSession(BaseQwenRealtimeSession):
             )
 
         try:
-            result = await asyncio.to_thread(
-                execute_tool,
-                pending.name,
-                arguments,
-            )
+            if is_demo_tool(pending.name):
+                result = await asyncio.to_thread(
+                    execute_demo_tool,
+                    pending.name,
+                    arguments,
+                )
+            else:
+                result = await asyncio.to_thread(
+                    execute_tool,
+                    pending.name,
+                    arguments,
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -393,7 +383,6 @@ class QwenRealtimeSession(BaseQwenRealtimeSession):
             pending,
             result,
             duration_ms=duration_ms,
-            skipped=False,
         )
         return result
 
@@ -403,7 +392,6 @@ class QwenRealtimeSession(BaseQwenRealtimeSession):
         result: dict[str, Any],
         *,
         duration_ms: float,
-        skipped: bool,
     ) -> None:
         result = {
             "tool": pending.name,
@@ -426,17 +414,13 @@ class QwenRealtimeSession(BaseQwenRealtimeSession):
                 "response_id": pending.response_id,
                 "call_id": pending.call_id,
                 "duration_ms": duration_ms,
-                "skipped": skipped,
                 "summary": summary,
                 "contract": contract,
                 **result,
             }
         )
 
-        if (
-            result.get("success")
-            and changes_dashboard(pending.name)
-        ):
+        if result.get("success") and changes_dashboard(pending.name):
             views = get_views_for_frontend()
 
             if self._dashboard_logger:
