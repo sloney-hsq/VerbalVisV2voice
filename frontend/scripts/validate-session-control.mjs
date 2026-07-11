@@ -66,6 +66,11 @@ assert.doesNotMatch(
   "The browser must not create a Qwen session on every mic click.",
 );
 assert.match(
+  webSocket,
+  /if \(!dashboard\.sessionReady\) return false;/,
+  "PCM must never be sent before the page-level Qwen session is ready.",
+);
+assert.match(
   realtime,
   /await self\._connect_qwen\(\)[\s\S]*await self\._configure_qwen\(\)/,
   "The backend must create and configure Qwen when the page WebSocket opens.",
@@ -76,23 +81,23 @@ assert.doesNotMatch(
   "Qwen startup must not wait for a microphone-control event.",
 );
 assert.match(
-  realtime,
+  main,
   /def qwen_configuration_error\(/,
-  "Qwen configuration must be validated explicitly.",
+  "Qwen configuration must be validated before starting the runtime.",
 );
 assert.match(
-  realtime,
+  main,
   /"type": "configuration_error"/,
-  "Missing configuration must be reported once to the browser.",
+  "Missing configuration must be reported once to the browser without a traceback loop.",
 );
 assert.match(
   runtimeStore,
-  /case "configuration_error":|configurationError/,
+  /configurationError/,
   "The UI runtime must preserve an actionable configuration state.",
 );
 assert.match(
   main,
-  /qwen_configured/,
+  /"qwen_configured": qwen_configuration_error\(\) is None/,
   "The health endpoint must expose whether Qwen is configured.",
 );
 assert.match(envExample, /^DASHSCOPE_API_KEY=/m);
