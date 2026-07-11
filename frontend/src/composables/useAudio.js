@@ -38,6 +38,7 @@ export function useAudio(options = {}) {
   let onPlaybackIdle = null;
   const activeSources = new Set();
   const invalidatedResponseIds = new Set();
+  const flushedResponseIds = new Set();
 
   // ------------------------------------------------------------------
   // Microphone capture
@@ -115,7 +116,6 @@ export function useAudio(options = {}) {
         onAudioChunk(arrayBufferToBase64(event.data));
       };
       sourceNode.connect(workletNode);
-      // A zero-gain sink keeps the AudioWorklet alive without monitoring the mic.
       const silentGain = captureContext.createGain();
       silentGain.gain.value = 0;
       workletNode.connect(silentGain);
@@ -149,8 +149,8 @@ export function useAudio(options = {}) {
   function beginAssistantResponse(responseId) {
     if (!responseId) return;
 
-    // Stop B before C becomes the current response. Setting the id first was
-    // the original cause of B and C audio playing simultaneously.
+    // Stop B before C becomes current. Assigning C first was the original
+    // reason B and C could remain scheduled at the same time.
     if (currentResponseId && currentResponseId !== responseId) {
       stopAssistantAudio({
         responseId: currentResponseId,
@@ -162,6 +162,7 @@ export function useAudio(options = {}) {
 
     currentResponseId = responseId;
     invalidatedResponseIds.delete(responseId);
+    flushedResponseIds.delete(responseId);
     assistantAudioBlocked = false;
     const context = ensurePlaybackContext();
     nextPlayTime = Math.max(nextPlayTime, context.currentTime);
@@ -202,18 +203,7 @@ export function useAudio(options = {}) {
     source.onended = () => {
       activeSources.delete(record);
       if (record.stoppedManually) return;
-      if (responseId !== currentResponseId) return;
-      if (hasActiveSource(responseId)) return;
-
-      const playbackCursor = getPlaybackCursor();
-      currentResponseId = null;
-      currentPlayback = null;
-      nextPlayTime = context.currentTime;
-      onPlaybackIdle?.({
-        responseId,
-        playbackCursor,
-        reason: "natural_end",
-      });
+      maybeFinishPlayback(responseId);
     };
 
     source.start(startAt);
@@ -221,15 +211,38 @@ export function useAudio(options = {}) {
     return true;
   }
 
-  function flush() {
-    // Chunks are already scheduled as they arrive. Kept as a stable interface.
+  function flush(metadata = {}) {
+    const responseId = metadata.response_id || metadata.responseId || currentResponseId;
+    if (!responseId) return;
+    flushedResponseIds.add(responseId);
+    maybeFinishPlayback(responseId);
+  }
+
+  function maybeFinishPlayback(responseId) {
+    if (responseId !== currentResponseId) return;
+    if (!flushedResponseIds.has(responseId)) return;
+    if (hasActiveSource(responseId)) return;
+
+    const playbackCursor = getPlaybackCursor();
+    flushedResponseIds.delete(responseId);
+    currentResponseId = null;
+    currentPlayback = null;
+    nextPlayTime = playbackContext?.currentTime || 0;
+    onPlaybackIdle?.({
+      responseId,
+      playbackCursor,
+      reason: "natural_end",
+    });
   }
 
   function stopAssistantAudio({ responseId = null, blockNewAudio = true, reason = "interrupted" } = {}) {
     const targetResponseId = responseId || currentResponseId;
     const playbackCursor = getPlaybackCursor();
 
-    if (targetResponseId) invalidatedResponseIds.add(targetResponseId);
+    if (targetResponseId) {
+      invalidatedResponseIds.add(targetResponseId);
+      flushedResponseIds.delete(targetResponseId);
+    }
     if (blockNewAudio) assistantAudioBlocked = true;
 
     for (const record of Array.from(activeSources)) {
@@ -247,13 +260,13 @@ export function useAudio(options = {}) {
       currentResponseId = null;
       currentPlayback = null;
     }
-    const context = playbackContext;
-    nextPlayTime = context && context.state !== "closed" ? context.currentTime : 0;
+    nextPlayTime = playbackContext && playbackContext.state !== "closed"
+      ? playbackContext.currentTime
+      : 0;
 
-    return {
-      ...playbackCursor,
-      reason,
-    };
+    return playbackCursor
+      ? { ...playbackCursor, reason }
+      : null;
   }
 
   function stop() {
@@ -264,6 +277,7 @@ export function useAudio(options = {}) {
     for (const record of Array.from(activeSources)) {
       if (record.responseId === responseId) continue;
       invalidatedResponseIds.add(record.responseId);
+      flushedResponseIds.delete(record.responseId);
       record.stoppedManually = true;
       try {
         record.source.stop();
@@ -334,6 +348,7 @@ export function useAudio(options = {}) {
     playbackContext = null;
     playbackGain = null;
     invalidatedResponseIds.clear();
+    flushedResponseIds.clear();
     onPlaybackIdle = null;
   }
 
