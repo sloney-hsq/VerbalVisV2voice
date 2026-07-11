@@ -16,6 +16,7 @@ from typing import Any
 
 import realtime as base_realtime
 import tools
+import tool_runtime_patch  # noqa: F401 - installs managed-view refresh ownership
 from db import build_where, get_connection, initialize_db
 from demo_tools import execute_demo_tool, register_demo_tool_schemas
 
@@ -227,6 +228,21 @@ def validate_task_b() -> dict[str, Any]:
 
     office = next(item for item in evidence if item.get("product_category") == "office_furniture")
     _validate_office_furniture_semantics(office)
+
+    # Scope changes after coordinated views exist must not route those managed
+    # views through the legacy generic SQL refresh path.
+    refresh_result = execute_demo_tool(
+        "update_analysis_scope",
+        {
+            "operation": "add",
+            "filters": [
+                {"field": "review_score", "operator": "gte", "value": 1},
+            ],
+        },
+    )
+    _require(refresh_result.get("success") is True, "Managed comparison refresh failed")
+    for view_id in view_ids:
+        _require(_view(view_id).get("managed_comparison") is True, "Managed view was lost after refresh")
 
     return {
         "scope_rows": scope["payload"]["filtered_rows"],
