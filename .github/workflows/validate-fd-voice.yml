@@ -52,6 +52,10 @@ jobs:
         working-directory: frontend
         run: npm run validate:layout
 
+      - name: Validate page-session microphone lifecycle
+        working-directory: frontend
+        run: npm run validate:session
+
       - name: Build frontend
         working-directory: frontend
         run: npm run build
