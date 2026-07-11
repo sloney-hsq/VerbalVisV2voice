@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { defineStore } from "pinia";
 
 const MAX_TRANSCRIPT_ITEMS = 120;
@@ -7,13 +7,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const views = ref([]);
   const activeFilters = ref([]);
   const highlightedViewIds = ref([]);
-  const highlightedViewId = computed(() => highlightedViewIds.value[0] || null);
   const highlightElement = ref(null);
   const highlightDimOthers = ref(true);
 
-  // A flat chronological timeline: user, assistant, and tool items.
+  // Flat chronological timeline: user, assistant, and tool items.
   const transcriptItems = ref([]);
-  const transcripts = computed(() => transcriptItems.value);
   const currentUserItemId = ref(null);
   const currentAssistantResponseId = ref(null);
 
@@ -28,38 +26,34 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const inputAudioRate = ref(16000);
   const outputAudioRate = ref(24000);
 
-  const viewIds = computed(() => views.value.map((view) => view.id));
-
   // ------------------------------------------------------------------
   // Dashboard state
   // ------------------------------------------------------------------
 
   function initViews(viewList = []) {
     activeFilters.value = [];
-    highlightedViewIds.value = viewList.filter((view) => view.highlighted).map((view) => view.id);
+    highlightedViewIds.value = [];
     highlightElement.value = null;
     highlightDimOthers.value = true;
-    applyViewList(viewList);
+    transcriptItems.value = [];
+    currentUserItemId.value = null;
+    currentAssistantResponseId.value = null;
+    isAssistantSpeaking.value = false;
+    applyAuthoritativeViews(viewList);
   }
 
   function updateViews(viewList = []) {
-    const incomingIds = new Set(viewList.map((view) => view.id));
-    highlightedViewIds.value = highlightedViewIds.value.filter((id) => incomingIds.has(id));
-    if (!highlightedViewIds.value.length) highlightElement.value = null;
-    applyViewList(viewList);
+    applyAuthoritativeViews(viewList);
   }
 
-  function applyViewList(viewList) {
-    const highlighted = new Set(highlightedViewIds.value);
-    views.value = viewList.map((view) => ({
-      ...view,
-      highlighted: highlighted.has(view.id) || Boolean(view.highlighted),
-    }));
-  }
-
-  function appendView(view) {
-    if (!view?.id) return;
-    views.value.push({ ...view, highlighted: false });
+  function applyAuthoritativeViews(viewList) {
+    highlightedViewIds.value = viewList
+      .filter((view) => Boolean(view.highlighted))
+      .map((view) => view.id);
+    if (!highlightedViewIds.value.length) {
+      highlightElement.value = null;
+    }
+    views.value = viewList.map((view) => ({ ...view }));
   }
 
   function setSessionInfo(info = {}) {
@@ -70,10 +64,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
     if (info.model) model.value = info.model;
     if (info.inputAudioRate) inputAudioRate.value = info.inputAudioRate;
     if (info.outputAudioRate) outputAudioRate.value = info.outputAudioRate;
-  }
-
-  function highlightView(viewId, element = null, dimOthers = true) {
-    highlightViews([viewId], element, dimOthers);
   }
 
   function highlightViews(ids, element = null, dimOthers = true) {
@@ -121,6 +111,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   function beginUserTranscript({ utteranceId = null, text = "" } = {}) {
     const existing = findPendingUser(utteranceId);
     if (existing) return existing;
+
     const item = makeItem({
       role: "user",
       text,
@@ -143,6 +134,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   function completeUserTranscript(text, { utteranceId = null } = {}) {
     const clean = String(text || "").trim();
     if (!clean) return null;
+
     const item = findPendingUser(utteranceId);
     if (item) {
       item.text = clean;
@@ -151,6 +143,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       currentUserItemId.value = null;
       return item;
     }
+
     const completed = makeItem({
       role: "user",
       text: clean,
@@ -345,11 +338,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
     views,
     activeFilters,
     highlightedViewIds,
-    highlightedViewId,
     highlightElement,
     highlightDimOthers,
     transcriptItems,
-    transcripts,
     isAssistantSpeaking,
     connectionStatus,
     sessionReady,
@@ -360,12 +351,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
     model,
     inputAudioRate,
     outputAudioRate,
-    viewIds,
     initViews,
     updateViews,
-    appendView,
     setSessionInfo,
-    highlightView,
     highlightViews,
     clearHighlight,
     handleToolResult,
