@@ -1,16 +1,19 @@
 import { ref, onBeforeUnmount } from "vue";
+import { storeToRefs } from "pinia";
 import { useDashboardStore } from "../stores/dashboard";
+import { useRuntimeStore } from "../stores/runtime";
 
 const ANALYSIS_ID_STORAGE_KEY = "verbalvis.analysisId";
 
 /**
  * WebSocket composable for the VerbalVis backend.
- * Dispatches incoming messages to the Pinia store and audio player.
+ * Dispatches incoming messages to the dashboard/runtime stores and audio player.
  */
 export function useWebSocket(audioPlayer) {
   const store = useDashboardStore();
+  const runtime = useRuntimeStore();
+  const { toolRunning } = storeToRefs(runtime);
   const socket = ref(null);
-  const toolRunning = ref(false);
 
   let suppressCurrentAssistantTranscript = false;
   let activeResponseId = null;
@@ -21,6 +24,7 @@ export function useWebSocket(audioPlayer) {
   audioPlayer?.setPlaybackIdleHandler?.((event = {}) => {
     const responseId = event.responseId || event.response_id || null;
     store.isAssistantSpeaking = false;
+    if (!toolRunning.value) runtime.setPhase("ready");
     sendPlaybackStopped(
       responseId,
       event.reason || "natural_end",
@@ -38,14 +42,16 @@ export function useWebSocket(audioPlayer) {
 
     manualClose = false;
     lastUrl = url;
+    runtime.resetRuntime();
+    runtime.setPhase("connecting");
     store.connectionStatus = "connecting";
     store.sessionReady = false;
-    toolRunning.value = false;
     const ws = new WebSocket(url);
     socket.value = ws;
 
     ws.onopen = () => {
       store.connectionStatus = "connected";
+      runtime.setPhase("connecting");
       console.log("%c[WS] connected to backend", "color: #22c55e; font-weight: bold");
     };
 
@@ -54,7 +60,7 @@ export function useWebSocket(audioPlayer) {
       store.connectionStatus = "disconnected";
       store.sessionReady = false;
       activeResponseId = null;
-      toolRunning.value = false;
+      runtime.setPhase("disconnected", { toolRunning: false, tools: [] });
       socket.value = null;
     };
 
@@ -64,7 +70,7 @@ export function useWebSocket(audioPlayer) {
       store.connectionStatus = "disconnected";
       store.sessionReady = false;
       activeResponseId = null;
-      toolRunning.value = false;
+      runtime.setPhase("error", { toolRunning: false, tools: [] });
     };
 
     ws.onmessage = (event) => {
@@ -77,7 +83,11 @@ export function useWebSocket(audioPlayer) {
     switch (msg.type) {
       case "init":
         activeResponseId = null;
-        toolRunning.value = false;
+        runtime.setPhase("connecting", { toolRunning: false, tools: [] });
+        runtime.updateDashboardState({
+          ...runtime.dashboardState,
+          views: msg.views || [],
+        });
         store.initViews(msg.views);
         store.setSessionInfo({
           mode: msg.mode,
@@ -94,18 +104,35 @@ export function useWebSocket(audioPlayer) {
         if (!msg.response_id) break;
         activeResponseId = msg.response_id;
         suppressCurrentAssistantTranscript = false;
+        runtime.setPhase("processing");
         store.beginAssistantResponse(msg.response_id);
         audioPlayer?.beginAssistantResponse?.(msg.response_id);
         break;
 
       case "views_update":
         store.updateViews(msg.views);
+        runtime.updateDashboardState({
+          ...runtime.dashboardState,
+          views: msg.views || [],
+        });
+        break;
+
+      case "dashboard_state":
+        runtime.updateDashboardState(msg.state || {});
+        break;
+
+      case "runtime_state":
+        runtime.setPhase(msg.phase || "ready", {
+          toolRunning: Boolean(msg.tool_running),
+          tools: msg.tools || [],
+        });
         break;
 
       case "audio":
         if (!msg.response_id || msg.response_id !== activeResponseId) {
           break;
         }
+        runtime.setPhase("assistant_speaking");
         if (audioPlayer) {
           const didEnqueue = audioPlayer.enqueue(msg.data, {
             response_id: msg.response_id,
@@ -149,6 +176,9 @@ export function useWebSocket(audioPlayer) {
           });
         }
         activeResponseId = null;
+        if (!toolRunning.value && !store.isAssistantSpeaking) {
+          runtime.setPhase("ready");
+        }
         break;
 
       case "assistant_response_done":
@@ -157,15 +187,23 @@ export function useWebSocket(audioPlayer) {
           activeResponseId = null;
         }
         suppressCurrentAssistantTranscript = false;
+        if (!toolRunning.value && !store.isAssistantSpeaking) {
+          runtime.setPhase("ready");
+        }
         break;
 
       case "speech_started":
+        runtime.setPhase("listening");
         if (msg.text || msg.utterance_id) {
           store.beginUserTranscript({
             utteranceId: msg.utterance_id,
             text: msg.text || "",
           });
         }
+        break;
+
+      case "speech_stopped":
+        if (!toolRunning.value) runtime.setPhase("processing");
         break;
 
       case "assistant_playback_stop":
@@ -183,30 +221,40 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "tool_execution_started":
-        toolRunning.value = true;
-        console.log("%c[TOOLS] dashboard update started", "color: #f59e0b; font-weight: bold");
+        runtime.startToolBatch(msg);
+        console.log("%c[TOOLS] dashboard operation started", "color: #f59e0b; font-weight: bold");
         break;
 
       case "tool_execution_finished":
-        toolRunning.value = false;
-        console.log("%c[TOOLS] dashboard update finished", "color: #22c55e; font-weight: bold");
+        runtime.finishToolBatch(msg);
+        console.log("%c[TOOLS] dashboard operation finished", "color: #22c55e; font-weight: bold");
         break;
 
       case "tool_call":
         console.log(`%c>>> TOOL CALL: ${msg.name}(${msg.arguments})`, "color: #f59e0b; font-weight: bold");
-        store.recordToolCall({ name: msg.name, arguments: msg.arguments });
+        store.recordToolCall({
+          name: msg.name,
+          arguments: msg.arguments,
+          contract: msg.contract,
+        });
         store.addToolActionToTranscript(
-          { name: msg.name, arguments: msg.arguments },
+          {
+            name: msg.name,
+            arguments: msg.arguments,
+            summary: msg.contract?.label,
+          },
           msg.response_id || activeResponseId
         );
         break;
 
       case "tool_result":
         store.handleToolResult(msg);
+        runtime.recordToolResult(msg);
         break;
 
       case "session_ready":
         store.sessionReady = true;
+        runtime.setPhase("ready");
         break;
 
       case "session_updated":
@@ -219,13 +267,17 @@ export function useWebSocket(audioPlayer) {
           inputAudioRate: msg.input_audio_rate,
           outputAudioRate: msg.output_audio_rate,
         });
-        // Store session info for recording upload
         window.__verbalvis_session_id = msg.session_id || "";
         analysisId = normalizeAnalysisId(msg.analysis_id) || analysisId;
         setCurrentAnalysisId(analysisId);
         break;
 
       case "error":
+        runtime.setPhase("error", { toolRunning: false, tools: [] });
+        runtime.recordToolResult({
+          success: false,
+          error: msg.message || "Realtime server error",
+        });
         console.error("Server error:", msg.message);
         break;
     }
@@ -305,8 +357,8 @@ export function useWebSocket(audioPlayer) {
       socket.value = null;
     }
     activeResponseId = null;
-    toolRunning.value = false;
     store.sessionReady = false;
+    runtime.setPhase("disconnected", { toolRunning: false, tools: [] });
   }
 
   function reconnect() {
@@ -355,6 +407,7 @@ export function useWebSocket(audioPlayer) {
   return {
     socket,
     toolRunning,
+    runtime,
     connect,
     sendAudio,
     sendPlaybackStopped,
