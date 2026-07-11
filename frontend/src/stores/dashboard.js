@@ -9,6 +9,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const highlightedViewIds = ref([]);
   const highlightedViewId = computed(() => highlightedViewIds.value[0] || null);
   const highlightElement = ref(null);
+  const highlightDimOthers = ref(true);
 
   // A flat chronological timeline: user, assistant, and tool items.
   const transcriptItems = ref([]);
@@ -36,8 +37,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   function initViews(viewList = []) {
     activeFilters.value = [];
     highlightedViewIds.value = viewList.filter((view) => view.highlighted).map((view) => view.id);
-    applyViewList(viewList);
     highlightElement.value = null;
+    highlightDimOthers.value = true;
+    applyViewList(viewList);
   }
 
   function updateViews(viewList = []) {
@@ -78,16 +80,17 @@ export const useDashboardStore = defineStore("dashboard", () => {
     const normalized = uniqueIds(ids);
     highlightedViewIds.value = normalized;
     highlightElement.value = element;
+    highlightDimOthers.value = Boolean(dimOthers);
     const selected = new Set(normalized);
     views.value.forEach((view) => {
-      if (selected.has(view.id)) view.highlighted = true;
-      else if (dimOthers) view.highlighted = false;
+      view.highlighted = selected.has(view.id);
     });
   }
 
   function clearHighlight() {
     highlightedViewIds.value = [];
     highlightElement.value = null;
+    highlightDimOthers.value = true;
     views.value.forEach((view) => {
       view.highlighted = false;
     });
@@ -177,7 +180,6 @@ export const useDashboardStore = defineStore("dashboard", () => {
       transcriptItems.value.push(item);
       trimTimeline();
     }
-    // One response always appends into one existing timeline row.
     item.text += String(delta || "");
     item.status = "streaming";
     return item;
@@ -345,6 +347,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     highlightedViewIds,
     highlightedViewId,
     highlightElement,
+    highlightDimOthers,
     transcriptItems,
     transcripts,
     isAssistantSpeaking,
