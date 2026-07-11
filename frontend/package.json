@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "validate:highlight": "node scripts/validate-highlight.mjs",
-    "validate:layout": "node scripts/validate-layout.mjs"
+    "validate:layout": "node scripts/validate-layout.mjs",
+    "validate:session": "node scripts/validate-session-control.mjs"
   },
   "dependencies": {
     "pinia": "^2.1.0",
