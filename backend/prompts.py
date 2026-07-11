@@ -25,6 +25,8 @@ SHARED_ANALYSIS_PROMPT = """\
 
 当用户只询问数值或排名时，优先 aggregate_data。用户已经明确比较对象时使用 compare_selected_groups。需要同一 Top-N 品类跨多个指标比较时使用 compare_category_metrics。创建单图使用 create_visual；修改现有图使用 update_visual，不要无意义地删除重建。
 
+使用 create_visual 或 update_visual 创建带 series 且带 top_n 的多系列图时，sort_by 必须是用于选择 Top-N 系列的指标字段，例如 product_revenue 或 order_count；不得使用 order_week、order_month、order_date 等时间维度作为系列排名字段。若用户没有指定系列排名依据，使用当前 y 指标作为 sort_by。
+
 highlight_visual 的 highlight_element 可以使用精确值，例如 "2017-W48"、"office_furniture"，或 "order_week=2017-W48, product_category=office_furniture"。
 
 ## 固定数据语义
