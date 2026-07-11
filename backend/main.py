@@ -1,7 +1,12 @@
-"""VerbalVis FastAPI entry point."""
+"""VerbalVis FastAPI entry point.
+
+The current dashboard state is intentionally single-session. A second browser is
+rejected instead of sharing filters and views with the active participant.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 import uuid
@@ -12,9 +17,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from db import initialize_db
-from realtime import QWEN_TURN_DETECTION, QwenRealtimeSession
+from realtime import QWEN_MODEL, QWEN_TURN_DETECTION, QwenRealtimeSession
 
-QWEN_REALTIME_MODEL = "qwen3.5-omni-plus-realtime"
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 logging.basicConfig(
@@ -31,6 +35,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_active_session_lock = asyncio.Lock()
+_active_session_id: str | None = None
+
 
 @app.on_event("startup")
 async def startup_event() -> None:
@@ -40,27 +47,46 @@ async def startup_event() -> None:
 
 
 @app.get("/health")
-async def health_check() -> dict[str, str]:
-    return {"status": "ok"}
+async def health_check() -> dict[str, str | bool | None]:
+    return {
+        "status": "ok",
+        "single_session": True,
+        "active_session_id": _active_session_id,
+    }
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
+    global _active_session_id
+
     await websocket.accept()
     session_id = f"session-{uuid.uuid4().hex[:8]}"
+
+    async with _active_session_lock:
+        if _active_session_id is not None:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": "Another VerbalVis study session is already active.",
+                }
+            )
+            await websocket.close(code=1013)
+            return
+        _active_session_id = session_id
+
     analysis_id = _analysis_id_from_query(websocket)
     log.info(
         "Client connected: %s analysis=%s model=%s turn_detection=%s",
         session_id,
         analysis_id or "-",
-        QWEN_REALTIME_MODEL,
+        QWEN_MODEL,
         QWEN_TURN_DETECTION,
     )
 
     session = QwenRealtimeSession(
         client_ws=websocket,
         session_id=session_id,
-        model=QWEN_REALTIME_MODEL,
+        model=QWEN_MODEL,
         analysis_id=analysis_id,
     )
     try:
@@ -69,6 +95,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         log.info("Client disconnected: %s", session_id)
     except Exception as exc:
         log.exception("Qwen session error: %s", exc)
+    finally:
+        async with _active_session_lock:
+            if _active_session_id == session_id:
+                _active_session_id = None
 
 
 def _analysis_id_from_query(websocket: WebSocket) -> str | None:
