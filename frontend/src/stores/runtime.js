@@ -44,8 +44,9 @@ export const useRuntimeStore = defineStore("runtime", () => {
     if (toolRunning.value && activeTools.value.length) {
       return activeTools.value.map((tool) => tool.label || tool.name).join(" · ");
     }
-    if (lastToolError.value) return lastToolError.value;
-    if (lastToolSummary.value) return lastToolSummary.value;
+    if (phase.value === "ready" && lastToolSummary.value) {
+      return lastToolSummary.value;
+    }
     return "";
   });
 
@@ -65,6 +66,8 @@ export const useRuntimeStore = defineStore("runtime", () => {
     phase.value = nextPhase || "ready";
     if (Array.isArray(options.tools)) {
       activeTools.value = options.tools;
+    } else if (["ready", "listening", "assistant_speaking", "disconnected", "error"].includes(phase.value)) {
+      activeTools.value = [];
     }
     if (typeof options.toolRunning === "boolean") {
       toolRunning.value = options.toolRunning;
