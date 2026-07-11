@@ -83,6 +83,14 @@ def changes_dashboard(name: str) -> bool:
     return bool(contract_for(name).get("changes_dashboard"))
 
 
+def _format_count(value: Any) -> str:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{number:,}"
+
+
 def result_summary(name: str, result: dict[str, Any]) -> str:
     """Create a short, non-speculative UI summary for a completed tool call."""
     label = str(contract_for(name).get("label") or name)
@@ -92,7 +100,7 @@ def result_summary(name: str, result: dict[str, Any]) -> str:
             if name in {"filter_data", "remove_filter"}:
                 rows = payload.get("filtered_rows")
                 if rows is not None:
-                    return f"{label} completed · {rows:,} rows in scope"
+                    return f"{label} completed · {_format_count(rows)} rows in scope"
             if name == "append_visual" and payload.get("view_id"):
                 return f"{label} completed · {payload['view_id']}"
             if name == "delete_visual" and payload.get("view_id"):
