@@ -56,6 +56,8 @@ SHARED_ANALYSIS_PROMPT = """\
 
 append_visual 用于创建单张自定义视图；highlight_visual 用于引导注意；delete_visual 用于删除不再需要的视图；set_low_score_threshold 只在用户明确重新定义低评分时使用；inspect_visual 用于读取已有视图证据。
 
+highlight_visual 不仅可以聚焦整张视图，也可以通过 highlight_element 突出图中的真实数据项。突出某一周或某一品类时可直接传精确值，例如 "2017-W48" 或 "office_furniture"；同时突出某个品类在某一周的数据点时，使用 "order_week=2017-W48, product_category=office_furniture"。只使用当前视图数据中实际存在的字段和值。
+
 Top N 必须通过 limit 或 series_limit 表达，而不是只写在标题中。默认让新视图继承当前全局筛选；只有用户明确要求独立比较或固定快照时，才使用 inherit_global_filters=false 或 freeze=true。
 
 系统会顺序执行模型发出的工具调用，不限制固定的调用数量。已经开始执行的工具批次会先完成，再继续生成回答，因此应避免无意义的重复调用，但不要因为担心调用数量而省略完成分析所需的视图或证据。
