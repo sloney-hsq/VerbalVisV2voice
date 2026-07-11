@@ -1,9 +1,9 @@
 # VerbalVis-FD-Voice
 
-VerbalVis-FD-Voice is a full-duplex voice-only visual analytics prototype for
-the Olist dashboard. It supports continuous microphone input, Qwen semantic
-VAD, live user transcription, assistant speech and text output, dashboard tool
-calls, user barge-in during assistant playback, and experiment logs.
+VerbalVis-FD-Voice is a full-duplex, voice-only visual analytics prototype for
+the Olist dashboard. It supports continuous microphone input, Qwen semantic VAD,
+live user transcription, assistant speech and text output, dashboard tools,
+barge-in during assistant playback, and experiment logs.
 
 Text-CVA, Voice/Text switching, text input, `/ws/text`, and `/ws/qwen` are not
 part of this project.
@@ -14,7 +14,7 @@ part of this project.
 - Voice: `Ethan`
 - Input audio: 16 kHz PCM16
 - Output audio: 24 kHz PCM16
-- Turn Detection: `semantic_vad`
+- Turn detection: `semantic_vad`
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:8000`
 - WebSocket: `ws://localhost:8000/ws`
@@ -47,43 +47,79 @@ Open:
 http://localhost:5173
 ```
 
-## Interruption Boundary
+## Interaction Boundary
 
-Only Qwen `input_audio_buffer.speech_started` stops old assistant output.
-Browser RMS detection is used only for local audio activity and does not pause
-assistant audio, stop assistant audio, or send `response.cancel`.
+Only Qwen `input_audio_buffer.speech_started` stops an old assistant response.
+Browser RMS activity does not pause assistant audio, stop playback, or send
+`response.cancel`.
 
-When `speech_started` arrives while a Qwen response is still active, the backend
-marks that response interrupted, asks the frontend to stop playback, clears the
-streaming assistant transcript, and sends `response.cancel`. If Qwen generation
-has already completed and only buffered browser audio is still playing, the
-backend stops frontend playback without sending `response.cancel`.
+When `speech_started` arrives while a Qwen response is active, the backend marks
+that response interrupted, asks the frontend to stop playback, clears the
+streaming assistant transcript, and sends `response.cancel`. If generation has
+already completed and only buffered browser audio remains, the backend stops
+frontend playback without sending `response.cancel`.
 
 ## Non-preemptive Tool Boundary
 
 Dashboard tool execution is intentionally non-preemptive. Once a tool batch has
-started, the batch is allowed to finish normally. The project does not implement
-stale-tool invalidation, rollback, transactions, epochs, or thread cancellation.
+started, it is allowed to finish normally. The project does not implement:
+
+- stale-tool invalidation;
+- rollback or transactions;
+- intent epochs;
+- tool-thread cancellation.
 
 While a tool batch is running:
 
 - the backend ignores new browser audio chunks;
 - the frontend also stops sending microphone chunks;
-- all calls in the current batch use the user transcript captured when the batch
-  started;
-- the backend emits `tool_execution_started` and `tool_execution_finished` so the
-  client can track the boundary;
-- after the batch finishes, microphone streaming resumes and Qwen generates the
-  natural-language/audio result.
+- all calls use the completed user transcript captured for that batch;
+- at most four calls are accepted from one model response;
+- the browser receives `tool_execution_started`, `tool_execution_finished`,
+  `runtime_state`, and `dashboard_state` events;
+- the microphone stream resumes after the post-tool Qwen response is requested.
 
-Tools are extracted only from `response.done`. Before tool execution, the
-backend still discards interrupted responses, stale response completions, and
-non-completed responses. A tool that has already entered `execute_tool()` is
-allowed to finish and update the dashboard.
+A tool that has already entered `execute_tool()` is allowed to finish and update
+the dashboard.
+
+## Tool Design
+
+The runtime keeps a small tool set with explicit contracts:
+
+- data scope: `filter_data`, `remove_filter`;
+- data definition: `set_low_score_threshold`;
+- visualization: `append_visual`, `delete_visual`;
+- attention: `highlight_visual`;
+- evidence reading: `inspect_visual`.
+
+`inspect_visual` is the authoritative source for chart values and statistics.
+Dashboard metadata is used only to locate views and describe their configuration.
+The prompt asks the model to use the smallest necessary tool chain and to avoid
+repeated or speculative dashboard mutations.
+
+## Dashboard State Feedback
+
+The frontend includes a shared runtime panel showing:
+
+- current phase: ready, listening, processing, speaking, reading, or updating;
+- active tool names;
+- global filter count;
+- view count;
+- current low-score definition;
+- filtered row count when available;
+- tool failures and the temporary microphone pause during tool execution.
+
+This state feedback is informational. It does not add direct-manipulation controls
+that would change the voice-only study condition.
+
+## Logs
+
+The original multi-file logs are preserved. Non-preemptive tool batches also
+write `tool_execution.jsonl`, including batch duration, success/failure counts,
+ignored audio chunks, and whether the post-tool response was requested.
 
 Frontend playback completion is reported with `playback_stopped`, including
-`reason=natural_end` for normal playback completion. The backend uses that
-receipt to clear `playback_response_id`.
+`reason=natural_end` for normal completion.
 
 ## Validation Commands
 
