@@ -233,14 +233,29 @@ npm run build
 GitHub Actions runs backend compilation and validation, highlight validation, and
 the frontend production build for pushes to `fd-voice` and pull requests.
 
-## Start
+## Qwen Connection
 
-Create the environment variables:
+Current deployments should provide a Bailian workspace ID. The backend builds the
+regional WebSocket URL automatically:
 
 ```env
 DASHSCOPE_API_KEY=your_api_key
+QWEN_WORKSPACE_ID=your_workspace_id
 QWEN_REGION=beijing
+QWEN_VOICE=Ethan
 ```
+
+For a custom gateway or an already complete WebSocket endpoint, set:
+
+```env
+QWEN_REALTIME_URL=wss://your-host/api-ws/v1/realtime
+```
+
+`QWEN_REALTIME_URL` has priority over `QWEN_WORKSPACE_ID`. Existing installations
+without either variable fall back to the earlier DashScope realtime host and emit a
+warning; new installations should use a workspace ID or explicit URL.
+
+## Start
 
 Start the backend:
 
