@@ -1,9 +1,11 @@
 <template>
   <Dashboard />
+  <RuntimeStatus />
 </template>
 
 <script setup>
 import Dashboard from "./components/Dashboard.vue";
+import RuntimeStatus from "./components/RuntimeStatus.vue";
 </script>
 
 <style>
