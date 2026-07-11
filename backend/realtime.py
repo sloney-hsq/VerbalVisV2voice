@@ -1,12 +1,17 @@
 """Qwen-Omni-Realtime runtime for VerbalVis FD-Voice.
 
-One class owns the complete runtime:
-- Qwen connection and Semantic VAD
-- immediate speech-start interruption (R-A)
-- one active assistant response
-- non-preemptive sequential dashboard tools
-- compact browser events
-- events.jsonl and conversation.jsonl logs
+This module is the only realtime implementation. It owns:
+
+- the Qwen WebSocket session and Semantic VAD;
+- immediate speech-start interruption (R-A);
+- exactly one active assistant response;
+- a non-preemptive, sequential dashboard-tool boundary;
+- the browser event contract;
+- events.jsonl and conversation.jsonl logs.
+
+Tool execution is an input-closed window. Microphone chunks are blocked in the
+browser, rejected again by the backend, and the Qwen input buffer is cleared
+before tools run. Running tools are never cancelled or rolled back.
 """
 
 from __future__ import annotations
@@ -29,12 +34,7 @@ import websockets
 
 from logging_utils import resolve_session_log_dir, safe_log_token
 from prompts import build_system_prompt
-from tool_contracts import (
-    batch_metadata,
-    changes_dashboard,
-    contract_for,
-    result_summary,
-)
+from tool_contracts import batch_metadata, changes_dashboard, contract_for, result_summary
 from tools import (
     TOOL_SCHEMAS,
     execute_tool,
@@ -53,7 +53,10 @@ QWEN_API_KEY = (
     or os.getenv("QWEN_API_KEY")
     or ""
 ).strip()
-QWEN_MODEL = "qwen3.5-omni-plus-realtime"
+QWEN_MODEL = (
+    os.getenv("QWEN_REALTIME_MODEL", "qwen3.5-omni-plus-realtime").strip()
+    or "qwen3.5-omni-plus-realtime"
+)
 QWEN_VOICE = os.getenv("QWEN_VOICE", "Ethan").strip() or "Ethan"
 QWEN_REGION = os.getenv("QWEN_REGION", "beijing").strip().lower()
 QWEN_WORKSPACE_ID = os.getenv("QWEN_WORKSPACE_ID", "").strip()
@@ -62,10 +65,21 @@ QWEN_INPUT_SAMPLE_RATE = 16000
 QWEN_OUTPUT_SAMPLE_RATE = 24000
 QWEN_AUDIO_FORMAT = "pcm"
 QWEN_TURN_DETECTION = "semantic_vad"
-QWEN_VAD_THRESHOLD = 0.4
-QWEN_VAD_SILENCE_DURATION_MS = 800
+QWEN_VAD_THRESHOLD = float(os.getenv("QWEN_VAD_THRESHOLD", "0.4"))
+QWEN_VAD_SILENCE_DURATION_MS = int(
+    os.getenv("QWEN_VAD_SILENCE_DURATION_MS", "800")
+)
 
 LOG_ROOT = Path(__file__).parent / "logs"
+
+
+@dataclass(frozen=True)
+class PendingToolCall:
+    call_id: str
+    name: str
+    arguments_raw: str
+    response_id: str | None
+    origin_user_transcript: str
 
 
 def _with_model_query(url: str) -> str:
@@ -84,42 +98,24 @@ def _with_model_query(url: str) -> str:
 
 
 def _qwen_url() -> str:
-    """Resolve current Workspace URL, with explicit and legacy compatibility."""
+    """Return the current Bailian workspace realtime endpoint."""
     if QWEN_REALTIME_URL:
         return _with_model_query(QWEN_REALTIME_URL)
 
-    if QWEN_WORKSPACE_ID:
-        if QWEN_REGION in {"singapore", "ap-southeast-1", "intl"}:
-            host = f"{QWEN_WORKSPACE_ID}.ap-southeast-1.maas.aliyuncs.com"
-        else:
-            host = f"{QWEN_WORKSPACE_ID}.cn-beijing.maas.aliyuncs.com"
-        return f"wss://{host}/api-ws/v1/realtime?model={QWEN_MODEL}"
+    if not QWEN_WORKSPACE_ID:
+        raise RuntimeError(
+            "QWEN_WORKSPACE_ID or QWEN_REALTIME_URL is required for Qwen Realtime"
+        )
 
-    # Kept for installations created before Workspace-specific domains became
-    # the documented default. New deployments should set QWEN_WORKSPACE_ID.
-    host = (
-        "dashscope-intl.aliyuncs.com"
-        if QWEN_REGION in {"singapore", "ap-southeast-1", "intl"}
-        else "dashscope.aliyuncs.com"
-    )
-    log.warning(
-        "QWEN_WORKSPACE_ID is not configured; using the legacy realtime host. "
-        "Set QWEN_WORKSPACE_ID or QWEN_REALTIME_URL for current deployments."
-    )
+    if QWEN_REGION in {"singapore", "ap-southeast-1", "intl"}:
+        host = f"{QWEN_WORKSPACE_ID}.ap-southeast-1.maas.aliyuncs.com"
+    else:
+        host = f"{QWEN_WORKSPACE_ID}.cn-beijing.maas.aliyuncs.com"
     return f"wss://{host}/api-ws/v1/realtime?model={QWEN_MODEL}"
 
 
-@dataclass
-class PendingToolCall:
-    call_id: str
-    name: str
-    arguments_raw: str
-    response_id: str | None
-    origin_user_transcript: str
-
-
 def _clean_schema(value: Any) -> Any:
-    """Convert local schemas to the conservative subset accepted by Qwen."""
+    """Keep the conservative JSON-schema subset accepted by Qwen tools."""
     if isinstance(value, list):
         return [_clean_schema(item) for item in value if item is not None]
     if not isinstance(value, dict):
@@ -150,11 +146,11 @@ def _clean_schema(value: Any) -> Any:
 
 
 def _qwen_tools() -> list[dict[str, Any]]:
-    result = []
-    for tool in TOOL_SCHEMAS:
-        nested = tool.get("function")
-        function = nested if isinstance(nested, dict) else tool
-        result.append(
+    tools: list[dict[str, Any]] = []
+    for schema in TOOL_SCHEMAS:
+        nested = schema.get("function")
+        function = nested if isinstance(nested, dict) else schema
+        tools.append(
             {
                 "type": "function",
                 "function": {
@@ -167,7 +163,7 @@ def _qwen_tools() -> list[dict[str, Any]]:
                 },
             }
         )
-    return result
+    return tools
 
 
 class QwenRealtimeSession:
@@ -184,7 +180,7 @@ class QwenRealtimeSession:
         self.session_id = session_id
         self.analysis_id = safe_log_token(analysis_id) or None
         self.log_scope_id = self.analysis_id or safe_log_token(session_id, "session")
-        self.model = QWEN_MODEL
+        self.model = model or QWEN_MODEL
 
         self.qwen_ws: Any = None
         self.running = False
@@ -211,14 +207,13 @@ class QwenRealtimeSession:
         self._init_logs()
         self.running = True
 
-        sent = await self._send_client(
+        if not await self._send_client(
             {
                 "type": "init",
                 "views": get_views_for_frontend(),
                 **self._session_metadata(),
             }
-        )
-        if not sent:
+        ):
             return
 
         try:
@@ -235,10 +230,8 @@ class QwenRealtimeSession:
 
             error: BaseException | None = None
             for task in done:
-                if not task.cancelled():
-                    task_error = task.exception()
-                    if task_error and error is None:
-                        error = task_error
+                if not task.cancelled() and task.exception() and error is None:
+                    error = task.exception()
             for task in pending:
                 task.cancel()
             for task in pending:
@@ -260,9 +253,7 @@ class QwenRealtimeSession:
 
     async def _connect_qwen(self) -> None:
         if not QWEN_API_KEY:
-            raise RuntimeError(
-                "DASHSCOPE_API_KEY or QWEN_API_KEY is not configured"
-            )
+            raise RuntimeError("DASHSCOPE_API_KEY or QWEN_API_KEY is not configured")
 
         url = _qwen_url()
         self._event("qwen_connecting", model=self.model, url=url)
@@ -304,12 +295,7 @@ class QwenRealtimeSession:
         while self.running:
             raw = await asyncio.wait_for(self.qwen_ws.recv(), timeout=20)
             event = json.loads(raw)
-            self._event(
-                "qwen_event",
-                qwen_type=event.get("type"),
-                payload=self._compact_qwen_event(event),
-            )
-
+            self._log_qwen_event(event)
             if event.get("type") == "session.updated":
                 await self._send_client(
                     {"type": "session_updated", **self._session_metadata()}
@@ -381,14 +367,10 @@ class QwenRealtimeSession:
     async def _qwen_to_client(self) -> None:
         async for raw in self.qwen_ws:
             event = json.loads(raw)
+            self._log_qwen_event(event)
             event_type = event.get("type", "")
-            self._event(
-                "qwen_event",
-                qwen_type=event_type,
-                payload=self._compact_qwen_event(event),
-            )
 
-            if event_type == "session.updated":
+            if event_type in {"session.created", "session.updated"}:
                 continue
             if event_type == "response.created":
                 await self._response_created(event)
@@ -420,6 +402,19 @@ class QwenRealtimeSession:
         )
         if not response_id:
             return
+        response_id = str(response_id)
+
+        if self.current_response_id and self.current_response_id != response_id:
+            old_id = self.current_response_id
+            self.interrupted_response_ids.add(old_id)
+            await self._send_client(
+                {
+                    "type": "assistant_playback_stop",
+                    "response_id": old_id,
+                    "reason": "superseded_by_new_response",
+                    "clear_queue": True,
+                }
+            )
 
         self.current_response_id = response_id
         self.assistant_transcript = ""
@@ -436,7 +431,7 @@ class QwenRealtimeSession:
         if response_id not in self.first_audio_at:
             self.first_audio_at[response_id] = time.perf_counter()
 
-        sent = await self._send_client(
+        if await self._send_client(
             {
                 "type": "audio",
                 "data": event.get("delta", ""),
@@ -445,8 +440,7 @@ class QwenRealtimeSession:
                 "content_index": event.get("content_index", 0),
                 "sample_rate": QWEN_OUTPUT_SAMPLE_RATE,
             }
-        )
-        if sent:
+        ):
             self.playback_response_id = response_id
 
     async def _assistant_transcript_delta(self, event: dict[str, Any]) -> None:
@@ -475,25 +469,25 @@ class QwenRealtimeSession:
             self.assistant_transcript = transcript
 
     async def _speech_started(self, event: dict[str, Any]) -> None:
+        if self.tool_running:
+            self._event("speech_ignored_during_tool")
+            return
+
         utterance_id = event.get("item_id") or event.get("utterance_id")
         await self._send_client(
             {"type": "speech_started", "utterance_id": utterance_id}
         )
 
-        active_response_id = self.current_response_id
-        response_id = active_response_id or self.playback_response_id
+        active_id = self.current_response_id
+        response_id = active_id or self.playback_response_id
         if not response_id:
             return
 
         self.playback_stop_started_at[response_id] = time.perf_counter()
-        self._event(
-            "barge_in",
-            response_id=response_id,
-            utterance_id=utterance_id,
-        )
-        if active_response_id:
-            self.interrupted_response_ids.add(active_response_id)
-            self.cancel_requested_response_ids.add(active_response_id)
+        self._event("barge_in", response_id=response_id, utterance_id=utterance_id)
+        if active_id:
+            self.interrupted_response_ids.add(active_id)
+            self.cancel_requested_response_ids.add(active_id)
             self.current_response_id = None
             self.assistant_transcript = ""
 
@@ -505,10 +499,12 @@ class QwenRealtimeSession:
                 "clear_queue": True,
             }
         )
-        if active_response_id:
+        if active_id:
             await self._send_qwen({"type": "response.cancel"})
 
     async def _speech_stopped(self, event: dict[str, Any]) -> None:
+        if self.tool_running:
+            return
         self.last_speech_stopped_at = time.perf_counter()
         await self._send_client(
             {
@@ -518,23 +514,27 @@ class QwenRealtimeSession:
         )
 
     async def _user_transcript_delta(self, event: dict[str, Any]) -> None:
+        if self.tool_running:
+            return
         preview = (
             str(event.get("text") or "") + str(event.get("stash") or "")
         ).strip()
-        if not preview:
-            return
-        await self._send_client(
-            {
-                "type": "transcript",
-                "role": "user",
-                "text": preview,
-                "status": "partial",
-                "completed": False,
-                "utterance_id": event.get("item_id"),
-            }
-        )
+        if preview:
+            await self._send_client(
+                {
+                    "type": "transcript",
+                    "role": "user",
+                    "text": preview,
+                    "status": "partial",
+                    "completed": False,
+                    "utterance_id": event.get("item_id"),
+                }
+            )
 
     async def _user_transcript_completed(self, event: dict[str, Any]) -> None:
+        if self.tool_running:
+            self._event("user_transcript_ignored_during_tool")
+            return
         transcript = str(event.get("transcript") or "").strip()
         if not transcript:
             return
@@ -580,6 +580,7 @@ class QwenRealtimeSession:
             return
 
         self.current_response_id = None
+        metrics = self._response_metrics(response_id, response)
         if status != "completed":
             self.assistant_transcript = ""
             await self._send_client(
@@ -587,13 +588,24 @@ class QwenRealtimeSession:
                     "type": "response_done",
                     "response_id": response_id,
                     "status": status,
-                    "metrics": self._response_metrics(response_id, response),
+                    "metrics": metrics,
                 }
             )
             return
 
         tool_calls = self._tool_calls_from_response(response)
         if tool_calls:
+            # Close the tool-selection response in the browser before the
+            # separate post-tool response starts. Empty assistant rows are
+            # removed by the frontend store.
+            await self._send_client(
+                {
+                    "type": "response_done",
+                    "response_id": response_id,
+                    "status": "tool_call",
+                    "metrics": metrics,
+                }
+            )
             self.assistant_transcript = ""
             await self._execute_tool_batch(tool_calls)
             return
@@ -610,7 +622,7 @@ class QwenRealtimeSession:
                 "type": "response_done",
                 "response_id": response_id,
                 "status": status,
-                "metrics": self._response_metrics(response_id, response),
+                "metrics": metrics,
             }
         )
 
@@ -622,9 +634,7 @@ class QwenRealtimeSession:
         calls: list[PendingToolCall] = []
         seen: set[str] = set()
         for item in response.get("output") or []:
-            if not isinstance(item, dict):
-                continue
-            if item.get("type") != "function_call":
+            if not isinstance(item, dict) or item.get("type") != "function_call":
                 continue
             if item.get("status") not in {None, "completed"}:
                 continue
@@ -661,6 +671,9 @@ class QwenRealtimeSession:
 
         self.tool_running = True
         self.ignored_audio_chunks = 0
+        # Remove any partial audio that reached Qwen immediately before the
+        # browser received the tool-running state.
+        await self._send_qwen({"type": "input_audio_buffer.clear"})
         await self._send_client(
             {
                 "type": "tool_execution_started",
@@ -682,15 +695,19 @@ class QwenRealtimeSession:
                 completed += 1
                 if result.get("success"):
                     successful += 1
-            if self.running:
-                followup_requested = await self._send_qwen(
-                    {"type": "response.create"}
-                )
         finally:
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
             ignored = self.ignored_audio_chunks
             self.tool_running = False
             self.ignored_audio_chunks = 0
+
+            if self.running:
+                # Official Qwen tool flow: all function_call_output items first,
+                # then one response.create for the final spoken answer.
+                followup_requested = await self._send_qwen(
+                    {"type": "response.create"}
+                )
+
             await self._send_client(
                 {
                     "type": "tool_execution_finished",
@@ -952,12 +969,8 @@ class QwenRealtimeSession:
             "condition_code": "fd_voice",
             **payload,
         }
-        with (self._log_dir / "events.jsonl").open(
-            "a", encoding="utf-8"
-        ) as handle:
-            handle.write(
-                json.dumps(record, ensure_ascii=False, default=str) + "\n"
-            )
+        with (self._log_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
     def _conversation(self, role: str, text: str) -> None:
         clean = " ".join(str(text or "").split())
@@ -974,6 +987,13 @@ class QwenRealtimeSession:
             "a", encoding="utf-8"
         ) as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def _log_qwen_event(self, event: dict[str, Any]) -> None:
+        self._event(
+            "qwen_event",
+            qwen_type=event.get("type"),
+            payload=self._compact_qwen_event(event),
+        )
 
     @staticmethod
     def _compact_qwen_event(event: dict[str, Any]) -> dict[str, Any]:
@@ -1010,11 +1030,7 @@ class QwenRealtimeSession:
     def _is_cancel_race(self, event: dict[str, Any]) -> bool:
         if not self.cancel_requested_response_ids:
             return False
-        error = (
-            event.get("error")
-            if isinstance(event.get("error"), dict)
-            else {}
-        )
+        error = event.get("error") if isinstance(event.get("error"), dict) else {}
         combined = " ".join(
             str(error.get(key) or "").lower()
             for key in ("code", "message", "param")
