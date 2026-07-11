@@ -21,7 +21,7 @@
     </div>
 
     <p v-if="toolRunning" class="runtime-status__notice">
-      Voice input is temporarily paused while the current dashboard operation completes.
+      The microphone remains on, but speech is not forwarded until the current dashboard operation completes.
     </p>
 
     <p v-else-if="lastToolError" class="runtime-status__error">
