@@ -1,0 +1,332 @@
+%% VerbalVis 中文稿
+%% 编译：xelatex main_zh && bibtex main_zh && xelatex main_zh && xelatex main_zh
+
+\documentclass[UTF8,a4paper,10.5pt]{ctexart}
+
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{cite}
+\usepackage{graphicx}
+\graphicspath{{png/}}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.25em}
+
+\title{VerbalVis：面向分析意图修订的全双工对话式可视分析}
+\author{匿名作者}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{center}
+\includegraphics[width=\textwidth]{teaser-main.png}
+
+\small
+图~\ref{fig:teaser}：VerbalVis 在分析意图修订过程中协调用户语音、Assistant 语音、结构化工具和持久化仪表盘。贯穿全文的运行示例关注 RJ 州配送资源配置：当 Assistant 正在基于低评分比例和配送时间解释为何应优先改善 \texttt{office\_furniture} 时，分析者插话，要求同时考虑商品营收和订单数量。系统停止旧语音、丢弃旧响应的迟到事件，并在保留 RJ 分析范围的基础上重新规划后续工具和回答。
+\label{fig:teaser}
+\end{center}
+
+\begin{abstract}
+探索式数据分析具有持续迭代的特征：新的视觉证据可能促使分析者改变问题、修正临时解释，或重新限定正在调查的数据范围。语音适合快速、连续地表达这些变化，而可视化则提供了一个持久化工作空间，用于比较数值、定位异常并核验语音解释。现有对话式可视分析系统通常以完整轮次组织交互；当用户在 Assistant 尚未说完时插话，仅停止语音仍然不够，因为同一个模型响应还可能包含会修改仪表盘的结构化工具调用。
+
+本文提出 \textbf{VerbalVis}，一个协调用户音频、Assistant 音频、结构化分析工具和仪表盘状态的全双工对话式可视分析系统。当前原型采用“响应级取消、当前响应工具准入、非抢占式顺序工具边界、执行后状态回注”的机制。当用户语音取代当前响应时，系统立即停止播放、向 Qwen Realtime 发送 \texttt{response.cancel}，并丢弃被中断响应后续到达的音频、转写和完成事件。只有当前响应正常完成后，其中的 function call 才会进入工具层；一旦工具批次开始，系统暂时关闭语音输入并让工具按顺序完成，再将工具结果和最新仪表盘状态回传给 Realtime 模型，生成新的语音回答。
+
+四人形成性调研为上下文接地、可组合分析动作、重叠语音处理和跨流协调提供了设计需求。本文使用 RJ 配送资源配置作为贯穿全文的运行示例，并以 SP 周度运营风险分析作为独立案例研究，展示系统如何支持假设修正、范围细化和跨指标视觉比较。本文提供的是案例化系统证据，而不是因果性用户研究结论：它说明系统机制如何运行以及支持何种分析过程，但不声称全双工语音能够在总体上提升任务绩效、工作负担或主观控制感。
+\end{abstract}
+
+\textbf{关键词：}可视分析；对话式界面；语音交互；全双工对话；分析意图修订；探索式数据分析；案例研究。
+
+\section{引言}
+\label{sec:intro-zh}
+
+探索式数据分析并不是按照预先规定的步骤线性完成的。随着证据不断出现，分析者会在观察、提问、临时解释和新操作之间往复移动；新的模式和异常可能暴露当前分析方向的局限，使分析者重新思考问题是什么、当前解释是否成立、以及哪些数据仍然相关 \cite{russell1993cost,pirolli2005sensemaking,sacha2014knowledge,battle2019characterizing}。本文使用“分析意图修订”描述这样一类事件：分析者替换、限定或实质性改变了一个已经形成的分析承诺。
+
+自然语言接口和大模型驱动的可视分析系统已经能够支持上下文查询、图表生成、对话式细化和多步骤工具调用 \cite{gao2015datatone,setlur2016eviza,narechania2021nl4dv,dibia2023lida,wang2024dataformulator2,zhao2024lightva}。但是，这些细化通常发生在完整轮次之后。语音交互使这一限制更加明显：Assistant 的回答需要在时间上逐步展开，分析者可能在回答结束前已经意识到当前方向不对，但传统轮次式系统要求其等待。
+
+语音和可视化在 VerbalVis 中承担互补角色。引入语音并不是因为语音模型必然具有更低的推理延迟，而是因为语音能够降低表达后续问题、增加条件和修正方向的切换成本，使分析过程更接近连续讨论。可视化则将当前分析状态外化，支持跨指标比较、证据回看和异常定位。例如，一个品类可能具有最高的商品营收、较低的低评分比例和较少的订单数量。只有同时观察这些指标，分析者才能判断其营收优势是否来自较高的单笔价值，而不是广泛的销售规模。
+
+全双工语音允许系统在说话时继续监听，用户因此可以通过插话立即改变正在进行的解释。然而，插话本身并不能解决可视分析中的一致性问题。插话只是一个时间事件，用户也可能只是附和、纠正识别、请求澄清或让系统停止冗长输出。更重要的是，一个 Realtime 响应可能同时包含语音内容和一个或多个 function call。当响应过时后，系统必须判断旧语音是否应停止、尚未提交的工具是否仍应执行，以及下一轮对话应以哪个仪表盘状态为依据。
+
+VerbalVis 不引入新的语音模型。语音理解、服务端起声检测、语音生成和工具规划依赖 Qwen Realtime API。系统的核心贡献在于模型事件到达后的协调过程：浏览器播放控制、响应有效性判断、工具准入、仪表盘更新和上下文回注。
+
+当前实现包含四个机制。第一，系统始终只维护一个活动 Assistant 响应；收到语音起始事件后，立即停止前端播放并发送 \texttt{response.cancel}。第二，音频、转写和完成事件只有在其 \texttt{response\_id} 仍等于当前响应时才会被接受。第三，function call 只从“当前且正常完成”的响应中解析；被取消或已被替代的响应不会提交未完成工具。第四，一旦合法工具批次开始，系统进入非抢占式、输入关闭的执行边界：麦克风音频不再上传，工具依次执行，全部输出和最新仪表盘状态回传完成后，系统只请求一次新的语音回答。已经开始的工具不会被取消或回滚。
+
+本文保留四人形成性调研作为设计需求的经验来源。RJ 配送资源配置被设定为贯穿全文的运行示例，SP 周度运营风险分析则作为独立案例研究。本文不再设置 Full-Duplex 与 Turn-Based 的正式用户对照实验，因此不对工作负担、控制感、任务时间或洞察质量作因果性结论。
+
+本文贡献包括：
+
+\begin{enumerate}
+\item 提出一个面向全双工对话式可视分析的分析意图修订框架，将语音重叠与分析目标、工作假设和分析范围的变化区分开来。
+
+\item 实现 VerbalVis，通过响应级取消、当前响应工具准入、非抢占式顺序工具执行和执行后仪表盘状态回注，协调 Assistant 语音、结构化工具和持久化可视状态。
+
+\item 通过 RJ 运行示例、SP 案例研究以及音频替换、工具流程、仪表盘同步和指标语义检查，对当前系统能力和边界进行案例化说明。
+\end{enumerate}
+
+\section{相关工作}
+
+\subsection{面向可视化的自然语言交互}
+
+自然语言可视化接口将用户话语映射为数据属性、分析任务和视觉规范。DataTone 通过交互式歧义控件展示候选解释 \cite{gao2015datatone}；Eviza 将语言同时接地到数据集和当前视图，以支持上下文引用和后续问题 \cite{setlur2016eviza}；NL4DV 提供了从语言中抽取属性和分析任务并生成候选可视化的通用管线 \cite{narechania2021nl4dv}。这些工作确立了语言接地、歧义管理和上下文解释的重要性。
+
+Orko、InChorus 和 DataBreeze 等多模态系统进一步结合语音、触摸、笔输入和直接操作 \cite{srinivasan2018orko,srinivasan2020inchorus,srinivasan2021databreeze}。Snowy 和 conversational NL4DV 支持后续话语和已有视图修改 \cite{srinivasan2021snowy,mitra2022conversational}。这些系统通常在一个交互轮次完成后进行细化，而 VerbalVis 关注 Assistant 输出仍在进行时的即时改向。
+
+\subsection{大模型驱动与智能体式可视分析}
+
+LIDA 将可视化生成分解为数据摘要、目标生成、图表创建和评估 \cite{dibia2023lida}。Data Formulator 和 Data Formulator~2 将自然语言概念与显式视觉编码、数据转换和历史导航结合起来 \cite{wang2024dataformulator,wang2024dataformulator2}。InsightPilot、LightVA、WaitGPT 和 InsightLens 等系统进一步支持多步骤分析规划、中间操作检查以及对话、代码、图表和发现之间的关联 \cite{ma2023insightpilot,zhao2024lightva,xie2024waitgpt,weng2025insightlens}。
+
+这些系统提高了分析过程的可操控性，但用户通常通过下一条提示、图形控件或显式检查点进行修正。已有研究较少讨论：当用户在一个响应完成前改变方向时，旧响应中尚未完成的分析动作是否仍然有效。
+
+\subsection{全双工对话与打断}
+
+流式语音系统增量处理或生成音频，而全双工系统在说话时仍然继续监听。系统需要处理背景语音、附和、合作性重叠和抢占话轮等情况 \cite{skantze2021turntaking}。Barge-in 通常指用户在系统输出期间开始说话，并使系统停止或修改当前回答 \cite{heins1997bargein}。Duplex Conversation、SyncLLM、Moshi 和 SALMONN-omni 等近期工作关注并行语音流、低延迟话轮管理和上下文相关的打断 \cite{lin2022duplex,veluri2024syncllm,defossez2024moshi,yu2025salmonnomni}。
+
+打断时机并不能直接决定分析含义。用户可能在附和、修复识别、请求澄清或真正修订分析方向。停止音频也不会自动决定 function call 和仪表盘更新是否仍有效。因此，VerbalVis 将起声事件作为让出话轮的信号，并通过响应身份和工具执行边界协调后续分析动作。
+
+\subsection{意义建构与分析修订}
+
+意义建构研究将分析描述为问题、解释和数据焦点随证据持续演化的过程 \cite{russell1993cost,pirolli2005sensemaking,sacha2014knowledge}。信息搜寻研究讨论查询和目标如何逐步细化 \cite{bates1989berrypicking,vakkari2001changes,battle2019characterizing}；Data--Frame Theory 和科学推理研究说明临时解释如何在反例出现后被修正 \cite{klein2007dataframe,klahr1988dual,chinn1993anomalous}；信息觅食和可视化任务框架则区分分析目的与人群、时间、地理、变量、品类和粒度等数据目标 \cite{pirolli1999information,brehmer2013multilevel,wongsuphasawat2016voyager}。
+
+这些研究支持对分析目标、工作假设和分析范围的区分，但并不意味着三者构成穷尽且互斥的分类。本文将其作为设计和解释分析过程的敏化概念，而不是运行时标签。
+
+\section{形成性调研与设计需求}
+
+我们邀请四名参与者（F01--F04）使用早期 VerbalVis 原型，通过语音自由探索 Olist 巴西电商数据。调研目标是理解分析者如何修订正在进行的分析，以及这些修订要求系统采取何种行为，而不是验证一套普适分类。
+
+\subsection{分析修订概念}
+
+\begin{description}
+\item[\textbf{分析目标转移。}]
+分析者实质性改变主要分析问题或期望获得的知识结果。
+
+\item[\textbf{工作假设修订。}]
+分析者拒绝、替换或限定当前临时解释、判断或决策命题。
+
+\item[\textbf{分析范围细化。}]
+在大体分析目标不变的情况下，改变人群、时间、地理、变量、品类、粒度或数据子集。
+\end{description}
+
+这些概念描述不同的变化对象，并非互斥类别。一个话语可以同时被编码为多种修订；方法变化、表示变化、证据请求和对话修复被保留为边界代码。
+
+\subsection{过程与结果}
+
+初始仪表盘包含月度订单量、品类销售、州级订单分布、评分分布和配送时间统计。参与者不需要按照固定任务进行分析，也未被要求必须打断 Assistant。我们记录带时间戳的用户和 Assistant 话语，以及可获得的仪表盘事件，并在使用后收集关于改向原因、应保留或放弃的状态和重要操作的问卷反馈。
+
+分析采用演绎与归纳结合的方法。首先由大模型辅助从日志中检索候选事件，然后人工结合上下文确认是否存在可识别的既有分析承诺，以及新话语是否实质性改变、限定或替代了该承诺。最终保留 27 个分析修订事件，其中 12 个涉及分析目标转移，5 个涉及工作假设修订，18 个涉及分析范围细化，8 个事件同时具有多个标签。
+
+\begin{table*}[t]
+\centering
+\caption{三类分析修订的代表性形成性事件。}
+\label{tab:formative-episodes-zh}
+\small
+\begin{tabularx}{\textwidth}{p{0.16\textwidth}p{0.21\textwidth}Xp{0.25\textwidth}}
+\toprule
+\textbf{修订概念} & \textbf{此前承诺} & \textbf{用户话语} & \textbf{解释} \\
+\midrule
+\textbf{分析目标转移} & 探索月度订单趋势。 & “分析客户体验，也就是低评分订单，包括时间、品类和配送情况。” & 分析结果从描述订单量转向调查低评分客户体验。 \\
+\textbf{工作假设修订} & 因 BA 在高订单量州中配送时间最长而优先改善 BA。 & “BA 只是配送时间最长，这个结论有没有考虑销售量？” & 用户要求将业务规模加入原有决策标准。 \\
+\textbf{分析范围细化} & 在全量订单上研究客户体验。 & “现在把全局评分筛选到一分和两分。” & 上层目标不变，但后续分析对象被限定为低评分订单。 \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+形成性调研表明，语音重叠并不等同于分析修订。参与者也会在 Assistant 输出期间纠正识别、询问后续问题、让系统缩短说明或进行附和。因此，系统应立即让出话轮，但不能仅根据重叠时间判断语义。
+
+参与者还期待选择性取消与保留：未完成且与旧方向相关的解释应被放弃，而仍有价值的筛选、视图、发现和对话上下文应保留。由此形成四项设计需求：
+
+\paragraph{DR1：基于当前对话和视觉状态解释新话语。}
+系统需要使用活动筛选、可见视图、近期变量以及当前正在解释的内容理解省略式后续请求。
+
+\paragraph{DR2：通过可组合分析动作支持复合修订。}
+一个话语可能同时改变范围、请求比较并创建或修改视图，系统不应强迫用户拆成多个轮次。
+
+\paragraph{DR3：将让出话轮与语义解释分开。}
+起声事件应停止 Assistant 占用音频通道，但不能自动被视为分析修订。
+
+\paragraph{DR4：协调响应有效性、工具准入和仪表盘状态。}
+当活动响应被替代时，旧语音应停止，旧响应中尚未正式提交的 function call 不应进入工具层；已经建立的视觉状态应继续保留。合法工具批次开始后，当前原型允许其作为封闭边界顺序完成，并以执行后的仪表盘状态生成下一轮回答。
+
+四人形成性调研只能作为设计证据，不能用于估计总体比例或验证通用分类。后续运行示例和案例研究展示的是系统行为，而不是人类绩效假设。
+
+\section{运行示例：RJ 配送资源配置}
+
+运行示例关注 RJ 州 2017 年 10 月至 2018 年 5 月期间的配送资源配置。公司需要在商品营收 Top~15 品类中选择优先改善对象，并提出 \texttt{office\_furniture} 作为候选。
+
+仅观察服务风险时，\texttt{office\_furniture} 可能因为较高的低评分比例和较长的配送时间而显得最需要改善。但该品类订单数量可能较少。若资源目标是影响更多订单，\texttt{bed\_bath\_table} 等更大规模品类可能具有不同的投入收益。因此，分析不能把单一极值直接转化为决策，而应共同比较低评分比例、配送时间、商品营收和订单数量。
+
+运行过程如下：
+
+\begin{enumerate}
+\item 用户要求将仪表盘限定到 RJ 和指定时间范围。
+\item 系统使用共同的商品营收 Top~15 品类，创建低评分比例、配送时间、商品营收和订单数量四张协调视图。
+\item Assistant 开始基于服务风险解释初步建议。
+\item 用户插话：“先别只看低评分和配送时间，把营收和订单量也考虑进去。”
+\item VerbalVis 停止旧语音并取消活动响应，随后到达的旧响应音频、转写和完成事件不会继续影响界面。
+\item 新话语基于已经保留的 RJ 范围和当前视图进行解释；合法工具完成后，最新工具结果和仪表盘状态被重新注入 Realtime 模型，生成新的语音说明。
+\end{enumerate}
+
+该示例体现了“已建立分析状态”和“活动响应”的区别。RJ 和日期筛选已经成为工作空间的一部分，应继续保留；尚未说完的推荐属于活动响应，应在用户修订决策标准后失效。用户因此可以修正工作假设，而不需要重新构造整个分析范围。
+
+\section{VerbalVis 设计}
+
+\subsection{上下文接地解释}
+
+“只看 RJ”“把它和订单量比较”“高亮第 48 周”等话语依赖此前讨论和当前视图。VerbalVis 将近期对话与紧凑仪表盘元数据结合，包括活动筛选、高亮元素、视图标识、标题、编码和统计摘要。系统没有把目标和假设表示为形式化符号对象；三类修订只用于设计和事后解释。
+
+\subsection{可组合分析动作}
+
+VerbalVis 提供范围更新、数据聚合、指定群体比较、共同 Top-$N$ 品类比较、视图创建和修改、删除、高亮、证据读取、仪表盘总结和撤销等工具。工具参数被限制在数据集字段、支持指标和 line、bar、scatter 三类图表中，由后端进行规范化和校验。
+
+\subsection{立即让出话轮}
+
+系统采用简洁的 R-A 策略。Qwen Semantic VAD 检测到用户起声后，浏览器立即停止 Assistant 音频，后端发送 \texttt{response.cancel}。该策略优先保证用户能够抢占话轮，因此短附和或误检测也可能停止回答；当前原型不会自动恢复被打断语音的剩余部分。
+
+\subsection{响应级协调与工具边界}
+
+后端维护 \texttt{current\_response\_id}，前端维护对应的活动播放响应。只有标识仍匹配的音频和转写才会被接受。打断发生后，活动 ID 被清空，响应进入 interrupted 集合，旧响应之后到达的 \texttt{response.done} 会被丢弃。
+
+function call 只在 \texttt{response.done} 到达后统一提取，并且前提是该响应仍然是当前响应且正常完成。因此，被取消响应中尚未正式提交的工具不会执行。
+
+合法工具批次开始后，系统进入非抢占式输入关闭窗口。前端不再发送音频，后端再次拒绝残余音频，并清空 Qwen 输入缓冲区。工具依次执行；前一工具失败时，后续依赖调用被跳过。系统不会取消已经运行的查询，也不会回滚已经发生的状态修改。工具全部完成后，每个 function output 都携带最新仪表盘状态，随后只发送一次 \texttt{response.create} 生成后续解释。
+
+\subsection{持久化视觉工作空间}
+
+初始仪表盘包含月度订单趋势、评分分布、州订单量和商品营收 Top~15 品类。对话过程中可以创建和修改 line、bar、scatter 视图。所有 View 在布局中被同等对待，并根据屏幕宽度采用 4/3/2/1 列响应式排列。
+
+高亮支持具体周、品类、系列以及“周+品类”交叉数据点。语音负责快速表达问题和改向，仪表盘负责同时呈现多指标证据、帮助用户定位异常并核验 Assistant 的解释。
+
+\subsection{交互反馈}
+
+界面显示连接状态、麦克风状态、活动筛选和紧凑 Transcript。每个用户话语和 Assistant 响应只占一行；Assistant 文本通过增量 append 更新。TOOL 默认显示一行摘要，展开后仅显示工具名和参数。被打断的 Assistant 行会保留一个小型中断标记，但旧音频不会继续播放。
+
+\section{系统实现}
+
+VerbalVis 是一个单用户浏览器研究原型。前端使用 Vue~3、Pinia、Vega 和 Vega-Lite；后端使用 FastAPI、Qwen~3.5 Omni Plus Realtime、结构化工具和内存 DuckDB。
+
+\subsection{会话与音频管线}
+
+一次页面生命周期对应一个浏览器 WebSocket、一个后端会话管理器和一个 Qwen Realtime Session。点击 Start/Stop mic 只控制是否采集并发送 PCM 音频，不会创建或关闭对话 Session。
+
+浏览器通过 \texttt{AudioWorklet} 采集 16~kHz 单声道 PCM16，每个音频块约 40~ms。Qwen Semantic VAD 检测用户起声和停声。Assistant 音频以 24~kHz PCM16 增量返回，并由 Web Audio API 顺序播放。
+
+前端维护一个硬约束：任意时刻只允许一个 Assistant \texttt{response\_id} 的音频被调度。新响应开始时，旧响应的全部播放源和队列会被停止。只有收到 \texttt{response.done} 且该响应全部音频源播放结束后，系统才认定自然播放完成。
+
+\subsection{Realtime 事件协调}
+
+后端只有在事件标识仍等于 \texttt{current\_response\_id} 时才转发音频和转写。用户起声后，系统先清空活动响应标识，再停止播放并发送取消，因此旧回答不能与新回答重叠。
+
+工具结果按照 Qwen 官方流程回传：先为全部调用创建 \texttt{function\_call\_output}，然后只发送一次 \texttt{response.create}。工具后最终回答尚未开始前，麦克风仍保持阻断；收到新的 \texttt{assistant\_response\_started} 后才重新允许用户音频，从而避免用户输入与 post-tool response 创建竞争。
+
+\subsection{结构化分析工具}
+
+当前模型可调用 11 个工具，如表~\ref{tab:tools-zh} 所示。
+
+\begin{table*}[t]
+\centering
+\caption{VerbalVis 当前模型可见工具。}
+\label{tab:tools-zh}
+\small
+\begin{tabularx}{\textwidth}{p{0.22\textwidth}p{0.28\textwidth}X}
+\toprule
+\textbf{工具} & \textbf{主要参数} & \textbf{作用} \\
+\midrule
+\texttt{update\_analysis\_scope} & operation、filters、fields & 替换、增加、移除或清空共享筛选。 \\
+\texttt{aggregate\_data} & group\_by、metrics、sort、limit & 在不创建图表的情况下计算分组证据。 \\
+\texttt{compare\_selected\_groups} & dimension、values、metrics & 比较用户明确指定的州、品类、评分或时间值。 \\
+\texttt{compare\_category\_metrics} & mode、Top-$N$、rank、metrics、scope & 为同一品类集合创建多指标协调视图。 \\
+\texttt{create\_visual} & chart type、$x$、$y$、series、Top-$N$ & 创建一张 line、bar 或 scatter 图。 \\
+\texttt{update\_visual} & view id 和需要修改的编码 & 保留视图标识并修改图表。 \\
+\texttt{delete\_visual} & view id & 删除一张视图。 \\
+\texttt{highlight\_visual} & view ids、值或 field=value & 高亮视图或图内数据项，不改变数据范围。 \\
+\texttt{inspect\_visual} & view id、series、$x$ values、Top-$k$ & 定向读取当前视图证据。 \\
+\texttt{summarize\_dashboard} & 无 & 返回筛选、视图、高亮和紧凑统计。 \\
+\texttt{undo\_last\_action} & 无 & 恢复最近一次已完成的仪表盘修改。 \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\subsection{数据与指标语义}
+
+Olist 数据层包含 96,478 条已送达订单和 110,197 条订单商品记录。低评分固定定义为 \texttt{review\_score <= 2}；商品营收为 \texttt{SUM(price)}，不包含运费；品类配送指标先按 \texttt{order\_id + product\_category} 去重，避免同一订单内多个同品类商品重复加权；延迟订单表示实际送达日期晚于预计日期。
+
+后端是筛选、视图、高亮和撤销历史的唯一权威来源。状态修改完成后，后端将完整视图集合和紧凑仪表盘状态发送给前端。当前进程级内存状态仅支持一个活动分析会话。
+
+\subsection{日志与验证}
+
+每次连接生成带分析标识的 \texttt{events.jsonl} 和 \texttt{conversation.jsonl}。日志记录响应创建、起声、取消、工具调用、工具结果、仪表盘状态和时序信息。仓库还包含工具、Task A/Task B 数据语义、会话生命周期、图内高亮、响应式布局和前端构建验证脚本。这些记录用于重建机制行为，而不是人类绩效比较。
+
+\section{案例研究：SP 周度运营风险}
+
+案例研究关注 SP 州 2017 年 10 月至 2018 年 5 月的运营风险。系统首先按照商品营收选择共同 Top~5 品类，然后创建订单数量、低评分比例、平均配送时间和延迟比例四张周度多系列视图，并将 \texttt{2017-W48} 设为关注周。
+
+\subsection{案例过程}
+
+分析者首先询问：“第 48 周是不是主要品类共同的运营高峰？高需求是否同时对应客户体验风险？”VerbalVis 一次性应用 SP 和日期范围，并调用 \texttt{compare\_category\_metrics} 的 \texttt{weekly\_trends} 模式。工具为每个指标返回关注周数值、峰值周以及协调视图。
+
+在 Assistant 解释过程中，分析者插话：“不要把订单高峰直接当成风险高峰，低评分和延迟要分别比较。”旧语音立即停止，SP 范围和已有视图继续保留。该话语修正了工作假设：订单量高不再被视为服务风险的充分证据。系统随后高亮第 48 周并定向读取相关系列，而不是重新构建全部工作空间。
+
+分析者进一步把关注范围缩小到需求与风险模式差异最大的品类。这属于分析范围细化，而不是新的顶层目标。共同 Top~5 品类集合仍然不变，因此不同图之间的比较基准保持一致。
+
+\subsection{分析观察}
+
+第一，\texttt{2017-W48} 并不必然同时成为所有品类在订单数量、低评分比例、配送时间和延迟比例上的峰值。协调视图可以防止用户把需求峰值直接解释为客户体验危机。
+
+第二，跨指标排名可能显著不同。案例轨迹中，一个品类同时表现为商品营收最高、低评分比例相对较低、订单数量相对较少。这更可能表示较高的单笔价值，而不是广泛的销售规模。仪表盘将营收、数量和服务指标并置，使该解释能够被视觉核验。
+
+第三，风险强度最大的品类不一定是资源投入能够覆盖最多订单的品类。该观察与 RJ 运行示例一致：资源优先级应平衡风险严重度和潜在影响，而不是选择单张图中的最大值。
+
+\subsection{机制观察}
+
+案例轨迹展示了以下实现行为：
+
+\begin{itemize}
+\item 用户插话后，旧 Assistant 音频停止，不会与下一条回答重叠。
+\item 被中断响应的迟到音频、转写和完成事件被响应标识检查丢弃。
+\item 已经建立的筛选和视图在假设修订后继续保留。
+\item 合法工具以顺序、输入关闭的批次执行；已经运行的工具不会被取消。
+\item 只有工具结果和最新仪表盘状态全部回传后，系统才生成 post-tool 语音回答。
+\end{itemize}
+
+这些结果说明原型能够形成一致的端到端分析轨迹，但不能证明全双工语音相对于其他交互方式具有总体绩效优势。
+
+\section{讨论}
+
+\subsection{为什么结合语音和可视化}
+
+语音使分析者能够快速表达改向，而不需要等待 Assistant 说完或切换到文本输入。可视化则提供同时比较、持久记忆和异常定位能力。VerbalVis 因此把语音视为 steering 通道，把仪表盘视为 inspection 和 verification 工作空间。
+
+\subsection{响应级一致性，而非事务型工具}
+
+当前实现最强的保证是响应级一致性：被中断的响应不会继续播放，也不会提交尚未通过准入的 function call。该保证不等于完整的工具事务。一旦工具批次开始，系统会关闭输入并让其完成，不取消数据库查询、不回滚仪表盘修改，也不为每次状态更新附加 epoch。
+
+这一边界降低了当前单用户原型的复杂度，但也意味着用户无法在工具批次运行期间继续修订。未来可以使用隔离状态副本，在第二次有效性检查后统一提交，或者为查询和图表更新设计可取消操作。
+
+\subsection{局限性}
+
+本文证据主要来自四人形成性调研和一个案例研究，不能估计可用性、工作负担、控制感或分析质量的总体分布。RJ 和 SP 场景均来自 Olist 电商数据，结论不能直接推广到医疗、科研或金融分析。
+
+立即 R-A 策略可能因为附和或误检测停止回答。系统不会在让出话轮前区分 backchannel、修复、澄清和分析修订。Qwen 侧也可能保留已经生成但用户未听到的文本，因为当前实现停止客户端播放并取消响应，但不会按照实际播放位置截断 Assistant conversation item。
+
+后端采用进程级共享状态，仅支持一个活动分析 Session。工具执行非抢占、仪表盘更新没有版本号、前端也没有独立的乱序状态拒绝机制。这些限制适用于受控研究原型，而不适用于生产部署。
+
+\subsection{未来工作}
+
+未来工作包括事务化工具执行、显式 Dashboard 版本、更加细粒度的打断语义判断和多用户状态隔离。后续也可以开展正式人类评估，研究分析者如何使用插话以及协调机制是否影响主观控制和分析行为，但这些结论不属于本文当前证据范围。
+
+\section{结论}
+
+本文提出 VerbalVis，一个面向分析意图修订的全双工对话式可视分析系统。系统将快速语音 steering 与支持比较和异常定位的持久化视觉工作空间结合起来。当前机制包括响应级取消、响应标识过滤、当前响应工具准入、非抢占式顺序工具边界以及执行后仪表盘状态回注。
+
+四人形成性调研为系统设计提供了需求依据。RJ 配送资源配置作为运行示例，SP 周度运营风险作为独立案例研究，展示了跨指标推理、工作假设修订、分析范围细化以及语音--工具--仪表盘同步。本文的贡献是案例化系统说明，而不是因果性用户研究结论。VerbalVis 展示了如何将 Realtime 语音模型嵌入可视分析控制层，在响应级别保持语音输出、已接受分析动作和可见工作空间的一致性，同时明确非事务型工具执行边界。
+
+\bibliographystyle{IEEEtran}
+\bibliography{main}
+
+\end{document}
