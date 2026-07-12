@@ -36,13 +36,16 @@ const REVIEW_SCORE_COLORS = [
 /** Build one responsive Vega-Lite specification from backend view metadata. */
 export function createSpec(view, highlightElement = null) {
   const spec = {
-    $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+    $schema: "https://vega.github.io/schema/vega-lite/v6.json",
     width: "container",
     height: chartHeightForView(view),
     autosize: {
       type: "fit",
       contains: "padding",
       resize: true,
+    },
+    data: {
+      values: plainRows(view.data),
     },
     encoding: {},
   };
@@ -63,12 +66,17 @@ export function createSpec(view, highlightElement = null) {
   else if (view.chart_type === "line") buildLine(spec, view);
   else buildBar(spec, view);
 
-  return applyHighlightToSpec(spec, view, highlightElement);
+  return applyFocusReference(
+    applyHighlightToSpec(spec, view, highlightElement),
+    view,
+  );
 }
 
 function buildLine(spec, view) {
   spec.mark = { type: "line", point: true, tooltip: true };
-  spec.encoding.x = dimensionEncoding(view.x_field, { sort: "ascending" });
+  spec.encoding.x = dimensionEncoding(view.x_field, {
+    sort: explicitOrder(view) || "ascending",
+  });
   spec.encoding.y = metricEncoding(view.y_field);
   if (view.color) {
     spec.encoding.color = seriesEncoding(view);
@@ -89,20 +97,20 @@ function buildBar(spec, view) {
       field: view.x_field,
       type: "nominal",
       title: fieldTitle(view.x_field),
-      sort: view.sort_by
+      sort: explicitOrder(view) || (view.sort_by
         ? { field: view.sort_by, order: vegaOrder(view.sort_order) }
-        : "-x",
+        : "-x"),
     };
     spec.encoding.x = normalized
       ? normalizedMetricEncoding(view)
       : metricEncoding(view.y_field);
   } else {
     spec.encoding.x = dimensionEncoding(view.x_field, {
-      sort: TIME_FIELDS.has(view.x_field)
+      sort: explicitOrder(view) || (TIME_FIELDS.has(view.x_field)
         ? "ascending"
         : view.sort_by
           ? { field: view.sort_by, order: vegaOrder(view.sort_order) }
-          : "-y",
+          : "-y"),
     });
     spec.encoding.y = normalized
       ? normalizedMetricEncoding(view)
@@ -239,6 +247,52 @@ function seriesField(view) {
   return view.color === "review_score"
     ? "__review_score_label"
     : view.color;
+}
+
+function explicitOrder(view) {
+  const contract = view.order_contract;
+  if (
+    contract?.verified === true &&
+    contract.field === view.x_field &&
+    Array.isArray(contract.values) &&
+    contract.values.length
+  ) {
+    return [...contract.values];
+  }
+  return null;
+}
+
+function plainRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row) => ({ ...row }));
+}
+
+function applyFocusReference(spec, view) {
+  if (view.chart_type !== "line" || !view.focus_x) return spec;
+  const reference = {
+    mark: {
+      type: "rule",
+      color: "#f59e0b",
+      strokeWidth: 2,
+      strokeDash: [5, 4],
+      opacity: 0.9,
+    },
+    encoding: {
+      x: {
+        datum: view.focus_x,
+        type: view.x_field === "order_date" ? "temporal" : "ordinal",
+      },
+      tooltip: { datum: `Focus: ${view.focus_x}` },
+    },
+  };
+  if (Array.isArray(spec.layer)) {
+    return { ...spec, layer: [reference, ...spec.layer] };
+  }
+  const { mark, encoding, ...rest } = spec;
+  return {
+    ...rest,
+    layer: [reference, { mark, encoding }],
+  };
 }
 
 function vegaOrder(order) {

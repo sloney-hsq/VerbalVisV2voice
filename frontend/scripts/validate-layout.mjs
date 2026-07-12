@@ -7,6 +7,9 @@ import {
   MAX_CHART_HEIGHT,
   chartHeightForView,
 } from "../src/chartLayout.js";
+import { createSpec } from "../src/specFactory.js";
+import { compile } from "vega-lite";
+import { reactive } from "vue";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const srcRoot = resolve(here, "../src");
@@ -27,13 +30,8 @@ const dashboardStore = readFileSync(
 
 assert.match(
   dashboard,
-  /grid-template-columns:\s*repeat\(auto-fill,\s*540px\)/,
-  "Desktop grids must use fixed 540 px view columns.",
-);
-assert.match(
-  dashboard,
-  /@media \(max-width: 899px\)[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
-  "Small screens must use one column.",
+  /grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(min\(100%,\s*400px\),\s*1fr\)\)/,
+  "The workspace must use a fluid auto-fit chart grid.",
 );
 assert.doesNotMatch(
   dashboard,
@@ -48,9 +46,13 @@ assert.doesNotMatch(
   /title:\s*view\.title/,
   "The Vega spec must not duplicate the card title.",
 );
-assert.match(chartSlot, /max-width:\s*540px/);
-assert.match(chartSlot, /height:\s*360px/);
-assert.match(chartSlot, /min-height:\s*360px/);
+assert.doesNotMatch(
+  chartSlot,
+  /max-width:\s*540px/,
+  "Chart cards must fill their responsive grid tracks.",
+);
+assert.match(chartSlot, /height:\s*clamp\(330px,\s*28vw,\s*360px\)/);
+assert.match(chartSlot, /min-height:\s*330px/);
 assert.doesNotMatch(chartSlot, /aspect-ratio:\s*1\s*\/\s*1/);
 assert.match(chartSlot, /chartHeightForView/);
 assert.match(chartSlot, /import\("vega-embed"\)/);
@@ -69,9 +71,17 @@ assert.match(dashboard, /class="tool-error"/);
 assert.match(dashboard, />All data<\/span>/);
 assert.match(dashboard, /ws\.runtime\.lastToolError/);
 assert.match(specFactory, /view\.comparison_categories/);
+assert.match(specFactory, /view\.order_contract/);
+assert.match(specFactory, /view\.focus_x/);
 assert.match(specFactory, /COMPARISON_COLORS/);
+assert.match(chartSlot, /Shared order/);
+assert.match(chartSlot, /Focus/);
 assert.match(chartSlot, /props\.view\.y_field === "low_score_ratio"/);
 assert.match(chartSlot, /view\.low_score_threshold \?\? 2/);
+assert.match(dashboard, /groupTranscriptItems/);
+assert.match(dashboard, /conversationGroups/);
+assert.match(dashboard, /timeline--collapsed/);
+assert.match(dashboard, /Actions \(/);
 
 assert.equal(
   chartHeightForView({ chart_type: "line", data: Array(30).fill({}) }),
@@ -95,6 +105,76 @@ assert.equal(
   }),
   MAX_CHART_HEIGHT,
   "Dense category bars remain capped at the maximum plotting height.",
+);
+
+const sharedCategories = ["watches_gifts", "bed_bath_table", "office_furniture"];
+const categorySpec = createSpec({
+  chart_type: "bar",
+  x_field: "product_category",
+  y_field: "low_score_ratio",
+  order_contract: {
+    field: "product_category",
+    mode: "shared_rank",
+    values: sharedCategories,
+    verified: true,
+  },
+});
+assert.deepEqual(
+  categorySpec.encoding.y.sort,
+  sharedCategories,
+  "Task B bars must use the backend-verified shared revenue order.",
+);
+compile(categorySpec);
+
+const weeklySpec = createSpec({
+  chart_type: "line",
+  x_field: "order_week",
+  y_field: "order_count",
+  color: "product_category",
+  focus_x: "2017-W48",
+  comparison_categories: ["watches_gifts", "bed_bath_table"],
+  order_contract: {
+    field: "order_week",
+    mode: "time",
+    values: ["2017-W47", "2017-W48", "2017-W49"],
+    verified: true,
+  },
+});
+assert.ok(Array.isArray(weeklySpec.layer));
+assert.equal(weeklySpec.layer[0].encoding.x.datum, "2017-W48");
+assert.deepEqual(
+  weeklySpec.layer[1].encoding.x.sort,
+  ["2017-W47", "2017-W48", "2017-W49"],
+);
+compile(weeklySpec);
+
+const reactiveBaseView = reactive({
+  chart_type: "line",
+  x_field: "order_month",
+  y_field: "order_count",
+  order_contract: {
+    field: "order_month",
+    mode: "time",
+    values: ["2017-01", "2017-02"],
+    verified: true,
+  },
+  data: [
+    { order_month: "2017-01", order_count: 10 },
+    { order_month: "2017-02", order_count: 12 },
+  ],
+});
+const reactiveSpec = createSpec(reactiveBaseView);
+assert.equal(
+  reactiveSpec.$schema,
+  "https://vega.github.io/schema/vega-lite/v6.json",
+);
+assert.deepEqual(reactiveSpec.data?.values, [
+  { order_month: "2017-01", order_count: 10 },
+  { order_month: "2017-02", order_count: 12 },
+]);
+assert.doesNotThrow(
+  () => structuredClone(reactiveSpec),
+  "Vega specs must not retain Vue reactive proxies.",
 );
 
 console.log("Dashboard layout validation: PASS");

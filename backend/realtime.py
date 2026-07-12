@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import logging
@@ -34,6 +33,7 @@ import websockets
 
 from logging_utils import resolve_session_log_dir, safe_log_token
 from prompts import build_system_prompt
+from response_coordinator import PendingToolCall, ResponseCoordinator
 from tool_contracts import batch_metadata, changes_dashboard, contract_for, result_summary
 from tools import (
     TOOL_SCHEMAS,
@@ -72,14 +72,11 @@ QWEN_VAD_SILENCE_DURATION_MS = int(
 
 LOG_ROOT = Path(__file__).parent / "logs"
 
-
-@dataclass(frozen=True)
-class PendingToolCall:
-    call_id: str
-    name: str
-    arguments_raw: str
-    response_id: str | None
-    origin_user_transcript: str
+ALLOWED_TOOL_NAMES = {
+    str((schema.get("function") or schema).get("name") or "")
+    for schema in TOOL_SCHEMAS
+}
+ALLOWED_TOOL_NAMES.discard("")
 
 
 def _with_model_query(url: str) -> str:
@@ -191,7 +188,10 @@ class QwenRealtimeSession:
         self.qwen_ws: Any = None
         self.running = False
         self.tool_running = False
+        self.awaiting_followup_response = False
         self.ignored_audio_chunks = 0
+        self.coordinator = ResponseCoordinator()
+        self._tool_task: asyncio.Task[None] | None = None
 
         self.current_response_id: str | None = None
         self.playback_response_id: str | None = None
@@ -254,6 +254,9 @@ class QwenRealtimeSession:
             await self._send_client({"type": "error", "message": str(exc)})
             raise
         finally:
+            if self._tool_task and not self._tool_task.done():
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await asyncio.shield(self._tool_task)
             self.running = False
             await self._close_qwen()
 
@@ -356,7 +359,7 @@ class QwenRealtimeSession:
             message = json.loads(raw)
             message_type = message.get("type")
             if message_type == "audio":
-                if self.tool_running:
+                if self.tool_running or self.awaiting_followup_response:
                     self.ignored_audio_chunks += 1
                     continue
                 audio = message.get("data")
@@ -366,6 +369,16 @@ class QwenRealtimeSession:
                     )
             elif message_type == "playback_stopped":
                 self._handle_playback_stopped(message)
+            elif message_type == "chart_rendered":
+                self._event(
+                    "chart_rendered",
+                    view_id=str(message.get("view_id") or ""),
+                    dashboard_revision=message.get("revision"),
+                    success=bool(message.get("success")),
+                    row_count=message.get("row_count"),
+                    order_verified=message.get("order_verified"),
+                    error=(str(message.get("error"))[:500] if message.get("error") else None),
+                )
             elif message_type in {"close", "disconnect"}:
                 self.running = False
                 return
@@ -394,6 +407,8 @@ class QwenRealtimeSession:
                 await self._user_transcript_delta(event)
             elif event_type == "conversation.item.input_audio_transcription.completed":
                 await self._user_transcript_completed(event)
+            elif event_type == "response.function_call_arguments.done":
+                self._function_call_arguments_done(event)
             elif event_type == "response.done":
                 await self._response_done(event)
             elif event_type == "error":
@@ -412,6 +427,7 @@ class QwenRealtimeSession:
 
         if self.current_response_id and self.current_response_id != response_id:
             old_id = self.current_response_id
+            self.coordinator.interrupt_current()
             self.interrupted_response_ids.add(old_id)
             await self._send_client(
                 {
@@ -423,11 +439,22 @@ class QwenRealtimeSession:
             )
 
         self.current_response_id = response_id
+        epoch = self.coordinator.bind_response(response_id)
+        if self.awaiting_followup_response:
+            self.awaiting_followup_response = False
         self.assistant_transcript = ""
         self.response_created_at[response_id] = time.perf_counter()
-        self._event("assistant_response_started", response_id=response_id)
+        self._event(
+            "assistant_response_started",
+            response_id=response_id,
+            intent_epoch=epoch,
+        )
         await self._send_client(
-            {"type": "assistant_response_started", "response_id": response_id}
+            {
+                "type": "assistant_response_started",
+                "response_id": response_id,
+                "intent_epoch": epoch,
+            }
         )
 
     async def _audio_delta(self, event: dict[str, Any]) -> None:
@@ -475,9 +502,11 @@ class QwenRealtimeSession:
             self.assistant_transcript = transcript
 
     async def _speech_started(self, event: dict[str, Any]) -> None:
-        if self.tool_running:
+        if self.tool_running or self.awaiting_followup_response:
             self._event("speech_ignored_during_tool")
             return
+
+        intent_epoch = self.coordinator.begin_user_turn()
 
         utterance_id = event.get("item_id") or event.get("utterance_id")
         await self._send_client(
@@ -490,7 +519,12 @@ class QwenRealtimeSession:
             return
 
         self.playback_stop_started_at[response_id] = time.perf_counter()
-        self._event("barge_in", response_id=response_id, utterance_id=utterance_id)
+        self._event(
+            "barge_in",
+            response_id=response_id,
+            utterance_id=utterance_id,
+            intent_epoch=intent_epoch,
+        )
         if active_id:
             self.interrupted_response_ids.add(active_id)
             self.cancel_requested_response_ids.add(active_id)
@@ -509,7 +543,7 @@ class QwenRealtimeSession:
             await self._send_qwen({"type": "response.cancel"})
 
     async def _speech_stopped(self, event: dict[str, Any]) -> None:
-        if self.tool_running:
+        if self.tool_running or self.awaiting_followup_response:
             return
         self.last_speech_stopped_at = time.perf_counter()
         await self._send_client(
@@ -520,7 +554,7 @@ class QwenRealtimeSession:
         )
 
     async def _user_transcript_delta(self, event: dict[str, Any]) -> None:
-        if self.tool_running:
+        if self.tool_running or self.awaiting_followup_response:
             return
         preview = (
             str(event.get("text") or "") + str(event.get("stash") or "")
@@ -538,7 +572,7 @@ class QwenRealtimeSession:
             )
 
     async def _user_transcript_completed(self, event: dict[str, Any]) -> None:
-        if self.tool_running:
+        if self.tool_running or self.awaiting_followup_response:
             self._event("user_transcript_ignored_during_tool")
             return
         transcript = str(event.get("transcript") or "").strip()
@@ -555,6 +589,33 @@ class QwenRealtimeSession:
                 "completed": True,
                 "utterance_id": event.get("item_id"),
             }
+        )
+
+    def _function_call_arguments_done(self, event: dict[str, Any]) -> None:
+        response_id = self._event_response_id(event)
+        call_id = str(event.get("call_id") or "")
+        name = str(event.get("name") or "")
+        arguments = event.get("arguments") or "{}"
+        if not isinstance(arguments, str):
+            arguments = json.dumps(arguments, ensure_ascii=False)
+        registered = bool(response_id) and self.coordinator.register_tool_call(
+            response_id=str(response_id),
+            call_id=call_id,
+            name=name,
+            arguments_raw=arguments,
+            origin_user_transcript=self.last_user_transcript,
+        )
+        self._event(
+            "function_call_arguments_done",
+            response_id=response_id,
+            call_id=call_id,
+            tool=name,
+            registered=registered,
+            intent_epoch=(
+                self.coordinator.response_epoch(str(response_id))
+                if response_id
+                else None
+            ),
         )
 
     async def _response_done(self, event: dict[str, Any]) -> None:
@@ -585,9 +646,10 @@ class QwenRealtimeSession:
             )
             return
 
-        self.current_response_id = None
         metrics = self._response_metrics(response_id, response)
         if status != "completed":
+            self.coordinator.complete_response(response_id)
+            self.current_response_id = None
             self.assistant_transcript = ""
             await self._send_client(
                 {
@@ -599,8 +661,43 @@ class QwenRealtimeSession:
             )
             return
 
-        tool_calls = self._tool_calls_from_response(response)
-        if tool_calls:
+        has_tool_calls = any(
+            isinstance(item, dict) and item.get("type") == "function_call"
+            for item in response.get("output") or []
+        )
+        if has_tool_calls:
+            admission = self.coordinator.admit_tool_calls(
+                response,
+                allowed_tools=ALLOWED_TOOL_NAMES,
+                origin_user_transcript=self.last_user_transcript,
+            )
+            if not admission.allowed:
+                self.coordinator.complete_response(response_id)
+                self.current_response_id = None
+                self.assistant_transcript = ""
+                self._event(
+                    "tool_batch_rejected",
+                    response_id=response_id,
+                    reason=admission.reason,
+                    intent_epoch=self.coordinator.intent_epoch,
+                )
+                await self._send_client(
+                    {
+                        "type": "response_done",
+                        "response_id": response_id,
+                        "status": "tool_rejected",
+                        "reason": admission.reason,
+                        "metrics": metrics,
+                    }
+                )
+                await self._send_runtime("ready")
+                return
+
+            tool_calls = list(admission.calls)
+            for call in tool_calls:
+                self.coordinator.mark_executed(call)
+            self.coordinator.complete_response(response_id)
+            self.current_response_id = None
             # Close the tool-selection response in the browser before the
             # separate post-tool response starts. Empty assistant rows are
             # removed by the frontend store.
@@ -613,9 +710,18 @@ class QwenRealtimeSession:
                 }
             )
             self.assistant_transcript = ""
-            await self._execute_tool_batch(tool_calls)
+            # Close the backend input gate before yielding to the continuously
+            # running Qwen reader.
+            self.tool_running = True
+            self._tool_task = asyncio.create_task(
+                self._execute_tool_batch(tool_calls),
+                name=f"tool-batch:{response_id}",
+            )
+            self._tool_task.add_done_callback(self._tool_task_finished)
             return
 
+        self.coordinator.complete_response(response_id)
+        self.current_response_id = None
         transcript = (
             self.assistant_transcript.strip()
             or self._transcript_from_response(response)
@@ -632,42 +738,27 @@ class QwenRealtimeSession:
             }
         )
 
-    def _tool_calls_from_response(
-        self,
-        response: dict[str, Any],
-    ) -> list[PendingToolCall]:
-        response_id = str(response.get("id") or "") or None
-        calls: list[PendingToolCall] = []
-        seen: set[str] = set()
-        for item in response.get("output") or []:
-            if not isinstance(item, dict) or item.get("type") != "function_call":
-                continue
-            if item.get("status") not in {None, "completed"}:
-                continue
-            call_id = str(item.get("call_id") or "")
-            name = str(item.get("name") or "")
-            if not call_id or not name or call_id in seen:
-                continue
-            seen.add(call_id)
-            arguments = item.get("arguments") or "{}"
-            if not isinstance(arguments, str):
-                arguments = json.dumps(arguments, ensure_ascii=False)
-            calls.append(
-                PendingToolCall(
-                    call_id=call_id,
-                    name=name,
-                    arguments_raw=arguments,
-                    response_id=response_id,
-                    origin_user_transcript=self.last_user_transcript,
-                )
+    def _tool_task_finished(self, task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            self._event("tool_batch_task_cancelled")
+            return
+        error = task.exception()
+        if error is not None:
+            self.tool_running = False
+            self.awaiting_followup_response = False
+            self._event("tool_batch_task_error", error=str(error))
+            log.error(
+                "Realtime tool batch failed",
+                exc_info=(type(error), error, error.__traceback__),
             )
-        return calls
 
     async def _execute_tool_batch(self, calls: list[PendingToolCall]) -> None:
         if not calls:
             return
 
         response_id = calls[0].response_id
+        intent_epoch = calls[0].intent_epoch
+        base_revision = int(realtime_state().get("dashboard_revision") or 0)
         started_at = time.perf_counter()
         metadata = batch_metadata(call.name for call in calls)
         dashboard_change = any(changes_dashboard(call.name) for call in calls)
@@ -688,13 +779,21 @@ class QwenRealtimeSession:
                 "tool_count": len(calls),
                 "tools": metadata,
                 "changes_dashboard": dashboard_change,
+                "intent_epoch": intent_epoch,
+                "base_revision": base_revision,
             }
         )
         await self._send_runtime(
             "updating_dashboard" if dashboard_change else "reading_dashboard",
             tools=metadata,
         )
-        self._event("tool_batch_started", response_id=response_id, tools=metadata)
+        self._event(
+            "tool_batch_started",
+            response_id=response_id,
+            tools=metadata,
+            intent_epoch=intent_epoch,
+            base_revision=base_revision,
+        )
 
         try:
             blocking_failure: str | None = None
@@ -715,15 +814,41 @@ class QwenRealtimeSession:
         finally:
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
             ignored = self.ignored_audio_chunks
-            self.tool_running = False
             self.ignored_audio_chunks = 0
+            final_revision = int(realtime_state().get("dashboard_revision") or 0)
+
+            if dashboard_change and successful:
+                # Publish one coherent dashboard snapshot for the completed
+                # batch instead of exposing intermediate cross-view states.
+                await self._send_client(
+                    {
+                        "type": "views_update",
+                        "views": get_views_for_frontend(),
+                        "dashboard_revision": final_revision,
+                        "intent_epoch": intent_epoch,
+                    }
+                )
+                await self._send_client(
+                    {
+                        "type": "dashboard_state",
+                        "state": realtime_state(),
+                        "dashboard_revision": final_revision,
+                        "intent_epoch": intent_epoch,
+                    }
+                )
 
             if self.running:
                 # Official Qwen tool flow: all function_call_output items first,
                 # then one response.create for the final spoken answer.
+                self.coordinator.prepare_followup(intent_epoch)
+                self.awaiting_followup_response = True
                 followup_requested = await self._send_qwen(
                     {"type": "response.create"}
                 )
+                if not followup_requested:
+                    self.awaiting_followup_response = False
+
+            self.tool_running = False
 
             await self._send_client(
                 {
@@ -739,10 +864,10 @@ class QwenRealtimeSession:
                     "followup_requested": followup_requested,
                     "changes_dashboard": dashboard_change,
                     "tools": metadata,
+                    "intent_epoch": intent_epoch,
+                    "base_revision": base_revision,
+                    "dashboard_revision": final_revision,
                 }
-            )
-            await self._send_client(
-                {"type": "dashboard_state", "state": realtime_state()}
             )
             await self._send_runtime(
                 "processing" if followup_requested else "ready"
@@ -755,6 +880,9 @@ class QwenRealtimeSession:
                 skipped=skipped,
                 duration_ms=duration_ms,
                 ignored_audio_chunks=ignored,
+                intent_epoch=intent_epoch,
+                base_revision=base_revision,
+                dashboard_revision=final_revision,
             )
 
     async def _execute_one_tool(
@@ -764,19 +892,9 @@ class QwenRealtimeSession:
         skip_reason: str | None = None,
     ) -> dict[str, Any]:
         started_at = time.perf_counter()
-        argument_error: str | None = None
-        try:
-            raw_arguments = json.loads(pending.arguments_raw or "{}")
-            if not isinstance(raw_arguments, dict):
-                argument_error = "Tool arguments must decode to a JSON object"
-                raw_arguments = {}
-        except json.JSONDecodeError as exc:
-            argument_error = f"Invalid JSON tool arguments: {exc.msg}"
-            raw_arguments = {}
-
         arguments = normalize_tool_arguments(
             pending.name,
-            raw_arguments,
+            pending.arguments,
             user_transcript=pending.origin_user_transcript,
         )
         await self._send_client(
@@ -796,13 +914,6 @@ class QwenRealtimeSession:
                 "success": False,
                 "payload": None,
                 "error": skip_reason,
-            }
-        elif argument_error:
-            result = {
-                "tool": pending.name,
-                "success": False,
-                "payload": None,
-                "error": argument_error,
             }
         else:
             try:
@@ -842,6 +953,7 @@ class QwenRealtimeSession:
             parameters=arguments,
             success=result.get("success"),
             duration_ms=duration_ms,
+            intent_epoch=pending.intent_epoch,
         )
         await self._send_client(
             {
@@ -854,20 +966,15 @@ class QwenRealtimeSession:
             }
         )
 
-        if changes_dashboard(pending.name) and result.get("success"):
-            await self._send_client(
-                {"type": "views_update", "views": get_views_for_frontend()}
-            )
-            await self._send_client(
-                {"type": "dashboard_state", "state": realtime_state()}
-            )
-
+        state = realtime_state()
         output = {
             "success": result.get("success", False),
             "tool": result.get("tool", pending.name),
             "payload": result.get("payload"),
             "error": result.get("error"),
-            "dashboard_state": realtime_state(),
+            "dashboard_state": state,
+            "intent_epoch": pending.intent_epoch,
+            "dashboard_revision": state.get("dashboard_revision"),
         }
         await self._send_qwen(
             {
@@ -906,6 +1013,7 @@ class QwenRealtimeSession:
                 "type": "runtime_state",
                 "phase": phase,
                 "tool_running": self.tool_running,
+                "awaiting_followup_response": self.awaiting_followup_response,
                 "tools": tools or [],
             }
         )

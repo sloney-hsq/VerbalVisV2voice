@@ -5,6 +5,7 @@ const MAX_TRANSCRIPT_ITEMS = 120;
 
 export const useDashboardStore = defineStore("dashboard", () => {
   const views = ref([]);
+  const dashboardRevision = ref(0);
   const activeFilters = ref([]);
   const highlightedViewIds = ref([]);
   const highlightElement = ref(null);
@@ -30,7 +31,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   // Dashboard state
   // ------------------------------------------------------------------
 
-  function initViews(viewList = []) {
+  function initViews(viewList = [], revision = null) {
     activeFilters.value = [];
     highlightedViewIds.value = [];
     highlightElement.value = null;
@@ -39,14 +40,17 @@ export const useDashboardStore = defineStore("dashboard", () => {
     currentUserItemId.value = null;
     currentAssistantResponseId.value = null;
     isAssistantSpeaking.value = false;
-    applyAuthoritativeViews(viewList);
+    dashboardRevision.value = 0;
+    applyAuthoritativeViews(viewList, revision);
   }
 
-  function updateViews(viewList = []) {
-    applyAuthoritativeViews(viewList);
+  function updateViews(viewList = [], revision = null) {
+    return applyAuthoritativeViews(viewList, revision);
   }
 
-  function applyAuthoritativeViews(viewList) {
+  function applyAuthoritativeViews(viewList, revision = null) {
+    const incomingRevision = resolvedRevision(viewList, revision);
+    if (!acceptDashboardRevision(incomingRevision)) return false;
     highlightedViewIds.value = viewList
       .filter((view) => Boolean(view.highlighted))
       .map((view) => view.id);
@@ -54,6 +58,16 @@ export const useDashboardStore = defineStore("dashboard", () => {
       highlightElement.value = null;
     }
     views.value = viewList.map((view) => ({ ...view }));
+    return true;
+  }
+
+  function acceptDashboardRevision(revision) {
+    if (revision === null || revision === undefined || revision === "") return true;
+    const incomingRevision = Number(revision);
+    if (!Number.isFinite(incomingRevision)) return false;
+    if (incomingRevision < dashboardRevision.value) return false;
+    dashboardRevision.value = incomingRevision;
+    return true;
   }
 
   function setSessionInfo(info = {}) {
@@ -343,6 +357,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
 
   return {
     views,
+    dashboardRevision,
     activeFilters,
     highlightedViewIds,
     highlightElement,
@@ -360,6 +375,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     outputAudioRate,
     initViews,
     updateViews,
+    acceptDashboardRevision,
     setSessionInfo,
     highlightViews,
     clearHighlight,
@@ -376,3 +392,13 @@ export const useDashboardStore = defineStore("dashboard", () => {
     toggleToolDetails,
   };
 });
+
+function resolvedRevision(viewList, explicitRevision) {
+  if (explicitRevision !== null && explicitRevision !== undefined) {
+    return explicitRevision;
+  }
+  const revisions = (Array.isArray(viewList) ? viewList : [])
+    .map((view) => Number(view?.revision))
+    .filter(Number.isFinite);
+  return revisions.length ? Math.max(...revisions) : null;
+}

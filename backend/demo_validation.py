@@ -259,6 +259,85 @@ def validate_normalized_rating_chart() -> dict[str, Any]:
     }
 
 
+def validate_verified_order_and_revision() -> dict[str, Any]:
+    tools.init_views()
+    initial_revision = tools.realtime_state().get("dashboard_revision")
+    aggregated = tools.execute_tool(
+        "aggregate_data",
+        {
+            "group_by": ["customer_state"],
+            "metrics": ["low_score_ratio"],
+            "sort_by": "order_count",
+            "sort_order": "desc",
+            "limit": 3,
+        },
+    )
+    require(aggregated.get("success") is True, f"Cross-metric aggregate failed: {aggregated}")
+    require(
+        [row["customer_state"] for row in aggregated["payload"]["rows"]]
+        == ["SP", "RJ", "MG"],
+        f"Cross-metric aggregate order is wrong: {aggregated['payload']['rows']}",
+    )
+    require(
+        all("order_count" in row for row in aggregated["payload"]["rows"]),
+        "Cross-metric aggregate did not materialize order_count",
+    )
+    created = tools.execute_tool(
+        "create_visual",
+        {
+            "chart_type": "bar",
+            "x": "customer_state",
+            "y": "low_score_ratio",
+            "sort_by": "order_count",
+            "sort_order": "desc",
+            "title": "Low score by order volume",
+        },
+    )
+    require(created.get("success") is True, f"Cross-metric visual failed: {created}")
+    item = view(created["payload"]["view_id"])
+    order_contract = item.get("order_contract")
+    require(isinstance(order_contract, dict), "Cross-metric visual is missing order_contract")
+    require(order_contract.get("verified") is True, "Cross-metric order was not verified")
+    require(
+        order_contract.get("values", [])[:3] == ["SP", "RJ", "MG"],
+        f"Cross-metric order is wrong: {order_contract.get('values')}",
+    )
+    require(
+        all("order_count" in row for row in item["data"]),
+        "Cross-metric visual did not materialize order_count",
+    )
+
+    created_revision = created["payload"].get("dashboard_revision")
+    require(isinstance(initial_revision, int), "Realtime state is missing dashboard_revision")
+    require(isinstance(created_revision, int), "Mutating payload is missing dashboard_revision")
+    require(created_revision > initial_revision, "dashboard_revision did not advance after create_visual")
+    require(
+        tools.realtime_state().get("dashboard_revision") == created_revision,
+        "Realtime state revision does not match create_visual payload",
+    )
+
+    updated = tools.execute_tool(
+        "update_visual",
+        {
+            "view_id": item["id"],
+            "title": "Low score by order volume (verified)",
+        },
+    )
+    require(updated.get("success") is True, f"Revision update failed: {updated}")
+    updated_revision = updated["payload"].get("dashboard_revision")
+    require(isinstance(updated_revision, int), "Updated payload is missing dashboard_revision")
+    require(updated_revision > created_revision, "dashboard_revision is not monotonic")
+    require(
+        tools.realtime_state().get("dashboard_revision") == updated_revision,
+        "Realtime state revision does not match update_visual payload",
+    )
+    return {
+        "view_id": item["id"],
+        "order_values": order_contract["values"],
+        "dashboard_revision": updated_revision,
+    }
+
+
 def validate_task_a() -> dict[str, Any]:
     tools.init_views()
     result = tools.execute_tool(
@@ -355,6 +434,20 @@ def validate_task_b() -> dict[str, Any]:
     for metric in ("low_score_ratio", "delivery_days", "product_revenue", "order_count"):
         require(metric in office, f"office_furniture evidence is missing {metric}")
     validate_office_semantics(office)
+
+    expected_order = [item["product_category"] for item in payload["top_categories"]]
+    for view_id in payload["view_ids"]:
+        order_contract = view(view_id).get("order_contract") or {}
+        require(
+            order_contract.get("values") == expected_order,
+            f"{view_id} does not preserve the shared revenue order",
+        )
+    expected_metrics = {"low_score_ratio", "delivery_days", "product_revenue", "order_count"}
+    for row in payload["evidence"]:
+        require(
+            set(row.get("metric_ranks") or {}) == expected_metrics,
+            f"Task B evidence has incomplete metric ranks: {row}",
+        )
 
     refreshed = tools.execute_tool(
         "update_analysis_scope",
@@ -481,6 +574,7 @@ def main() -> None:
         "general_tools": validate_general_tools(),
         "scope_argument_recovery": validate_scope_argument_recovery(),
         "normalized_rating_chart": validate_normalized_rating_chart(),
+        "verified_order_and_revision": validate_verified_order_and_revision(),
         "task_a": validate_task_a(),
         "task_b": validate_task_b(),
         "preserved_comparison_scope": validate_preserved_comparison_scope(),

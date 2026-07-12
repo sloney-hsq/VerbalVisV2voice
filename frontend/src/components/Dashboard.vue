@@ -52,57 +52,104 @@
       <ChartSlot v-for="view in store.views" :key="view.id" :view="view" />
     </section>
 
-    <section class="timeline" aria-label="Session transcript">
-      <div class="timeline__header">
-        <strong>Transcript</strong>
-        <span>{{ store.transcriptItems.length }} events</span>
-      </div>
-
-      <div ref="timelineList" class="timeline__list" aria-live="polite">
-        <div
-          v-for="item in store.transcriptItems"
-          :key="item.id"
-          class="timeline-row"
-          :class="[
-            `timeline-row--${item.role}`,
-            {
-              'timeline-row--expanded': item.expanded,
-              'timeline-row--error': item.status === 'error',
-            },
-          ]"
-          @click="item.role === 'tool' && store.toggleToolDetails(item.id)"
+    <section
+      class="timeline"
+      :class="{ 'timeline--collapsed': timelineCollapsed }"
+      aria-label="Session transcript"
+    >
+      <header class="timeline__header">
+        <div class="timeline__meta">
+          <strong>Transcript</strong>
+          <span>{{ conversationGroups.length }} turns · {{ store.transcriptItems.length }} events</span>
+        </div>
+        <button
+          class="timeline__toggle"
+          type="button"
+          :aria-expanded="!timelineCollapsed"
+          @click="timelineCollapsed = !timelineCollapsed"
         >
-          <time>{{ formatTime(item.startedAt) }}</time>
-          <span class="timeline-row__role">{{ roleLabel(item) }}</span>
+          {{ timelineCollapsed ? 'Show conversation' : 'Hide conversation' }}
+          <span aria-hidden="true">{{ timelineCollapsed ? '⌃' : '⌄' }}</span>
+        </button>
+      </header>
 
-          <div class="timeline-row__body">
-            <template v-if="item.role === 'tool'">
-              <div class="tool-summary" :title="item.summary">
-                <span class="tool-caret">{{ item.expanded ? '▾' : '▸' }}</span>
-                <span>{{ item.summary || formatToolName(item.toolName) }}</span>
-              </div>
-              <div v-if="item.expanded" class="tool-details" @click.stop>
-                <div><b>Tool</b><code>{{ item.toolName }}</code></div>
-                <div><b>Parameters</b><pre>{{ formatParameters(item.parameters) }}</pre></div>
-                <div v-if="item.error" class="tool-error">
-                  <b>Error</b><code>{{ item.error }}</code>
-                </div>
-              </div>
-            </template>
-
-            <template v-else>
-              <span
-                class="message-text"
-                :title="item.text"
-              >{{ item.text || statusPlaceholder(item) }}</span>
+      <div
+        v-if="!timelineCollapsed"
+        ref="timelineList"
+        class="timeline__list"
+        aria-live="polite"
+      >
+        <p v-if="!conversationGroups.length" class="timeline__empty">
+          Conversation will appear here.
+        </p>
+        <section
+          v-for="group in conversationGroups"
+          :key="group.id"
+          class="conversation-turn"
+        >
+          <div
+            v-for="item in group.messages"
+            :key="item.id"
+            class="timeline-row"
+            :class="[
+              `timeline-row--${item.role}`,
+              { 'timeline-row--error': item.status === 'error' },
+            ]"
+          >
+            <time>{{ formatTime(item.startedAt) }}</time>
+            <span class="timeline-row__role">{{ roleLabel(item) }}</span>
+            <div class="timeline-row__body">
+              <span class="message-text" :title="item.text">
+                {{ item.text || statusPlaceholder(item) }}
+              </span>
               <span
                 v-if="item.role === 'assistant' && item.status === 'interrupted'"
                 class="interrupted-mark"
                 title="Assistant response interrupted"
               >×</span>
-            </template>
+            </div>
           </div>
-        </div>
+
+          <button
+            v-if="group.actions.length"
+            class="actions-toggle"
+            type="button"
+            :aria-expanded="isGroupActionsOpen(group.id)"
+            @click="toggleGroupActions(group.id)"
+          >
+            <span>Actions ({{ group.actions.length }})</span>
+            <span aria-hidden="true">{{ isGroupActionsOpen(group.id) ? '⌃' : '⌄' }}</span>
+          </button>
+
+          <div v-if="isGroupActionsOpen(group.id)" class="action-list">
+            <div
+              v-for="item in group.actions"
+              :key="item.id"
+              class="timeline-row timeline-row--tool"
+              :class="{
+                'timeline-row--expanded': item.expanded,
+                'timeline-row--error': item.status === 'error',
+              }"
+              @click="store.toggleToolDetails(item.id)"
+            >
+              <time>{{ formatTime(item.startedAt) }}</time>
+              <span class="timeline-row__role">ACTION</span>
+              <div class="timeline-row__body">
+                <div class="tool-summary" :title="item.summary">
+                  <span class="tool-caret">{{ item.expanded ? '▾' : '▸' }}</span>
+                  <span>{{ item.summary || formatToolName(item.toolName) }}</span>
+                </div>
+                <div v-if="item.expanded" class="tool-details" @click.stop>
+                  <div><b>Tool</b><code>{{ item.toolName }}</code></div>
+                  <div><b>Parameters</b><pre>{{ formatParameters(item.parameters) }}</pre></div>
+                  <div v-if="item.error" class="tool-error">
+                    <b>Error</b><code>{{ item.error }}</code>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </section>
   </main>
@@ -114,12 +161,15 @@ import ChartSlot from "./ChartSlot.vue";
 import { useAudio } from "../composables/useAudio";
 import { useWebSocket } from "../composables/useWebSocket";
 import { useDashboardStore } from "../stores/dashboard";
+import { groupTranscriptItems } from "../transcriptGroups";
 
 const store = useDashboardStore();
 const audio = useAudio();
 const ws = useWebSocket(audio);
 const timelineList = ref(null);
 const isStartingMic = ref(false);
+const timelineCollapsed = ref(false);
+const expandedActionGroupIds = ref(new Set());
 
 const phaseLabel = computed(() => ws.runtime.phaseLabel);
 const sessionTitle = computed(() => (
@@ -133,6 +183,7 @@ const statusDotClass = computed(() => ({
 const micDisabled = computed(() => (
   isStartingMic.value ||
   ws.toolRunning.value ||
+  audio.captureBlocked.value ||
   store.connectionStatus !== "connected" ||
   !store.sessionReady
 ));
@@ -147,8 +198,11 @@ const micLabel = computed(() => {
 });
 const timelineVersion = computed(() => (
   store.transcriptItems
-    .map((item) => `${item.id}:${item.text?.length || 0}:${item.status}:${item.expanded}`)
+    .map((item) => `${item.id}:${item.text?.length || 0}:${item.status}`)
     .join("|")
+));
+const conversationGroups = computed(() => (
+  groupTranscriptItems(store.transcriptItems)
 ));
 
 watch(timelineVersion, () => {
@@ -184,6 +238,17 @@ async function startMicrophone() {
 function toggleMicrophone() {
   if (audio.isRecording.value) audio.stopRecording();
   else startMicrophone();
+}
+
+function isGroupActionsOpen(groupId) {
+  return expandedActionGroupIds.value.has(groupId);
+}
+
+function toggleGroupActions(groupId) {
+  const next = new Set(expandedActionGroupIds.value);
+  if (next.has(groupId)) next.delete(groupId);
+  else next.add(groupId);
+  expandedActionGroupIds.value = next;
 }
 
 function handleShortcut(event) {
@@ -421,7 +486,7 @@ function filterLabel(filter) {
 
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 540px);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
   grid-auto-flow: row;
   grid-auto-rows: auto;
   flex: 1 1 auto;
@@ -430,38 +495,97 @@ function filterLabel(filter) {
   overflow: auto;
   align-content: start;
   align-items: start;
-  justify-content: center;
+  justify-content: stretch;
   padding: 1px 2px 6px;
 }
 
 .timeline {
   display: flex;
-  flex: 0 0 250px;
-  height: 250px;
+  flex: 0 0 clamp(150px, 22dvh, 210px);
+  height: clamp(150px, 22dvh, 210px);
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid #d9e1ec;
   border-radius: 12px;
   background: #fff;
+  transition: flex-basis 160ms ease, height 160ms ease;
+}
+
+.timeline--collapsed {
+  flex-basis: 40px;
+  height: 40px;
 }
 
 .timeline__header {
   display: flex;
-  flex: 0 0 82px;
-  flex-direction: column;
-  justify-content: center;
-  padding: 8px 10px;
-  border-right: 1px solid #e6ebf2;
+  flex: 0 0 39px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0 10px 0 12px;
+  gap: 12px;
+  border-bottom: 1px solid #e6ebf2;
   background: #f8fafc;
   font-size: 11px;
 }
-.timeline__header strong { font-size: 12px; }
-.timeline__header span { margin-top: 3px; color: #94a3b8; }
+
+.timeline--collapsed .timeline__header { border-bottom: 0; }
+
+.timeline__meta {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 8px;
+}
+.timeline__meta strong { color: #263448; font-size: 12px; }
+.timeline__meta span {
+  overflow: hidden;
+  color: #94a3b8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline__toggle,
+.actions-toggle {
+  border: 1px solid #d8e1ed;
+  border-radius: 7px;
+  background: #fff;
+  color: #526174;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.timeline__toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  height: 27px;
+  padding: 0 8px;
+  gap: 6px;
+}
+.timeline__toggle:hover,
+.actions-toggle:hover { border-color: #93b4e4; color: #1d5ec7; }
 
 .timeline__list {
   flex: 1 1 auto;
   min-width: 0;
   overflow-y: auto;
-  padding: 4px 7px;
+  padding: 2px 8px 6px;
+}
+
+.timeline__empty {
+  margin: 24px 0;
+  color: #94a3b8;
+  font-size: 11px;
+  text-align: center;
+}
+
+.conversation-turn {
+  padding: 3px 0 4px;
+}
+.conversation-turn + .conversation-turn {
+  border-top: 1px solid #e8edf4;
 }
 
 .timeline-row {
@@ -469,12 +593,10 @@ function filterLabel(filter) {
   grid-template-columns: 58px 40px minmax(0, 1fr);
   min-height: 25px;
   align-items: start;
-  border-bottom: 1px solid #f0f3f7;
   color: #334155;
   font-size: 11px;
   line-height: 1.35;
 }
-.timeline-row:last-child { border-bottom: 0; }
 .timeline-row time {
   padding: 5px 4px 4px 0;
   color: #94a3b8;
@@ -531,6 +653,30 @@ function filterLabel(filter) {
 }
 .tool-caret { flex: 0 0 14px; }
 
+.actions-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 104px;
+  height: 25px;
+  margin: 2px 0 1px 98px;
+  padding: 0 8px;
+  color: #8a5a11;
+  background: #fffbeb;
+  border-color: #f3d8a5;
+}
+
+.action-list {
+  margin: 4px 0 3px 90px;
+  padding: 3px 8px;
+  border-left: 2px solid #f1d39a;
+  border-radius: 0 7px 7px 0;
+  background: #fffdf7;
+}
+.action-list .timeline-row {
+  grid-template-columns: 58px 52px minmax(0, 1fr);
+}
+
 .timeline-row--expanded .timeline-row__body {
   display: block;
 }
@@ -572,10 +718,26 @@ function filterLabel(filter) {
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 899px) {
+@media (max-width: 900px) {
   .topbar { grid-template-columns: 1fr auto; }
   .session-state { grid-column: 1 / -1; grid-row: 2; }
   .brand p { display: none; }
-  .chart-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .dashboard { padding: 8px; gap: 8px; }
+  .topbar { padding: 7px 8px; gap: 8px; }
+  .session-state { overflow-x: auto; }
+  .mic-button { min-width: 44px; padding: 0 10px; }
+  .mic-button span { display: none; }
+  .timeline { flex-basis: clamp(140px, 25dvh, 190px); }
+  .timeline--collapsed { flex-basis: 40px; }
+  .timeline__toggle { font-size: 0; }
+  .timeline__toggle span { font-size: 12px; }
+  .timeline-row { grid-template-columns: 50px 34px minmax(0, 1fr); }
+  .actions-toggle { margin-left: 84px; }
+  .action-list { margin-left: 76px; }
+  .action-list .timeline-row { grid-template-columns: 50px 48px minmax(0, 1fr); }
+  .tool-details { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

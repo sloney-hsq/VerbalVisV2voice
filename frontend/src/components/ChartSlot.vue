@@ -14,6 +14,8 @@
       <div class="chart-card__badges">
         <span v-if="view.top_n || view.limit">Top {{ view.top_n || view.limit }}</span>
         <span v-if="view.normalize">100% stacked</span>
+        <span v-if="hasSharedOrder">Shared order</span>
+        <span v-if="view.focus_x">Focus {{ view.focus_x }}</span>
         <span v-if="usesLowScore">{{ lowScoreLabel }}</span>
         <span v-if="resolvedHighlight" class="highlight-badge">
           {{ resolvedHighlight.label }}
@@ -44,6 +46,8 @@ const store = useDashboardStore();
 const vegaContainer = ref(null);
 let embeddedView = null;
 let vegaEmbedPromise = null;
+let renderGeneration = 0;
+let renderQueue = Promise.resolve();
 
 const activeHighlightElement = computed(() => (
   props.view.highlighted ? store.highlightElement : null
@@ -66,6 +70,10 @@ const chartTypeLabel = computed(() => ({
   scatter: "Scatter",
 }[props.view.chart_type] || props.view.chart_type));
 const usesLowScore = computed(() => props.view.y_field === "low_score_ratio");
+const hasSharedOrder = computed(() => (
+  props.view.order_contract?.mode === "shared_rank" &&
+  props.view.order_contract?.verified === true
+));
 const lowScoreLabel = computed(() => (
   `Low score ≤ ${Number(props.view.low_score_threshold ?? 2)}`
 ));
@@ -85,27 +93,57 @@ watch(
 );
 
 onMounted(() => nextTick(render));
-onBeforeUnmount(clearChart);
+onBeforeUnmount(() => {
+  renderGeneration += 1;
+  clearChart();
+});
 
-async function render() {
-  if (!vegaContainer.value) return;
+function render() {
+  const generation = ++renderGeneration;
+  renderQueue = renderQueue
+    .catch(() => undefined)
+    .then(() => performRender(generation));
+  return renderQueue;
+}
+
+async function performRender(generation) {
+  if (!vegaContainer.value || generation !== renderGeneration) return;
   clearChart();
 
   const spec = createSpec(props.view, activeHighlightElement.value);
-  spec.data = { values: props.view.data || [] };
   try {
     const vegaEmbed = await loadVegaEmbed();
-    if (!vegaContainer.value) return;
+    if (!vegaContainer.value || generation !== renderGeneration) return;
     const result = await vegaEmbed(vegaContainer.value, spec, {
       actions: false,
       renderer: "svg",
       theme: "vox",
     });
+    if (generation !== renderGeneration) {
+      result.view?.finalize?.();
+      return;
+    }
     embeddedView = result.view;
+    reportRender(true);
   } catch (error) {
+    if (generation !== renderGeneration) return;
     console.warn(`Unable to render ${props.view.id}`, error);
     vegaContainer.value.textContent = "Unable to render this view.";
+    reportRender(false, error);
   }
+}
+
+function reportRender(success, error = null) {
+  window.dispatchEvent(new CustomEvent("verbalvis:chart-rendered", {
+    detail: {
+      view_id: props.view.id,
+      revision: props.view.revision ?? null,
+      success: Boolean(success),
+      row_count: Array.isArray(props.view.data) ? props.view.data.length : 0,
+      order_verified: props.view.order_contract?.verified ?? null,
+      error: error ? String(error?.message || error) : null,
+    },
+  }));
 }
 
 function loadVegaEmbed() {
@@ -127,10 +165,9 @@ function clearChart() {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 540px;
-  height: 360px;
+  height: clamp(330px, 28vw, 360px);
   min-width: 0;
-  min-height: 360px;
+  min-height: 330px;
   padding: 11px 12px 10px;
   overflow: hidden;
   border: 1px solid #d9e1ec;

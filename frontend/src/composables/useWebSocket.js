@@ -18,6 +18,8 @@ export function useWebSocket(audioPlayer) {
   let activeResponseId = null;
   let analysisId = createAnalysisId();
 
+  window.addEventListener("verbalvis:chart-rendered", handleChartRendered);
+
   audioPlayer?.setPlaybackIdleHandler?.((event = {}) => {
     dashboard.isAssistantSpeaking = false;
     if (!toolRunning.value && !runtime.configurationError) runtime.setPhase("ready");
@@ -90,7 +92,7 @@ export function useWebSocket(audioPlayer) {
     switch (message.type) {
       case "init":
         activeResponseId = null;
-        dashboard.initViews(message.views || []);
+        dashboard.initViews(message.views || [], message.dashboard_revision);
         syncSessionInfo(message);
         runtime.updateDashboardState({
           ...runtime.dashboardState,
@@ -182,7 +184,9 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "tool_execution_finished":
-        audioPlayer?.setCaptureBlocked?.(false);
+        audioPlayer?.setCaptureBlocked?.(
+          Boolean(message.followup_requested && !activeResponseId),
+        );
         runtime.finishToolBatch(message);
         break;
 
@@ -202,15 +206,23 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "views_update":
-        dashboard.updateViews(message.views || []);
-        runtime.updateDashboardState({
-          ...runtime.dashboardState,
-          views: message.views || [],
-        });
+        if (dashboard.updateViews(
+          message.views || [],
+          message.dashboard_revision,
+        )) {
+          runtime.updateDashboardState({
+            ...runtime.dashboardState,
+            views: message.views || [],
+            dashboard_revision: dashboard.dashboardRevision,
+          });
+        }
         break;
 
       case "dashboard_state":
-        syncDashboardState(message.state || {});
+        syncDashboardState(
+          message.state || {},
+          message.dashboard_revision ?? message.state?.dashboard_revision,
+        );
         break;
 
       case "runtime_state":
@@ -282,7 +294,8 @@ export function useWebSocket(audioPlayer) {
     if (acknowledge) sendPlaybackStopped(stoppedId, reason, playbackCursor);
   }
 
-  function syncDashboardState(state = {}) {
+  function syncDashboardState(state = {}, revision = null) {
+    if (!dashboard.acceptDashboardRevision(revision)) return;
     runtime.updateDashboardState(state);
     if (Array.isArray(state.filters)) dashboard.activeFilters = state.filters;
     if (Array.isArray(state.highlighted)) {
@@ -325,6 +338,14 @@ export function useWebSocket(audioPlayer) {
       response_id: responseId,
       reason,
       playback_cursor: playbackCursor || null,
+    }));
+  }
+
+  function handleChartRendered(event) {
+    if (!socket.value || socket.value.readyState !== WebSocket.OPEN) return;
+    socket.value.send(JSON.stringify({
+      type: "chart_rendered",
+      ...(event?.detail || {}),
     }));
   }
 
@@ -380,7 +401,10 @@ export function useWebSocket(audioPlayer) {
       .slice(0, 80);
   }
 
-  onBeforeUnmount(disconnect);
+  onBeforeUnmount(() => {
+    window.removeEventListener("verbalvis:chart-rendered", handleChartRendered);
+    disconnect();
+  });
 
   return {
     toolRunning,

@@ -61,7 +61,18 @@ highlighted_views: list[str] = []
 highlight_element: Any = None
 dim_others: bool = True
 view_counter = BASE_VIEW_COUNT
+dashboard_revision = 0
 _history: list[dict[str, Any]] = []
+
+MUTATING_TOOLS = {
+    "update_analysis_scope",
+    "compare_category_metrics",
+    "create_visual",
+    "update_visual",
+    "delete_visual",
+    "highlight_visual",
+    "undo_last_action",
+}
 
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -321,6 +332,7 @@ def init_views() -> None:
     global highlight_element
     global dim_others
     global view_counter
+    global dashboard_revision
     global _history
 
     active_filters = []
@@ -328,6 +340,7 @@ def init_views() -> None:
     highlight_element = None
     dim_others = True
     view_counter = BASE_VIEW_COUNT
+    dashboard_revision = 0
     _history = []
     views = [
         _make_view(
@@ -375,6 +388,8 @@ def execute_tool(
     name: str,
     arguments: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    global dashboard_revision
+
     args = normalize_tool_arguments(name, arguments or {})
     handlers = {
         "update_analysis_scope": _exec_update_analysis_scope,
@@ -393,7 +408,17 @@ def execute_tool(
     if not handler:
         return _error(name, f"Unknown tool: {name}")
     try:
-        return handler(args)
+        result = handler(args)
+        if result.get("success"):
+            if name in MUTATING_TOOLS:
+                dashboard_revision += 1
+            payload = result.get("payload")
+            if isinstance(payload, dict):
+                payload["dashboard_revision"] = dashboard_revision
+                postconditions = payload.get("postconditions")
+                if isinstance(postconditions, dict):
+                    postconditions["dashboard_revision"] = dashboard_revision
+        return result
     except Exception as exc:
         log.exception("Tool %s failed", name)
         return _error(name, str(exc))
@@ -429,16 +454,18 @@ def normalize_tool_arguments(
 def get_views_for_frontend() -> list[dict[str, Any]]:
     selected = set(highlighted_views)
     return [
-        {
-            **deepcopy(view),
-            "highlighted": view.get("id") in selected,
-        }
+            {
+                **deepcopy(view),
+                "highlighted": view.get("id") in selected,
+                "revision": dashboard_revision,
+            }
         for view in views
     ]
 
 
 def realtime_state() -> dict[str, Any]:
     return {
+        "dashboard_revision": dashboard_revision,
         "filters": deepcopy(active_filters),
         "highlighted": list(highlighted_views),
         "highlight_element": deepcopy(highlight_element),
@@ -559,10 +586,18 @@ def _exec_aggregate_data(args: dict[str, Any]) -> dict[str, Any]:
     if error:
         return _error("aggregate_data", error)
 
-    rows = _aggregate(group_by, metrics, [*active_filters, *filters])
+    sort_by = args.get("sort_by") or metrics[0]
+    query_metrics = list(metrics)
+    if (
+        sort_by in METRICS
+        and sort_by not in group_by
+        and sort_by not in query_metrics
+    ):
+        query_metrics.append(sort_by)
+    rows = _aggregate(group_by, query_metrics, [*active_filters, *filters])
     rows = _sort_and_limit(
         rows,
-        args.get("sort_by") or metrics[0],
+        sort_by,
         args.get("sort_order") or "desc",
         _limit(args.get("limit"), default=MAX_ROWS),
     )
@@ -709,7 +744,7 @@ def _exec_compare_category_metrics(args: dict[str, Any]) -> dict[str, Any]:
                 f"{_metric_label(metric)} · "
                 f"Top {top_n} by {_metric_label(rank_by)}"
             )
-            sort_by = metric
+            sort_by = rank_by
             sort_order = "desc"
 
         view = _make_view(
@@ -736,10 +771,14 @@ def _exec_compare_category_metrics(args: dict[str, Any]) -> dict[str, Any]:
                     "focus_week": focus_week,
                     "title_prefix": title_prefix,
                     "inherit_global_scope": True,
+                    "category_order": categories,
                 },
                 "comparison_categories": categories,
+                "focus_x": focus_week if mode == "weekly_trends" else None,
             }
         )
+        if mode == "category_summary":
+            view["preferred_order"] = categories
         _refresh_view(
             view,
             filters_override=[*comparison_scope, category_filter],
@@ -785,6 +824,18 @@ def _exec_compare_category_metrics(args: dict[str, Any]) -> dict[str, Any]:
         filtered_rows=total_rows(active_filters),
         revenue_definition="SUM(price), freight excluded",
         delivery_grain="one row per order and product category",
+        postconditions={
+            "comparison_order_verified": all(
+                (
+                    item.get("order_contract", {}).get("verified") is True
+                    if mode == "category_summary"
+                    else item.get("comparison_categories") == categories
+                )
+                for item in candidate_views
+            ),
+            "resolved_order": categories,
+            "view_ids": [view["id"] for view in candidate_views],
+        },
     )
 
 
@@ -806,6 +857,7 @@ def _exec_create_visual(args: dict[str, Any]) -> dict[str, Any]:
         view_id=candidate["id"],
         view=deepcopy(candidate),
         active_filters=deepcopy(active_filters),
+        postconditions=_view_postconditions(candidate),
     )
 
 
@@ -863,12 +915,25 @@ def _exec_update_visual(args: dict[str, Any]) -> dict[str, Any]:
 
     candidate["id"] = current["id"]
     candidate["label"] = current.get("label") or current["id"]
+    if not encoding_changed and current.get("managed_comparison"):
+        for key in (
+            "managed_comparison",
+            "comparison_id",
+            "comparison_config",
+            "comparison_categories",
+            "preferred_order",
+            "focus_x",
+        ):
+            if key in current:
+                candidate[key] = deepcopy(current[key])
+        _refresh_view(candidate)
     _push_history("update_visual")
     views[index] = candidate
     return _success(
         "update_visual",
         view_id=view_id,
         view=deepcopy(candidate),
+        postconditions=_view_postconditions(candidate),
     )
 
 
@@ -989,6 +1054,12 @@ def _exec_inspect_visual(args: dict[str, Any]) -> dict[str, Any]:
         y=view["y_field"],
         series=view.get("color"),
         normalize=bool(view.get("normalize")),
+        sort_by=view.get("sort_by"),
+        sort_order=view.get("sort_order"),
+        order_contract=deepcopy(view.get("order_contract")),
+        comparison_id=view.get("comparison_id"),
+        comparison_categories=deepcopy(view.get("comparison_categories") or []),
+        focus_x=view.get("focus_x"),
         active_filters=deepcopy(active_filters),
         local_filters=deepcopy(view.get("local_filters") or []),
         statistics=deepcopy(view.get("statistics") or {}),
@@ -1018,6 +1089,11 @@ def _exec_summarize_dashboard(
                 "y": view["y_field"],
                 "series": view.get("color"),
                 "normalize": bool(view.get("normalize")),
+                "sort_by": view.get("sort_by"),
+                "sort_order": view.get("sort_order"),
+                "order_contract": deepcopy(view.get("order_contract")),
+                "comparison_id": view.get("comparison_id"),
+                "focus_x": view.get("focus_x"),
                 "data_points": len(view.get("data") or []),
                 "statistics": deepcopy(view.get("statistics") or {}),
             }
@@ -1069,6 +1145,7 @@ def _build_visual_candidate(
         series = None
     title = str(args.get("title") or "").strip()
     normalize = _as_bool(args.get("normalize", False))
+    top_n = _limit(args.get("top_n"), default=None)
 
     if chart_type not in CHART_TYPES:
         return None, "chart_type must be line, bar, or scatter"
@@ -1100,6 +1177,18 @@ def _build_visual_candidate(
     if error:
         return None, error
 
+    if series is not None and top_n:
+        requested_sort = args.get("sort_by")
+        sort_by = requested_sort if requested_sort in METRICS else y
+        sort_order = args.get("sort_order") or "desc"
+    else:
+        sort_by = args.get("sort_by") or (
+            x if normalize or x in TIME_DIMENSIONS else y
+        )
+        sort_order = args.get("sort_order") or (
+            "asc" if normalize or x in TIME_DIMENSIONS else "desc"
+        )
+
     view = _make_view(
         "pending",
         chart_type,
@@ -1107,11 +1196,9 @@ def _build_visual_candidate(
         x,
         y,
         series=series,
-        top_n=_limit(args.get("top_n"), default=None),
-        sort_by=args.get("sort_by")
-        or (x if normalize or x in TIME_DIMENSIONS else y),
-        sort_order=args.get("sort_order")
-        or ("asc" if normalize or x in TIME_DIMENSIONS else "desc"),
+        top_n=top_n,
+        sort_by=sort_by,
+        sort_order=sort_order,
         normalize=normalize,
         local_filters=filters,
     )
@@ -1205,6 +1292,13 @@ def _refresh_comparison_group(
 
     for view in group:
         view["comparison_categories"] = categories
+        view["focus_x"] = config.get("focus_week")
+        if config.get("mode") == "category_summary":
+            view["preferred_order"] = categories
+            view["sort_by"] = config.get("rank_by", "product_revenue")
+            view["sort_order"] = "desc"
+        else:
+            view.pop("preferred_order", None)
         category_filter = {
             "field": "product_category",
             "operator": "in",
@@ -1272,8 +1366,11 @@ def _refresh_view(
                 view.get("sort_by") or view["y_field"],
                 filters,
                 view["top_n"],
+                view.get("sort_order", "desc"),
             )
             values = [row[view["color"]] for row in ranked]
+            view["series_order"] = values
+            view["comparison_categories"] = values
             effective_filters = [
                 *filters,
                 {
@@ -1283,15 +1380,24 @@ def _refresh_view(
                 },
             ]
 
-        rows = _aggregate(
-            group_by,
-            [view["y_field"]],
-            effective_filters,
-        )
+        query_metrics = [view["y_field"]]
+        sort_by = view.get("sort_by")
+        if (
+            not view.get("color")
+            and sort_by in METRICS
+            and sort_by not in group_by
+            and sort_by not in query_metrics
+        ):
+            query_metrics.append(sort_by)
+        rows = _aggregate(group_by, query_metrics, effective_filters)
         if not view.get("color"):
+            if sort_by and rows and not any(sort_by in row for row in rows):
+                raise ValueError(
+                    f"Unable to materialize sort field {sort_by} for {view['id']}"
+                )
             rows = _sort_and_limit(
                 rows,
-                view.get("sort_by"),
+                sort_by,
                 view.get("sort_order", "desc"),
                 view.get("top_n"),
             )
@@ -1308,9 +1414,94 @@ def _refresh_view(
                 view["x_field"],
                 view["y_field"],
             )
+        preferred_order = list(view.get("preferred_order") or [])
+        if preferred_order:
+            order_index = {
+                value: index
+                for index, value in enumerate(preferred_order)
+            }
+            rows.sort(
+                key=lambda row: (
+                    order_index.get(row.get(view["x_field"]), len(order_index)),
+                    str(row.get(view.get("color")) or ""),
+                )
+            )
         view["data"] = rows
 
+    _set_view_order_contract(view)
     view["statistics"] = _view_statistics(view)
+
+
+def _set_view_order_contract(view: dict[str, Any]) -> None:
+    if view.get("chart_type") == "scatter":
+        view["order_contract"] = None
+        return
+
+    field = view["x_field"]
+    rows = view.get("data") or []
+    actual_values = list(
+        dict.fromkeys(
+            row.get(field)
+            for row in rows
+            if row.get(field) is not None
+        )
+    )
+    preferred = [
+        value
+        for value in (view.get("preferred_order") or [])
+        if value in set(actual_values)
+    ]
+    if preferred:
+        extras = [value for value in actual_values if value not in set(preferred)]
+        resolved = [*preferred, *extras]
+        verified = not extras and len(preferred) == len(actual_values)
+        mode = "shared_rank"
+        basis = (
+            (view.get("comparison_config") or {}).get("rank_by")
+            or view.get("sort_by")
+        )
+    else:
+        resolved = actual_values
+        mode = "time" if field in TIME_DIMENSIONS else "metric"
+        basis = field if mode == "time" else view.get("sort_by")
+        verified = True
+        if not view.get("color") and rows and basis:
+            expected_rows = _sort_and_limit(
+                list(rows),
+                basis,
+                view.get("sort_order", "desc"),
+                None,
+            )
+            expected = list(
+                dict.fromkeys(
+                    row.get(field)
+                    for row in expected_rows
+                    if row.get(field) is not None
+                )
+            )
+            verified = expected == resolved
+
+    view["order_contract"] = {
+        "field": field,
+        "mode": mode,
+        "by": basis,
+        "direction": (
+            "asc" if field in TIME_DIMENSIONS else view.get("sort_order", "desc")
+        ),
+        "values": resolved,
+        "verified": bool(verified),
+    }
+
+
+def _view_postconditions(view: dict[str, Any]) -> dict[str, Any]:
+    contract = view.get("order_contract") or {}
+    return {
+        "view_id": view.get("id"),
+        "order_verified": contract.get("verified"),
+        "resolved_order": deepcopy(contract.get("values") or []),
+        "sort_by": contract.get("by"),
+        "sort_order": contract.get("direction"),
+    }
 
 
 def _add_normalized_values(
@@ -1493,9 +1684,10 @@ def _rank_dimension(
     metric: str,
     filters: list[dict[str, Any]],
     top_n: int,
+    order: str = "desc",
 ) -> list[dict[str, Any]]:
     rows = _aggregate([dimension], [metric], filters)
-    rows = _sort_and_limit(rows, metric, "desc", top_n)
+    rows = _sort_and_limit(rows, metric, order, top_n)
     return [
         {"rank": index + 1, **row}
         for index, row in enumerate(rows)
@@ -1520,6 +1712,23 @@ def _comparison_evidence(
         }
         for row in ranked
     }
+    order_support: dict[tuple[str, str], float | None] = {}
+    order_view = next(
+        (
+            view
+            for metric, view in zip(metrics, candidate_views)
+            if metric == "order_count"
+        ),
+        None,
+    )
+    if order_view:
+        order_support = {
+            (
+                str(row.get("product_category")),
+                str(row.get("order_week")),
+            ): _number(row.get("order_count"))
+            for row in order_view.get("data") or []
+        }
 
     for metric, view in zip(metrics, candidate_views):
         if mode == "category_summary":
@@ -1553,16 +1762,51 @@ def _comparison_evidence(
                 ),
                 None,
             )
+            focus_rank = next(
+                (
+                    index + 1
+                    for index, (week, _) in enumerate(points)
+                    if focus_week and week == focus_week
+                ),
+                None,
+            )
+            peak_week = points[0][0] if points else None
             evidence[category].setdefault("metrics", {})[metric] = {
-                "peak_week": points[0][0] if points else None,
+                "peak_week": peak_week,
                 "peak_value": points[0][1] if points else None,
                 "focus_week": focus_week,
                 "focus_value": focus_value,
+                "focus_rank": focus_rank,
+                "observed_weeks": len(points),
+                "focus_percentile": (
+                    round((len(points) - focus_rank + 1) / len(points), 4)
+                    if focus_rank and points
+                    else None
+                ),
+                "focus_order_count": order_support.get(
+                    (str(category), str(focus_week))
+                ),
+                "peak_week_order_count": order_support.get(
+                    (str(category), str(peak_week))
+                ),
                 "top_weeks": [
                     {"week": week, "value": value}
                     for week, value in points[:3]
                 ],
             }
+
+    if mode == "category_summary":
+        for metric in metrics:
+            ordered = sorted(
+                evidence.values(),
+                key=lambda row: (
+                    _number(row.get(metric)) is None,
+                    -(_number(row.get(metric)) or 0),
+                    str(row.get("product_category") or ""),
+                ),
+            )
+            for metric_rank, row in enumerate(ordered, start=1):
+                row.setdefault("metric_ranks", {})[metric] = metric_rank
 
     return sorted(
         evidence.values(),

@@ -58,6 +58,19 @@ A Qwen Semantic VAD speech-start event immediately gives the floor to the user. 
 Pure acknowledgements may occasionally trigger interruption under this simple R-A policy; do not call analytical tools unless the completed utterance contains an actual request, correction, question, or redirection.
 
 A dashboard tool batch that has already started finishes normally. Do not claim that a tool was cancelled or rolled back. After the batch, answer from the newest confirmed dashboard state.
+
+Treat tool postconditions as evidence, not the requested arguments. Never claim
+that cross-view axes are aligned unless ``comparison_order_verified`` and every
+view's ``order_contract.verified`` are true in the returned result.
+
+For the SP weekly task, keep the same revenue Top-5 series and colors across all
+four charts, retain the 2017-W48 reference, and compare each category's
+``focus_rank`` and ``focus_percentile`` with its actual ``peak_week``. A high
+value in one metric is not evidence that all operational risks peak together.
+
+For the RJ category task, all four category axes must reuse the product-revenue
+descending order. Cite ``metric_ranks`` and state the trade-off when
+office_furniture has severe service-risk ranks but limited revenue/order scale.
 """
 
 

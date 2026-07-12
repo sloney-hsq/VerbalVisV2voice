@@ -70,10 +70,22 @@ assert.match(
   /if \(!dashboard\.sessionReady\) return false;/,
   "PCM must never be sent before the page-level Qwen session is ready.",
 );
+const dashboardStore = readFileSync(
+  resolve(repoRoot, "frontend/src/stores/dashboard.js"),
+  "utf8",
+);
+const chartSlot = readFileSync(
+  resolve(repoRoot, "frontend/src/components/ChartSlot.vue"),
+  "utf8",
+);
+const coordinator = readFileSync(
+  resolve(repoRoot, "backend/response_coordinator.py"),
+  "utf8",
+);
 assert.match(
   webSocket,
-  /case "tool_execution_finished":[\s\S]{0,120}setCaptureBlocked\?\.\(false\)/,
-  "The microphone must reopen as soon as the non-preemptive tool batch finishes.",
+  /case "tool_execution_finished":[\s\S]{0,220}Boolean\(message\.followup_requested && !activeResponseId\)/,
+  "The microphone must remain blocked until the requested follow-up response starts.",
 );
 assert.match(
   realtime,
@@ -111,10 +123,24 @@ assert.match(
   "A failed tool must block later calls from the same response batch.",
 );
 assert.match(
-  realtime,
-  /Invalid JSON tool arguments/,
-  "Malformed function arguments must fail without executing a side-effecting tool.",
+  coordinator,
+  /malformed_arguments/,
+  "Malformed function arguments must be rejected before side effects.",
 );
+assert.match(realtime, /response\.function_call_arguments\.done/);
+assert.match(realtime, /asyncio\.create_task\([\s\S]{0,100}_execute_tool_batch/);
+assert.doesNotMatch(
+  realtime,
+  /await self\._execute_tool_batch\(/,
+  "Tool execution must not block the Qwen event reader.",
+);
+assert.match(dashboardStore, /dashboardRevision/);
+assert.match(dashboardStore, /incomingRevision < dashboardRevision\.value/);
+assert.match(chartSlot, /verbalvis:chart-rendered/);
+assert.match(chartSlot, /renderGeneration/);
+assert.match(chartSlot, /generation !== renderGeneration/);
+assert.match(webSocket, /case "chart_rendered"|handleChartRendered/);
+assert.match(realtime, /message_type == "chart_rendered"/);
 assert.match(
   realtime,
   /"dashscope\.aliyuncs\.com"/,
