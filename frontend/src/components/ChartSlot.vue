@@ -124,26 +124,11 @@ async function performRender(generation) {
       return;
     }
     embeddedView = result.view;
-    reportRender(true);
   } catch (error) {
     if (generation !== renderGeneration) return;
     console.warn(`Unable to render ${props.view.id}`, error);
     vegaContainer.value.textContent = "Unable to render this view.";
-    reportRender(false, error);
   }
-}
-
-function reportRender(success, error = null) {
-  window.dispatchEvent(new CustomEvent("verbalvis:chart-rendered", {
-    detail: {
-      view_id: props.view.id,
-      revision: props.view.revision ?? null,
-      success: Boolean(success),
-      row_count: Array.isArray(props.view.data) ? props.view.data.length : 0,
-      order_verified: props.view.order_contract?.verified ?? null,
-      error: error ? String(error?.message || error) : null,
-    },
-  }));
 }
 
 function loadVegaEmbed() {

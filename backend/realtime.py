@@ -369,16 +369,6 @@ class QwenRealtimeSession:
                     )
             elif message_type == "playback_stopped":
                 self._handle_playback_stopped(message)
-            elif message_type == "chart_rendered":
-                self._event(
-                    "chart_rendered",
-                    view_id=str(message.get("view_id") or ""),
-                    dashboard_revision=message.get("revision"),
-                    success=bool(message.get("success")),
-                    row_count=message.get("row_count"),
-                    order_verified=message.get("order_verified"),
-                    error=(str(message.get("error"))[:500] if message.get("error") else None),
-                )
             elif message_type in {"close", "disconnect"}:
                 self.running = False
                 return

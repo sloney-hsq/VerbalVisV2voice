@@ -275,26 +275,3 @@ Open `http://localhost:5173`. Wait until the top status becomes `Ready`, then
 press **Start mic**. Start/Stop mic may be toggled repeatedly within the same
 conversation session.
 
-## Validation
-
-Backend:
-
-```bat
-cd /d F:\VerbalVis2\backend
-python -m compileall .
-python demo_validation.py
-```
-
-Frontend:
-
-```bat
-cd /d F:\VerbalVis2\frontend
-npm install
-npm run validate:highlight
-npm run validate:layout
-npm run validate:session
-npm run build
-```
-
-The session validation guards the central contract: page load creates the Qwen
-session once; microphone toggles only control PCM transmission.

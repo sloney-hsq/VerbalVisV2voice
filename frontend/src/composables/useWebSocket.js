@@ -18,8 +18,6 @@ export function useWebSocket(audioPlayer) {
   let activeResponseId = null;
   let analysisId = createAnalysisId();
 
-  window.addEventListener("verbalvis:chart-rendered", handleChartRendered);
-
   audioPlayer?.setPlaybackIdleHandler?.((event = {}) => {
     dashboard.isAssistantSpeaking = false;
     if (!toolRunning.value && !runtime.configurationError) runtime.setPhase("ready");
@@ -341,14 +339,6 @@ export function useWebSocket(audioPlayer) {
     }));
   }
 
-  function handleChartRendered(event) {
-    if (!socket.value || socket.value.readyState !== WebSocket.OPEN) return;
-    socket.value.send(JSON.stringify({
-      type: "chart_rendered",
-      ...(event?.detail || {}),
-    }));
-  }
-
   function disconnect() {
     audioPlayer?.setCaptureBlocked?.(true);
     audioPlayer?.stopAssistantAudio?.({
@@ -401,10 +391,7 @@ export function useWebSocket(audioPlayer) {
       .slice(0, 80);
   }
 
-  onBeforeUnmount(() => {
-    window.removeEventListener("verbalvis:chart-rendered", handleChartRendered);
-    disconnect();
-  });
+  onBeforeUnmount(disconnect);
 
   return {
     toolRunning,
