@@ -93,7 +93,9 @@ def result_summary(name: str, result: dict[str, Any]) -> str:
         rows = payload.get("filtered_rows")
         return f"{label} · {int(rows):,} orders" if rows is not None else label
     if name == "compare_category_metrics":
-        return f"{label} · {len(payload.get('view_ids') or [])} views"
+        summary = f"{label} · {len(payload.get('view_ids') or [])} views"
+        rows = payload.get("filtered_rows")
+        return f"{summary} · {int(rows):,} orders" if rows is not None else summary
     if name in {"create_visual", "update_visual"} and payload.get("view_id"):
         return f"{label} · {payload['view_id']}"
     if name == "delete_visual" and payload.get("view_id"):

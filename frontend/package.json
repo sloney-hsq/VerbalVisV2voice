@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "validate:highlight": "node scripts/validate-highlight.mjs",
     "validate:layout": "node scripts/validate-layout.mjs",
+    "validate:normalized": "node scripts/validate-normalized-chart.mjs",
     "validate:session": "node scripts/validate-session-control.mjs"
   },
   "dependencies": {

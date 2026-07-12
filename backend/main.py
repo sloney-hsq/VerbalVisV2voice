@@ -73,12 +73,6 @@ def qwen_configuration_error() -> str | None:
             "Qwen Realtime is not configured: set DASHSCOPE_API_KEY in "
             "backend/.env and restart the backend."
         )
-    if not QWEN_REALTIME_URL and not QWEN_WORKSPACE_ID:
-        return (
-            "Qwen Realtime is not configured: set QWEN_WORKSPACE_ID to the "
-            "Bailian business-space ID, or set QWEN_REALTIME_URL to the full "
-            "regional WebSocket endpoint, then restart the backend."
-        )
     return None
 
 
@@ -90,7 +84,13 @@ async def startup_event() -> None:
     if config_error:
         log.error(config_error)
     else:
-        endpoint_mode = "QWEN_REALTIME_URL" if QWEN_REALTIME_URL else "QWEN_WORKSPACE_ID"
+        endpoint_mode = (
+            "QWEN_REALTIME_URL"
+            if QWEN_REALTIME_URL
+            else "QWEN_WORKSPACE_ID"
+            if QWEN_WORKSPACE_ID
+            else "DashScope public endpoint"
+        )
         log.info("Qwen Realtime configuration ready via %s.", endpoint_mode)
     log.info("Ready.")
 
@@ -194,8 +194,8 @@ async def _serve_configuration_error(
         {
             "type": "configuration_error",
             "message": message,
-            "required": ["DASHSCOPE_API_KEY", "QWEN_WORKSPACE_ID"],
-            "alternative": "QWEN_REALTIME_URL",
+            "required": ["DASHSCOPE_API_KEY"],
+            "optional": ["QWEN_WORKSPACE_ID", "QWEN_REALTIME_URL"],
         }
     )
     await websocket.send_json(

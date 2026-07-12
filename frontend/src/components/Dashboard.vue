@@ -14,8 +14,17 @@
       <div class="session-state" :title="sessionTitle">
         <span class="status-dot" :class="statusDotClass"></span>
         <span class="session-state__phase">{{ phaseLabel }}</span>
+        <span
+          v-if="ws.runtime.lastToolError"
+          class="runtime-error"
+          :title="ws.runtime.lastToolError"
+        >Tool failed</span>
         <span v-if="store.activeFilters.length" class="filter-count">
           {{ store.activeFilters.length }} filters
+        </span>
+        <span v-else class="scope-all">All data</span>
+        <span v-if="ws.runtime.filteredRows !== null" class="filtered-rows">
+          {{ formatCount(ws.runtime.filteredRows) }} orders
         </span>
         <div v-if="store.activeFilters.length" class="filter-strip">
           <span v-for="(filter, index) in store.activeFilters" :key="`${filter.field}-${index}`">
@@ -54,7 +63,13 @@
           v-for="item in store.transcriptItems"
           :key="item.id"
           class="timeline-row"
-          :class="[`timeline-row--${item.role}`, { 'timeline-row--expanded': item.expanded }]"
+          :class="[
+            `timeline-row--${item.role}`,
+            {
+              'timeline-row--expanded': item.expanded,
+              'timeline-row--error': item.status === 'error',
+            },
+          ]"
           @click="item.role === 'tool' && store.toggleToolDetails(item.id)"
         >
           <time>{{ formatTime(item.startedAt) }}</time>
@@ -69,6 +84,9 @@
               <div v-if="item.expanded" class="tool-details" @click.stop>
                 <div><b>Tool</b><code>{{ item.toolName }}</code></div>
                 <div><b>Parameters</b><pre>{{ formatParameters(item.parameters) }}</pre></div>
+                <div v-if="item.error" class="tool-error">
+                  <b>Error</b><code>{{ item.error }}</code>
+                </div>
               </div>
             </template>
 
@@ -208,6 +226,10 @@ function formatParameters(parameters) {
   return JSON.stringify(parameters || {}, null, 2);
 }
 
+function formatCount(value) {
+  return new Intl.NumberFormat().format(Number(value) || 0);
+}
+
 function filterLabel(filter) {
   const labels = {
     customer_state: "State",
@@ -239,8 +261,8 @@ function filterLabel(filter) {
   width: 100%;
   height: 100dvh;
   min-height: 0;
-  padding: 10px 12px;
-  gap: 8px;
+  padding: 12px 14px;
+  gap: 10px;
   overflow: hidden;
   color: #172033;
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -250,8 +272,8 @@ function filterLabel(filter) {
   display: grid;
   grid-template-columns: minmax(220px, auto) minmax(0, 1fr) auto;
   align-items: center;
-  min-height: 50px;
-  padding: 6px 10px;
+  min-height: 54px;
+  padding: 7px 11px;
   gap: 12px;
   border: 1px solid #d9e1ec;
   border-radius: 10px;
@@ -322,7 +344,10 @@ function filterLabel(filter) {
 .status-dot--error { background: #ef4444; }
 
 .session-state__phase,
-.filter-count {
+.filter-count,
+.scope-all,
+.filtered-rows,
+.runtime-error {
   flex: 0 0 auto;
   font-weight: 650;
 }
@@ -331,6 +356,19 @@ function filterLabel(filter) {
   padding-left: 7px;
   border-left: 1px solid #dbe3ef;
   color: #2563eb;
+}
+
+.scope-all,
+.filtered-rows {
+  color: #64748b;
+}
+
+.runtime-error {
+  padding: 2px 7px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
 .filter-strip {
@@ -383,24 +421,26 @@ function filterLabel(filter) {
 
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, 540px);
   grid-auto-flow: row;
-  grid-auto-rows: minmax(270px, auto);
+  grid-auto-rows: auto;
   flex: 1 1 auto;
   min-height: 0;
-  gap: 8px;
+  gap: 12px;
   overflow: auto;
   align-content: start;
-  align-items: stretch;
+  align-items: start;
+  justify-content: center;
+  padding: 1px 2px 6px;
 }
 
 .timeline {
   display: flex;
-  flex: 0 0 150px;
-  min-height: 0;
+  flex: 0 0 250px;
+  height: 250px;
   overflow: hidden;
   border: 1px solid #d9e1ec;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fff;
 }
 
@@ -474,6 +514,8 @@ function filterLabel(filter) {
 }
 
 .timeline-row--tool { cursor: pointer; }
+.timeline-row--error .timeline-row__role,
+.timeline-row--error .tool-summary { color: #b91c1c; }
 .tool-summary {
   display: flex;
   min-width: 0;
@@ -504,6 +546,13 @@ function filterLabel(filter) {
   cursor: default;
 }
 .tool-details div { min-width: 0; }
+.tool-details .tool-error {
+  grid-column: 1 / -1;
+  padding-top: 6px;
+  border-top: 1px solid #fecaca;
+}
+.tool-details .tool-error b,
+.tool-details .tool-error code { color: #b91c1c; }
 .tool-details b {
   display: block;
   margin-bottom: 3px;
@@ -523,19 +572,10 @@ function filterLabel(filter) {
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 1799px) {
-  .chart-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-
-@media (max-width: 1279px) {
-  .chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
 @media (max-width: 899px) {
   .topbar { grid-template-columns: 1fr auto; }
   .session-state { grid-column: 1 / -1; grid-row: 2; }
   .brand p { display: none; }
   .chart-grid { grid-template-columns: minmax(0, 1fr); }
-  .timeline { flex-basis: 170px; }
 }
 </style>

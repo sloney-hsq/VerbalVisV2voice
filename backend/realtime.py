@@ -5,7 +5,7 @@ This module is the only realtime implementation. It owns:
 - the Qwen WebSocket session and Semantic VAD;
 - immediate speech-start interruption (R-A);
 - exactly one active assistant response;
-- a non-preemptive, sequential dashboard-tool boundary;
+- a non-preemptive, sequential dashboard-tool boundary with fail-fast dependencies;
 - the browser event contract;
 - events.jsonl and conversation.jsonl logs.
 
@@ -98,19 +98,25 @@ def _with_model_query(url: str) -> str:
 
 
 def _qwen_url() -> str:
-    """Return the current Bailian workspace realtime endpoint."""
+    """Return the configured workspace endpoint or the DashScope fallback."""
     if QWEN_REALTIME_URL:
         return _with_model_query(QWEN_REALTIME_URL)
 
-    if not QWEN_WORKSPACE_ID:
-        raise RuntimeError(
-            "QWEN_WORKSPACE_ID or QWEN_REALTIME_URL is required for Qwen Realtime"
-        )
+    if QWEN_WORKSPACE_ID:
+        if QWEN_REGION in {"singapore", "ap-southeast-1", "intl"}:
+            host = f"{QWEN_WORKSPACE_ID}.ap-southeast-1.maas.aliyuncs.com"
+        else:
+            host = f"{QWEN_WORKSPACE_ID}.cn-beijing.maas.aliyuncs.com"
+        return f"wss://{host}/api-ws/v1/realtime?model={QWEN_MODEL}"
 
-    if QWEN_REGION in {"singapore", "ap-southeast-1", "intl"}:
-        host = f"{QWEN_WORKSPACE_ID}.ap-southeast-1.maas.aliyuncs.com"
-    else:
-        host = f"{QWEN_WORKSPACE_ID}.cn-beijing.maas.aliyuncs.com"
+    host = (
+        "dashscope-intl.aliyuncs.com"
+        if QWEN_REGION in {"singapore", "ap-southeast-1", "intl"}
+        else "dashscope.aliyuncs.com"
+    )
+    log.warning(
+        "QWEN_WORKSPACE_ID is not configured; using the DashScope public realtime endpoint."
+    )
     return f"wss://{host}/api-ws/v1/realtime?model={QWEN_MODEL}"
 
 
@@ -667,6 +673,7 @@ class QwenRealtimeSession:
         dashboard_change = any(changes_dashboard(call.name) for call in calls)
         completed = 0
         successful = 0
+        skipped = 0
         followup_requested = False
 
         self.tool_running = True
@@ -690,11 +697,21 @@ class QwenRealtimeSession:
         self._event("tool_batch_started", response_id=response_id, tools=metadata)
 
         try:
+            blocking_failure: str | None = None
             for pending in calls:
-                result = await self._execute_one_tool(pending)
+                result = await self._execute_one_tool(
+                    pending,
+                    skip_reason=blocking_failure,
+                )
                 completed += 1
                 if result.get("success"):
                     successful += 1
+                elif blocking_failure is not None:
+                    skipped += 1
+                else:
+                    blocking_failure = (
+                        f"Skipped because the earlier tool {pending.name} failed"
+                    )
         finally:
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
             ignored = self.ignored_audio_chunks
@@ -716,6 +733,7 @@ class QwenRealtimeSession:
                     "completed_count": completed,
                     "successful_count": successful,
                     "failed_count": max(0, completed - successful),
+                    "skipped_count": skipped,
                     "duration_ms": duration_ms,
                     "ignored_audio_chunks": ignored,
                     "followup_requested": followup_requested,
@@ -734,6 +752,7 @@ class QwenRealtimeSession:
                 response_id=response_id,
                 completed=completed,
                 successful=successful,
+                skipped=skipped,
                 duration_ms=duration_ms,
                 ignored_audio_chunks=ignored,
             )
@@ -741,13 +760,18 @@ class QwenRealtimeSession:
     async def _execute_one_tool(
         self,
         pending: PendingToolCall,
+        *,
+        skip_reason: str | None = None,
     ) -> dict[str, Any]:
         started_at = time.perf_counter()
+        argument_error: str | None = None
         try:
             raw_arguments = json.loads(pending.arguments_raw or "{}")
             if not isinstance(raw_arguments, dict):
+                argument_error = "Tool arguments must decode to a JSON object"
                 raw_arguments = {}
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            argument_error = f"Invalid JSON tool arguments: {exc.msg}"
             raw_arguments = {}
 
         arguments = normalize_tool_arguments(
@@ -766,21 +790,36 @@ class QwenRealtimeSession:
             }
         )
 
-        try:
-            result = await asyncio.to_thread(
-                execute_tool,
-                pending.name,
-                arguments,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
+        if skip_reason:
             result = {
                 "tool": pending.name,
                 "success": False,
                 "payload": None,
-                "error": str(exc),
+                "error": skip_reason,
             }
+        elif argument_error:
+            result = {
+                "tool": pending.name,
+                "success": False,
+                "payload": None,
+                "error": argument_error,
+            }
+        else:
+            try:
+                result = await asyncio.to_thread(
+                    execute_tool,
+                    pending.name,
+                    arguments,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                result = {
+                    "tool": pending.name,
+                    "success": False,
+                    "payload": None,
+                    "error": str(exc),
+                }
 
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
         summary = result_summary(pending.name, result)

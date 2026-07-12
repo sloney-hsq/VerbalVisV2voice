@@ -15,11 +15,6 @@ from typing import Any
 from db import build_where, get_connection, initialize_db
 import tools
 
-DATE_FILTER = {
-    "field": "order_date",
-    "operator": "between",
-    "value": ["2017-10-01", "2018-05-31"],
-}
 EXPECTED_TOOLS = {
     "update_analysis_scope",
     "aggregate_data",
@@ -53,25 +48,6 @@ def schema_names() -> set[str]:
         for schema in tools.TOOL_SCHEMAS
         if isinstance(schema, dict) and schema.get("name")
     }
-
-
-def set_scope(state: str) -> dict[str, Any]:
-    result = tools.execute_tool(
-        "update_analysis_scope",
-        {
-            "operation": "replace",
-            "filters": [
-                {"field": "customer_state", "operator": "eq", "value": state},
-                DATE_FILTER,
-            ],
-        },
-    )
-    require(result.get("success") is True, f"Unable to set {state} scope: {result}")
-    payload = result["payload"]
-    require(len(payload["active_filters"]) == 2, "Scope should contain state and date")
-    require(payload["filtered_rows"] > 0, f"{state} scope is empty")
-    require(payload["low_score_definition"] == "review_score <= 2", "Low-score definition changed")
-    return result
 
 
 def validate_tool_surface() -> dict[str, Any]:
@@ -141,6 +117,8 @@ def validate_general_tools() -> dict[str, Any]:
     )
     require(updated.get("success") is True, f"update_visual failed: {updated}")
     require(view(view_id)["chart_type"] == "bar", "View type was not updated")
+    require(view(view_id)["sort_by"] == "order_count", "Updated view kept stale sorting")
+    require(view(view_id)["sort_order"] == "desc", "Updated view kept stale sort order")
 
     highlighted = tools.execute_tool(
         "highlight_visual",
@@ -183,9 +161,106 @@ def validate_general_tools() -> dict[str, Any]:
     }
 
 
+def validate_scope_argument_recovery() -> dict[str, Any]:
+    tools.init_views()
+    recovered = tools.execute_tool(
+        "update_analysis_scope",
+        {
+            "operation": "replace",
+            "filters": [
+                {"field": "customer_state", "value": "sp"},
+                {
+                    "field": "order_date",
+                    "value": "2017-10-01 2018-05-31",
+                },
+            ],
+        },
+    )
+    require(recovered.get("success") is True, f"Scope recovery failed: {recovered}")
+    filters = recovered["payload"]["active_filters"]
+    require(
+        filters
+        == [
+            {"field": "customer_state", "operator": "eq", "value": "SP"},
+            {
+                "field": "order_date",
+                "operator": "between",
+                "value": ["2017-10-01", "2018-05-31"],
+            },
+        ],
+        f"Recovered scope is wrong: {filters}",
+    )
+
+    alias = tools.execute_tool(
+        "aggregate_data",
+        {
+            "metrics": ["order_count"],
+            "filters": [
+                {"field": "customer_state", "operator": "==", "value": "SP"},
+            ],
+        },
+    )
+    require(alias.get("success") is True, f"Operator alias failed: {alias}")
+    in_string = tools.execute_tool(
+        "aggregate_data",
+        {
+            "metrics": ["order_count"],
+            "filters": [
+                {
+                    "field": "customer_state",
+                    "operator": "in",
+                    "value": "SP,RJ",
+                },
+            ],
+        },
+    )
+    require(in_string.get("success") is True, f"String in-filter failed: {in_string}")
+    return {
+        "active_filters": filters,
+        "filtered_rows": recovered["payload"]["filtered_rows"],
+    }
+
+
+def validate_normalized_rating_chart() -> dict[str, Any]:
+    tools.init_views()
+    result = tools.execute_tool(
+        "create_visual",
+        {
+            "chart_type": "bar",
+            "x": "customer_state",
+            "y": "order_count",
+            "series": "review_score",
+            "normalize": True,
+            "sort_by": "customer_state",
+            "sort_order": "asc",
+            "title": "Rating share by state",
+        },
+    )
+    require(result.get("success") is True, f"Normalized chart failed: {result}")
+    item = view(result["payload"]["view_id"])
+    require(item["normalize"] is True, "Normalized chart metadata was lost")
+    require(item["normalized_field"] == "normalized_value", "Normalized field is missing")
+
+    scores = {row.get("review_score") for row in item["data"]}
+    require(scores == {None, 1, 2, 3, 4, 5}, f"Unexpected rating domain: {scores}")
+    totals: dict[str, float] = {}
+    for row in item["data"]:
+        state = str(row["customer_state"])
+        totals[state] = totals.get(state, 0.0) + float(row["normalized_value"])
+    require(len(totals) == 27, f"Expected 27 states, found {len(totals)}")
+    require(
+        all(abs(total - 1.0) < 0.00001 for total in totals.values()),
+        f"State rating shares are not normalized: {totals}",
+    )
+    return {
+        "view_id": item["id"],
+        "states": len(totals),
+        "rating_domain": sorted("null" if value is None else str(value) for value in scores),
+    }
+
+
 def validate_task_a() -> dict[str, Any]:
     tools.init_views()
-    scope = set_scope("SP")
     result = tools.execute_tool(
         "compare_category_metrics",
         {
@@ -200,6 +275,9 @@ def validate_task_a() -> dict[str, Any]:
             ],
             "focus_week": "2017-W48",
             "title_prefix": "SP",
+            "customer_state": "SP",
+            "start_date": "2017-10-01",
+            "end_date": "2018-05-31",
         },
     )
     require(result.get("success") is True, f"Task A failed: {result}")
@@ -207,6 +285,9 @@ def validate_task_a() -> dict[str, Any]:
     require(len(payload["view_ids"]) == 4, "Task A should create four views")
     require(len(payload["top_categories"]) == 5, "Task A should use five categories")
     require(len(payload["evidence"]) == 5, "Task A should return five evidence rows")
+    require(payload["scope_applied"] is True, "Task A scope was not applied atomically")
+    require(payload["filtered_rows"] > 0, "Task A scope is empty")
+    require(payload["active_filters"] == _expected_scope("SP"), "Task A scope is wrong")
 
     expected_categories = {item["product_category"] for item in payload["top_categories"]}
     expected_metrics = {"order_count", "low_score_ratio", "delivery_days", "late_ratio"}
@@ -216,15 +297,24 @@ def validate_task_a() -> dict[str, Any]:
         require(item["x_field"] == "order_week", f"{view_id} is not weekly")
         require(item["color"] == "product_category", f"{view_id} is not multi-series")
         require(set(item["comparison_categories"]) == expected_categories, "Views use different category sets")
+        require(
+            all(_week_in_task_range(row["order_week"]) for row in item["data"]),
+            f"{view_id} contains out-of-scope points",
+        )
 
     for row in payload["evidence"]:
         require(set(row["metrics"]) == expected_metrics, f"Incomplete Task A evidence: {row}")
         for metric in expected_metrics:
             require(row["metrics"][metric]["focus_week"] == "2017-W48", "Missing focus week")
             require(row["metrics"][metric]["peak_week"] is not None, "Missing peak week")
+            peak_week = row["metrics"][metric]["peak_week"]
+            require(
+                _week_in_task_range(peak_week),
+                f"Task A evidence escaped the requested scope: {peak_week}",
+            )
 
     return {
-        "scope_rows": scope["payload"]["filtered_rows"],
+        "active_filters": payload["active_filters"],
         "view_ids": payload["view_ids"],
         "top_categories": payload["top_categories"],
     }
@@ -232,7 +322,6 @@ def validate_task_a() -> dict[str, Any]:
 
 def validate_task_b() -> dict[str, Any]:
     tools.init_views()
-    scope = set_scope("RJ")
     result = tools.execute_tool(
         "compare_category_metrics",
         {
@@ -246,6 +335,9 @@ def validate_task_b() -> dict[str, Any]:
                 "order_count",
             ],
             "title_prefix": "RJ",
+            "customer_state": "RJ",
+            "start_date": "2017-10-01",
+            "end_date": "2018-05-31",
         },
     )
     require(result.get("success") is True, f"Task B failed: {result}")
@@ -253,6 +345,9 @@ def validate_task_b() -> dict[str, Any]:
     require(len(payload["view_ids"]) == 4, "Task B should create four views")
     require(len(payload["top_categories"]) == 15, "Task B should use fifteen categories")
     require(len(payload["evidence"]) == 15, "Task B should return fifteen evidence rows")
+    require(payload["scope_applied"] is True, "Task B scope was not applied atomically")
+    require(payload["filtered_rows"] > 0, "Task B scope is empty")
+    require(payload["active_filters"] == _expected_scope("RJ"), "Task B scope is wrong")
 
     categories = {item["product_category"] for item in payload["top_categories"]}
     require("office_furniture" in categories, "office_furniture is outside RJ Top 15")
@@ -275,10 +370,83 @@ def validate_task_b() -> dict[str, Any]:
         require(view(view_id).get("managed_comparison") is True, "Managed comparison was lost")
 
     return {
-        "scope_rows": scope["payload"]["filtered_rows"],
+        "active_filters": payload["active_filters"],
         "view_ids": payload["view_ids"],
         "office_furniture": office,
     }
+
+
+def validate_preserved_comparison_scope() -> dict[str, Any]:
+    tools.init_views()
+    first = tools.execute_tool(
+        "compare_category_metrics",
+        {
+            "mode": "category_summary",
+            "top_n": 3,
+            "rank_by": "product_revenue",
+            "metrics": ["product_revenue"],
+            "title_prefix": "SP",
+            "customer_state": "SP",
+            "start_date": "2017-10-01",
+            "end_date": "2018-05-31",
+        },
+    )
+    require(first.get("success") is True, f"Unable to create SP comparison: {first}")
+    first_id = first["payload"]["view_ids"][0]
+    first_categories = list(view(first_id)["comparison_categories"])
+
+    second = tools.execute_tool(
+        "compare_category_metrics",
+        {
+            "mode": "category_summary",
+            "top_n": 3,
+            "rank_by": "product_revenue",
+            "metrics": ["product_revenue"],
+            "title_prefix": "RJ",
+            "replace_previous": False,
+            "customer_state": "RJ",
+            "start_date": "2017-10-01",
+            "end_date": "2018-05-31",
+        },
+    )
+    require(second.get("success") is True, f"Unable to create RJ comparison: {second}")
+    preserved = view(first_id)
+    require(
+        preserved["comparison_categories"] == first_categories,
+        "Retained SP comparison was rewritten with the RJ scope",
+    )
+    require(
+        preserved["inherit_global_filters"] is False,
+        "Retained comparison did not freeze its original scope",
+    )
+    require(
+        preserved["local_filters"][:2] == _expected_scope("SP"),
+        "Retained comparison lost its original scope filters",
+    )
+    return {
+        "preserved_view": first_id,
+        "preserved_categories": first_categories,
+        "new_view": second["payload"]["view_ids"][0],
+    }
+
+
+def _week_in_task_range(value: str) -> bool:
+    if value.startswith("2017-W"):
+        return int(value[-2:]) >= 39
+    if value.startswith("2018-W"):
+        return int(value[-2:]) <= 22
+    return False
+
+
+def _expected_scope(state: str) -> list[dict[str, Any]]:
+    return [
+        {"field": "customer_state", "operator": "eq", "value": state},
+        {
+            "field": "order_date",
+            "operator": "between",
+            "value": ["2017-10-01", "2018-05-31"],
+        },
+    ]
 
 
 def validate_office_semantics(office: dict[str, Any]) -> None:
@@ -311,8 +479,11 @@ def main() -> None:
     results = {
         "tool_surface": validate_tool_surface(),
         "general_tools": validate_general_tools(),
+        "scope_argument_recovery": validate_scope_argument_recovery(),
+        "normalized_rating_chart": validate_normalized_rating_chart(),
         "task_a": validate_task_a(),
         "task_b": validate_task_b(),
+        "preserved_comparison_scope": validate_preserved_comparison_scope(),
     }
     print("VerbalVis validation: PASS")
     print(json.dumps(results, ensure_ascii=False, indent=2, default=str))

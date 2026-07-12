@@ -71,8 +71,9 @@ active.
 
 ## Qwen Realtime configuration
 
-Current Qwen-Omni-Realtime WebSocket access requires both an API Key and a Bailian
-business-space ID for the selected region.
+Qwen-Omni-Realtime WebSocket access requires an API Key. When no business-space
+ID or complete endpoint is set, VerbalVis uses the DashScope public regional
+endpoint for the selected region.
 
 Create the local configuration file:
 
@@ -85,7 +86,6 @@ Edit `backend/.env`:
 
 ```env
 DASHSCOPE_API_KEY=sk-your-api-key
-QWEN_WORKSPACE_ID=your-bailian-workspace-id
 QWEN_REGION=beijing
 QWEN_REALTIME_MODEL=qwen3.5-omni-plus-realtime
 QWEN_VOICE=Ethan
@@ -97,13 +97,20 @@ For Singapore:
 QWEN_REGION=singapore
 ```
 
-A complete endpoint may be supplied instead of `QWEN_WORKSPACE_ID`:
+A business-space ID may be supplied to use its regional endpoint:
+
+```env
+QWEN_WORKSPACE_ID=your-bailian-workspace-id
+```
+
+A complete endpoint may also be supplied:
 
 ```env
 QWEN_REALTIME_URL=wss://your-workspace-id.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime
 ```
 
-`QWEN_REALTIME_URL` takes priority. The code also accepts
+`QWEN_REALTIME_URL` takes priority, followed by `QWEN_WORKSPACE_ID`, followed
+by the public DashScope endpoint. The code also accepts
 `DASHSCOPE_WORKSPACE_ID` or `WORKSPACE_ID` as aliases, but
 `QWEN_WORKSPACE_ID` is the recommended name.
 
@@ -112,7 +119,7 @@ backend process starts.
 
 ### Configuration-error behavior
 
-When credentials or the workspace ID are missing:
+When the API Key is missing:
 
 - the page still receives the initial dashboard;
 - the backend sends one `configuration_error` event;
@@ -191,6 +198,9 @@ tool call selected
 ```
 
 Running tools are not cancelled or rolled back.
+If one tool fails validation or execution, later calls from that same model
+response receive explicit skipped outputs and do not run. This fail-fast rule is
+separate from user interruption: a tool that has already begun still completes.
 
 ## Model-facing tools
 
@@ -208,6 +218,12 @@ summarize_dashboard
 undo_last_action
 ```
 
+For the experiment's state-and-date comparisons, `compare_category_metrics`
+accepts `customer_state`, `start_date`, and `end_date` together. The backend
+applies that scope, selects the Top-N categories, and creates all coordinated
+views as one dashboard action. Generic filters also normalize common equality
+aliases and omitted scalar/range operators before validation.
+
 Supported chart types:
 
 ```text
@@ -215,6 +231,11 @@ line
 bar
 scatter
 ```
+
+`create_visual` and `update_visual` accept `normalize=true` for 100% stacked
+bar charts with a series. Rating-share charts use the fixed domain
+`null, 1, 2, 3, 4, 5`, a shared gray-to-green palette, and ascending stack
+order. Dashboard cards use a `540 × 360 px` desktop size.
 
 Core metrics:
 

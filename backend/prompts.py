@@ -25,7 +25,13 @@ SHARED_ANALYSIS_PROMPT = """\
 
 当用户只询问数值或排名时，优先 aggregate_data。用户已经明确比较对象时使用 compare_selected_groups。需要同一 Top-N 品类跨多个指标比较时使用 compare_category_metrics。创建单图使用 create_visual；修改现有图使用 update_visual，不要无意义地删除重建。
 
+筛选 operator 使用 eq、neq、in、gte、lte、between。标量相等和两端时间范围可省略 operator，但不要生成 = 或 ==。工具返回 success=false 时，不得声称操作完成，不得原样重试，也不得继续执行依赖该结果的分析；先根据 error 修正参数。只有返回的 active_filters 与用户要求一致，才能把图表描述为“已限定范围”。
+
+compare_category_metrics 支持 customer_state、start_date、end_date 三个范围参数。州与日期范围已经明确的 Top-N 多指标任务，优先在一次调用中同时传入这三个参数，使范围设置、排名和制图原子完成。
+
 使用 create_visual 或 update_visual 创建带 series 且带 top_n 的多系列图时，sort_by 必须是用于选择 Top-N 系列的指标字段，例如 product_revenue 或 order_count；不得使用 order_week、order_month、order_date 等时间维度作为系列排名字段。若用户没有指定系列排名依据，使用当前 y 指标作为 sort_by。
+
+用户要求“各州各评分占比”“百分比堆叠”或“归一化评分分布”时，调用 create_visual：chart_type=bar、x=customer_state、y=order_count、series=review_score、normalize=true、sort_by=customer_state、sort_order=asc。不要过滤空评分；界面会按 null、1、2、3、4、5 自下而上堆叠，并固定评分颜色。
 
 highlight_visual 的 highlight_element 可以使用精确值，例如 "2017-W48"、"office_furniture"，或 "order_week=2017-W48, product_category=office_furniture"。
 
@@ -35,9 +41,9 @@ highlight_visual 的 highlight_element 可以使用精确值，例如 "2017-W48"
 
 ## 研究任务的可靠路径
 
-SP 周度风险任务：设置 SP 和 2017-10-01 至 2018-05-31 范围，使用 compare_category_metrics 的 weekly_trends、product_revenue Top 5、order_count、low_score_ratio、delivery_days、late_ratio，并以 2017-W48 为 focus_week。根据各指标真实峰值判断是否同步，不预设结论。
+SP 周度风险任务：调用 compare_category_metrics，使用 weekly_trends、product_revenue Top 5、order_count、low_score_ratio、delivery_days、late_ratio，同时传 customer_state=SP、start_date=2017-10-01、end_date=2018-05-31，并以 2017-W48 为 focus_week。根据各指标真实峰值判断是否同步，不预设结论。
 
-RJ 资源配置任务：设置 RJ 和相同日期范围，使用 category_summary、product_revenue Top 15、low_score_ratio、delivery_days、product_revenue、order_count。综合风险和业务规模判断 office_furniture 是否应优先改善，不支持时从同一 Top 15 中提出替代品类。
+RJ 资源配置任务：调用 compare_category_metrics，使用 category_summary、product_revenue Top 15、low_score_ratio、delivery_days、product_revenue、order_count，同时传 customer_state=RJ、start_date=2017-10-01、end_date=2018-05-31。综合风险和业务规模判断 office_furniture 是否应优先改善，不支持时从同一 Top 15 中提出替代品类。
 
 ## 回答方式
 

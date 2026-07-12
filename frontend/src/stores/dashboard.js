@@ -230,6 +230,11 @@ export const useDashboardStore = defineStore("dashboard", () => {
     );
     if (!item) return;
     item.status = result.success === false ? "error" : "completed";
+    item.error = result.success === false
+      ? String(result.error || result.summary || "Tool execution failed")
+      : null;
+    if (result.summary) item.summary = String(result.summary);
+    if (item.error) item.expanded = true;
     item.completedAt = Date.now();
   }
 
@@ -270,6 +275,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     toolName = null,
     parameters = null,
     summary = null,
+    error = null,
   }) {
     const startedAt = Date.now();
     return {
@@ -283,6 +289,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
       toolName,
       parameters,
       summary,
+      error,
       expanded: false,
       startedAt,
       completedAt: status === "completed" ? startedAt : null,

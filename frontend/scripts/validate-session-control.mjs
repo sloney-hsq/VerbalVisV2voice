@@ -71,6 +71,11 @@ assert.match(
   "PCM must never be sent before the page-level Qwen session is ready.",
 );
 assert.match(
+  webSocket,
+  /case "tool_execution_finished":[\s\S]{0,120}setCaptureBlocked\?\.\(false\)/,
+  "The microphone must reopen as soon as the non-preemptive tool batch finishes.",
+);
+assert.match(
   realtime,
   /await self\._connect_qwen\(\)[\s\S]*await self\._configure_qwen\(\)/,
   "The backend must create and configure Qwen when the page WebSocket opens.",
@@ -99,6 +104,26 @@ assert.match(
   main,
   /"qwen_configured": qwen_configuration_error\(\) is None/,
   "The health endpoint must expose whether Qwen is configured.",
+);
+assert.match(
+  realtime,
+  /skip_reason=blocking_failure/,
+  "A failed tool must block later calls from the same response batch.",
+);
+assert.match(
+  realtime,
+  /Invalid JSON tool arguments/,
+  "Malformed function arguments must fail without executing a side-effecting tool.",
+);
+assert.match(
+  realtime,
+  /"dashscope\.aliyuncs\.com"/,
+  "An API-key-only installation must retain the DashScope public endpoint fallback.",
+);
+assert.doesNotMatch(
+  main,
+  /if \(!QWEN_REALTIME_URL and not QWEN_WORKSPACE_ID\)/,
+  "A missing workspace ID must not prevent an API-key-only session from starting.",
 );
 assert.match(envExample, /^DASHSCOPE_API_KEY=/m);
 assert.match(envExample, /^QWEN_WORKSPACE_ID=/m);

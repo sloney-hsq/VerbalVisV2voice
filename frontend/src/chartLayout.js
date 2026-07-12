@@ -1,5 +1,5 @@
-export const DEFAULT_CHART_HEIGHT = 220;
-export const MAX_CHART_HEIGHT = 320;
+export const DEFAULT_CHART_HEIGHT = 270;
+export const MAX_CHART_HEIGHT = 290;
 
 /**
  * All dashboard views occupy exactly one grid cell. This helper only adjusts
@@ -15,7 +15,7 @@ export function chartHeightForView(view) {
 
   if (!isCategoryBar) return DEFAULT_CHART_HEIGHT;
 
-  const estimatedHeight = 52 + rows * 16;
+  const estimatedHeight = 62 + rows * 15;
   return Math.min(
     MAX_CHART_HEIGHT,
     Math.max(DEFAULT_CHART_HEIGHT, estimatedHeight),

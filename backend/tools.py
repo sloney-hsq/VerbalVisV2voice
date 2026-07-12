@@ -14,10 +14,11 @@ transactional rollback, stale-tool epochs, or cancellation of running tools.
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import json
 import logging
 from pathlib import Path
+import re
 from typing import Any, Iterable
 from uuid import uuid4
 
@@ -88,12 +89,22 @@ FILTER_SCHEMA = {
     "type": "object",
     "properties": {
         "field": {"type": "string", "enum": FILTER_FIELDS},
-        "operator": {"type": "string", "enum": sorted(OPERATORS)},
+        "operator": {
+            "type": "string",
+            "enum": sorted(OPERATORS),
+            "description": (
+                "Use eq, neq, in, gte, lte, or between. Omit for scalar "
+                "equality or a two-value time range."
+            ),
+        },
         "value": {
-            "description": "Scalar value, list for in, or two-value list for between."
+            "description": (
+                "Scalar value, list for in, or two-value list for between. "
+                "A time range may also be two ISO values in one string."
+            )
         },
     },
-    "required": ["field", "operator", "value"],
+    "required": ["field", "value"],
 }
 
 TOOL_SCHEMAS = [
@@ -155,7 +166,11 @@ TOOL_SCHEMAS = [
     ),
     _tool(
         "compare_category_metrics",
-        "Create coordinated views for one common Top-N product-category set and return compact evidence.",
+        (
+            "Create coordinated views for one common Top-N product-category set and "
+            "return compact evidence. For a state/date study, provide customer_state, "
+            "start_date, and end_date together to apply that scope atomically."
+        ),
         {
             "mode": {
                 "type": "string",
@@ -173,6 +188,18 @@ TOOL_SCHEMAS = [
             "focus_week": {"type": "string"},
             "title_prefix": {"type": "string"},
             "replace_previous": {"type": "boolean"},
+            "customer_state": {
+                "type": "string",
+                "description": "Two-letter customer state code, for example SP or RJ.",
+            },
+            "start_date": {
+                "type": "string",
+                "description": "Inclusive ISO start date, for example 2017-10-01.",
+            },
+            "end_date": {
+                "type": "string",
+                "description": "Inclusive ISO end date, for example 2018-05-31.",
+            },
         },
         ["mode", "top_n", "metrics"],
     ),
@@ -197,6 +224,12 @@ TOOL_SCHEMAS = [
                 "enum": [*DIMENSIONS, *METRICS],
             },
             "sort_order": {"type": "string", "enum": ["asc", "desc"]},
+            "normalize": {
+                "type": "boolean",
+                "description": (
+                    "Use true for a 100% stacked bar chart when series is set."
+                ),
+            },
             "filters": {"type": "array", "items": FILTER_SCHEMA},
         },
         ["chart_type", "x", "y", "title"],
@@ -223,6 +256,12 @@ TOOL_SCHEMAS = [
                 "enum": [*DIMENSIONS, *METRICS],
             },
             "sort_order": {"type": "string", "enum": ["asc", "desc"]},
+            "normalize": {
+                "type": "boolean",
+                "description": (
+                    "Use true for a 100% stacked bar chart when series is set."
+                ),
+            },
             "filters": {"type": "array", "items": FILTER_SCHEMA},
         },
         ["view_id"],
@@ -413,6 +452,7 @@ def realtime_state() -> dict[str, Any]:
                 "x": view["x_field"],
                 "y": view["y_field"],
                 "series": view.get("color"),
+                "normalize": bool(view.get("normalize")),
                 "data_points": len(view.get("data") or []),
             }
             for view in views
@@ -589,6 +629,7 @@ def _exec_compare_selected_groups(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _exec_compare_category_metrics(args: dict[str, Any]) -> dict[str, Any]:
+    global active_filters
     global views
     global view_counter
 
@@ -617,10 +658,15 @@ def _exec_compare_category_metrics(args: dict[str, Any]) -> dict[str, Any]:
             "rank_by must be product_revenue or order_count",
         )
 
+    requested_scope, scope_error = _comparison_scope_filters(args)
+    if scope_error:
+        return _error("compare_category_metrics", scope_error)
+    comparison_scope = requested_scope or active_filters
+
     ranked = _rank_dimension(
         "product_category",
         rank_by,
-        active_filters,
+        comparison_scope,
         top_n,
     )
     categories = [row["product_category"] for row in ranked]
@@ -689,20 +735,30 @@ def _exec_compare_category_metrics(args: dict[str, Any]) -> dict[str, Any]:
                     "metrics": metrics,
                     "focus_week": focus_week,
                     "title_prefix": title_prefix,
+                    "inherit_global_scope": True,
                 },
                 "comparison_categories": categories,
             }
         )
-        _refresh_view(view)
+        _refresh_view(
+            view,
+            filters_override=[*comparison_scope, category_filter],
+        )
         candidate_views.append(view)
 
+    replace_previous = _as_bool(args.get("replace_previous", True))
     _push_history("compare_category_metrics")
-    if _as_bool(args.get("replace_previous", True)):
+    if replace_previous:
         views = [
             view
             for view in views
             if not view.get("managed_comparison")
         ]
+    elif requested_scope is not None:
+        _freeze_managed_comparison_scopes(active_filters)
+    if requested_scope is not None:
+        active_filters = requested_scope
+        _refresh_all_views()
     views.extend(candidate_views)
     view_counter = next_counter
 
@@ -725,6 +781,8 @@ def _exec_compare_category_metrics(args: dict[str, Any]) -> dict[str, Any]:
         view_ids=[view["id"] for view in candidate_views],
         evidence=evidence,
         active_filters=deepcopy(active_filters),
+        scope_applied=requested_scope is not None,
+        filtered_rows=total_rows(active_filters),
         revenue_definition="SUM(price), freight excluded",
         delivery_grain="one row per order and product category",
     )
@@ -765,6 +823,10 @@ def _exec_update_visual(args: dict[str, Any]) -> dict[str, Any]:
         return _error("update_visual", f"Unknown view_id: {view_id}")
 
     current = views[index]
+    encoding_changed = any(
+        field in args
+        for field in ("chart_type", "x", "y", "series")
+    )
     candidate_args = {
         "chart_type": args.get("chart_type", current["chart_type"]),
         "x": args.get("x", current["x_field"]),
@@ -772,10 +834,22 @@ def _exec_update_visual(args: dict[str, Any]) -> dict[str, Any]:
         "series": args.get("series", current.get("color")),
         "title": args.get("title", current["title"]),
         "top_n": args.get("top_n", current.get("top_n")),
-        "sort_by": args.get("sort_by", current.get("sort_by")),
-        "sort_order": args.get(
-            "sort_order",
-            current.get("sort_order"),
+        "normalize": args.get(
+            "normalize",
+            bool(current.get("normalize"))
+            if args.get("chart_type", current["chart_type"]) == "bar"
+            and args.get("series", current.get("color")) not in {None, "", "none"}
+            else False,
+        ),
+        "sort_by": (
+            args.get("sort_by")
+            if "sort_by" in args
+            else None if encoding_changed else current.get("sort_by")
+        ),
+        "sort_order": (
+            args.get("sort_order")
+            if "sort_order" in args
+            else None if encoding_changed else current.get("sort_order")
         ),
         "filters": args.get(
             "filters",
@@ -914,6 +988,7 @@ def _exec_inspect_visual(args: dict[str, Any]) -> dict[str, Any]:
         x=view["x_field"],
         y=view["y_field"],
         series=view.get("color"),
+        normalize=bool(view.get("normalize")),
         active_filters=deepcopy(active_filters),
         local_filters=deepcopy(view.get("local_filters") or []),
         statistics=deepcopy(view.get("statistics") or {}),
@@ -942,6 +1017,7 @@ def _exec_summarize_dashboard(
                 "x": view["x_field"],
                 "y": view["y_field"],
                 "series": view.get("color"),
+                "normalize": bool(view.get("normalize")),
                 "data_points": len(view.get("data") or []),
                 "statistics": deepcopy(view.get("statistics") or {}),
             }
@@ -992,6 +1068,7 @@ def _build_visual_candidate(
     if series == "none":
         series = None
     title = str(args.get("title") or "").strip()
+    normalize = _as_bool(args.get("normalize", False))
 
     if chart_type not in CHART_TYPES:
         return None, "chart_type must be line, bar, or scatter"
@@ -1001,6 +1078,8 @@ def _build_visual_candidate(
         return None, "Invalid series field"
     if not title:
         return None, "title is required"
+    if normalize and (chart_type != "bar" or series is None):
+        return None, "normalize requires a bar chart with a series field"
 
     if chart_type == "scatter":
         if x not in SCATTER_FIELDS:
@@ -1030,9 +1109,10 @@ def _build_visual_candidate(
         series=series,
         top_n=_limit(args.get("top_n"), default=None),
         sort_by=args.get("sort_by")
-        or (x if x in TIME_DIMENSIONS else y),
+        or (x if normalize or x in TIME_DIMENSIONS else y),
         sort_order=args.get("sort_order")
-        or ("asc" if x in TIME_DIMENSIONS else "desc"),
+        or ("asc" if normalize or x in TIME_DIMENSIONS else "desc"),
+        normalize=normalize,
         local_filters=filters,
     )
     _refresh_view(view)
@@ -1050,6 +1130,7 @@ def _make_view(
     top_n: int | None = None,
     sort_by: str | None = None,
     sort_order: str = "asc",
+    normalize: bool = False,
     local_filters: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
@@ -1064,6 +1145,8 @@ def _make_view(
         "limit": top_n if not series else None,
         "sort_by": sort_by or y,
         "sort_order": sort_order,
+        "normalize": bool(normalize),
+        "normalized_field": "normalized_value" if normalize else None,
         "local_filters": deepcopy(local_filters or []),
         "filters": deepcopy(local_filters or []),
         "inherit_global_filters": True,
@@ -1106,32 +1189,68 @@ def _refresh_comparison_group(
         return
 
     config = group[0].get("comparison_config") or {}
+    inherit_global_scope = config.get("inherit_global_scope", True) is not False
+    comparison_scope = (
+        active_filters
+        if inherit_global_scope
+        else deepcopy(config.get("scope_filters") or [])
+    )
     ranked = _rank_dimension(
         "product_category",
         config.get("rank_by", "product_revenue"),
-        active_filters,
+        comparison_scope,
         int(config.get("top_n") or 5),
     )
     categories = [row["product_category"] for row in ranked]
 
     for view in group:
         view["comparison_categories"] = categories
-        view["local_filters"] = [
-            {
-                "field": "product_category",
-                "operator": "in",
-                "value": categories,
-            }
-        ]
+        category_filter = {
+            "field": "product_category",
+            "operator": "in",
+            "value": categories,
+        }
+        view["inherit_global_filters"] = inherit_global_scope
+        view["local_filters"] = (
+            [category_filter]
+            if inherit_global_scope
+            else [*deepcopy(comparison_scope), category_filter]
+        )
         view["filters"] = deepcopy(view["local_filters"])
         _refresh_view(view)
 
 
-def _refresh_view(view: dict[str, Any]) -> None:
-    filters = [
-        *active_filters,
-        *(view.get("local_filters") or []),
-    ]
+def _freeze_managed_comparison_scopes(
+    scope_filters: list[dict[str, Any]],
+) -> None:
+    for view in views:
+        if not view.get("managed_comparison"):
+            continue
+        config = view.get("comparison_config") or {}
+        if config.get("inherit_global_scope", True) is False:
+            continue
+        config["inherit_global_scope"] = False
+        config["scope_filters"] = deepcopy(scope_filters)
+        view["comparison_config"] = config
+
+
+def _refresh_view(
+    view: dict[str, Any],
+    *,
+    filters_override: list[dict[str, Any]] | None = None,
+) -> None:
+    filters = (
+        list(filters_override)
+        if filters_override is not None
+        else [
+            *(
+                active_filters
+                if view.get("inherit_global_filters", True)
+                else []
+            ),
+            *(view.get("local_filters") or []),
+        ]
+    )
 
     if view["chart_type"] == "scatter":
         view["data"] = _scatter_rows(
@@ -1183,9 +1302,31 @@ def _refresh_view(view: dict[str, Any]) -> None:
                 "asc",
                 None,
             )
+        if view.get("normalize") and view.get("color"):
+            _add_normalized_values(
+                rows,
+                view["x_field"],
+                view["y_field"],
+            )
         view["data"] = rows
 
     view["statistics"] = _view_statistics(view)
+
+
+def _add_normalized_values(
+    rows: list[dict[str, Any]],
+    group_field: str,
+    metric: str,
+) -> None:
+    totals: dict[Any, float] = {}
+    for row in rows:
+        value = _number(row.get(metric)) or 0.0
+        key = row.get(group_field)
+        totals[key] = totals.get(key, 0.0) + value
+    for row in rows:
+        total = totals.get(row.get(group_field), 0.0)
+        value = _number(row.get(metric)) or 0.0
+        row["normalized_value"] = round(value / total, 6) if total else 0.0
 
 
 def _aggregate(
@@ -1453,10 +1594,15 @@ def _normalize_filters(
         if not isinstance(raw, dict):
             return [], "Each filter must be an object"
         field = raw.get("field")
-        operator = raw.get("operator")
+        operator = _canonical_filter_operator(raw.get("operator"))
         value = _coerce_json(raw.get("value"))
         if field not in FILTER_FIELDS:
             return [], f"Unknown filter field: {field}"
+        operator, value = _infer_filter_operator_and_value(
+            str(field),
+            operator,
+            value,
+        )
         if operator not in OPERATORS:
             return [], f"Unknown operator: {operator}"
         if operator == "between":
@@ -1472,6 +1618,106 @@ def _normalize_filters(
             }
         )
     return normalized, None
+
+
+def _canonical_filter_operator(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip().lower()
+    aliases = {
+        "=": "eq",
+        "==": "eq",
+        "equals": "eq",
+        "equal": "eq",
+        "is": "eq",
+        "!=": "neq",
+        "<>": "neq",
+        "not_equal": "neq",
+        "not equals": "neq",
+        ">=": "gte",
+        "<=": "lte",
+    }
+    return aliases.get(text, text)
+
+
+def _infer_filter_operator_and_value(
+    field: str,
+    operator: str | None,
+    value: Any,
+) -> tuple[str, Any]:
+    if field == "customer_state" and isinstance(value, str):
+        value = value.strip().upper()
+
+    if operator == "between" or (operator is None and field in TIME_DIMENSIONS):
+        range_values = _time_range_values(value)
+        if range_values is not None:
+            return "between", range_values
+
+    if operator == "in" and isinstance(value, str):
+        values = [
+            token.strip()
+            for token in re.split(r"[,，;；|]", value)
+            if token.strip()
+        ]
+        if field == "customer_state":
+            values = [token.upper() for token in values]
+        return "in", values
+
+    if operator is None:
+        if isinstance(value, list):
+            return "in", value
+        return "eq", value
+    return operator, value
+
+
+def _time_range_values(value: Any) -> list[Any] | None:
+    if isinstance(value, list):
+        return value if len(value) == 2 else None
+    if not isinstance(value, str):
+        return None
+    tokens = re.findall(
+        r"\d{4}-W\d{2}|\d{4}-\d{2}-\d{2}|\d{4}-\d{2}",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return tokens if len(tokens) == 2 else None
+
+
+def _comparison_scope_filters(
+    args: dict[str, Any],
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    values = {
+        "customer_state": str(args.get("customer_state") or "").strip().upper(),
+        "start_date": str(args.get("start_date") or "").strip(),
+        "end_date": str(args.get("end_date") or "").strip(),
+    }
+    if not any(values.values()):
+        return None, None
+    if not all(values.values()):
+        return None, (
+            "customer_state, start_date, and end_date must be provided together"
+        )
+    if len(values["customer_state"]) != 2:
+        return None, "customer_state must be a two-letter state code"
+    try:
+        start = date.fromisoformat(values["start_date"])
+        end = date.fromisoformat(values["end_date"])
+    except ValueError:
+        return None, "start_date and end_date must use YYYY-MM-DD"
+    if start > end:
+        return None, "start_date must not be after end_date"
+    return [
+        {
+            "field": "customer_state",
+            "operator": "eq",
+            "value": values["customer_state"],
+        },
+        {
+            "field": "order_date",
+            "operator": "between",
+            "value": [values["start_date"], values["end_date"]],
+        },
+    ], None
 
 
 def _coerce_filters(value: Any) -> list[Any]:

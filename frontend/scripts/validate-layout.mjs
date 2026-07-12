@@ -20,21 +20,15 @@ const chartSlot = readFileSync(
   "utf8",
 );
 const specFactory = readFileSync(resolve(srcRoot, "specFactory.js"), "utf8");
+const dashboardStore = readFileSync(
+  resolve(srcRoot, "stores/dashboard.js"),
+  "utf8",
+);
 
 assert.match(
   dashboard,
-  /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/,
-  "Wide screens must use four equal columns.",
-);
-assert.match(
-  dashboard,
-  /@media \(max-width: 1799px\)[\s\S]*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
-  "Medium-wide screens must use three equal columns.",
-);
-assert.match(
-  dashboard,
-  /@media \(max-width: 1279px\)[\s\S]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/,
-  "Desktop screens must use two equal columns.",
+  /grid-template-columns:\s*repeat\(auto-fill,\s*540px\)/,
+  "Desktop grids must use fixed 540 px view columns.",
 );
 assert.match(
   dashboard,
@@ -46,7 +40,6 @@ assert.doesNotMatch(
   /chart-card[^\n{]*[\s\S]{0,120}grid-column:\s*span/i,
   "No chart type may span extra grid columns.",
 );
-
 assert.match(specFactory, /width:\s*"container"/);
 assert.match(specFactory, /autosize:\s*\{[\s\S]*type:\s*"fit"/);
 assert.match(specFactory, /resize:\s*true/);
@@ -55,8 +48,30 @@ assert.doesNotMatch(
   /title:\s*view\.title/,
   "The Vega spec must not duplicate the card title.",
 );
-assert.match(chartSlot, /min-height:\s*270px/);
+assert.match(chartSlot, /max-width:\s*540px/);
+assert.match(chartSlot, /height:\s*360px/);
+assert.match(chartSlot, /min-height:\s*360px/);
+assert.doesNotMatch(chartSlot, /aspect-ratio:\s*1\s*\/\s*1/);
 assert.match(chartSlot, /chartHeightForView/);
+assert.match(chartSlot, /import\("vega-embed"\)/);
+assert.doesNotMatch(chartSlot, /^import vegaEmbed from "vega-embed"/m);
+assert.match(
+  dashboardStore,
+  /item\.error\s*=\s*result\.success\s*===\s*false/,
+  "Failed tools must retain their concrete error in the transcript.",
+);
+assert.match(
+  dashboardStore,
+  /if \(item\.error\) item\.expanded = true/,
+  "Failed tools must expand automatically so users can see why scope changes failed.",
+);
+assert.match(dashboard, /class="tool-error"/);
+assert.match(dashboard, />All data<\/span>/);
+assert.match(dashboard, /ws\.runtime\.lastToolError/);
+assert.match(specFactory, /view\.comparison_categories/);
+assert.match(specFactory, /COMPARISON_COLORS/);
+assert.match(chartSlot, /props\.view\.y_field === "low_score_ratio"/);
+assert.match(chartSlot, /view\.low_score_threshold \?\? 2/);
 
 assert.equal(
   chartHeightForView({ chart_type: "line", data: Array(30).fill({}) }),
@@ -69,7 +84,7 @@ assert.equal(
     x_field: "product_category",
     data: Array(15).fill({}),
   }),
-  292,
+  287,
   "Top-15 category bars receive enough internal plotting height.",
 );
 assert.equal(

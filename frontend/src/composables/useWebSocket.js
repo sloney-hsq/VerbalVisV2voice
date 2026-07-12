@@ -182,7 +182,7 @@ export function useWebSocket(audioPlayer) {
         break;
 
       case "tool_execution_finished":
-        audioPlayer?.setCaptureBlocked?.(Boolean(message.followup_requested));
+        audioPlayer?.setCaptureBlocked?.(false);
         runtime.finishToolBatch(message);
         break;
 
