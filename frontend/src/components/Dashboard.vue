@@ -54,7 +54,10 @@
 
     <section
       class="timeline"
-      :class="{ 'timeline--collapsed': timelineCollapsed }"
+      :class="{
+        'timeline--collapsed': timelineCollapsed,
+        'timeline--empty': !conversationGroups.length,
+      }"
       aria-label="Session transcript"
     >
       <header class="timeline__header">
@@ -516,6 +519,11 @@ function filterLabel(filter) {
   height: 40px;
 }
 
+.timeline--empty:not(.timeline--collapsed) {
+  flex-basis: 78px;
+  height: 78px;
+}
+
 .timeline__header {
   display: flex;
   flex: 0 0 39px;
@@ -575,7 +583,7 @@ function filterLabel(filter) {
 }
 
 .timeline__empty {
-  margin: 24px 0;
+  margin: 10px 0;
   color: #94a3b8;
   font-size: 11px;
   text-align: center;
