@@ -90,12 +90,15 @@ export function useWebSocket(audioPlayer) {
     switch (message.type) {
       case "init":
         activeResponseId = null;
-        dashboard.initViews(message.views || [], message.dashboard_revision);
+        dashboard.initViews(
+          message.views || [],
+          message.dashboard_revision,
+          message.state || {},
+        );
         syncSessionInfo(message);
-        runtime.updateDashboardState({
-          ...runtime.dashboardState,
-          views: message.views || [],
-        });
+        runtime.updateDashboardState(
+          message.state || { views: message.views || [] },
+        );
         break;
 
       case "configuration_error":
@@ -185,6 +188,12 @@ export function useWebSocket(audioPlayer) {
         audioPlayer?.setCaptureBlocked?.(
           Boolean(message.followup_requested && !activeResponseId),
         );
+        if (message.fatal_error) {
+          dashboard.failRunningToolItems(
+            message.response_id,
+            message.fatal_error,
+          );
+        }
         runtime.finishToolBatch(message);
         break;
 
@@ -203,24 +212,14 @@ export function useWebSocket(audioPlayer) {
         runtime.recordToolResult(message);
         break;
 
-      case "views_update":
-        if (dashboard.updateViews(
-          message.views || [],
-          message.dashboard_revision,
-        )) {
-          runtime.updateDashboardState({
-            ...runtime.dashboardState,
-            views: message.views || [],
-            dashboard_revision: dashboard.dashboardRevision,
-          });
+      case "dashboard_commit":
+        if (dashboard.applyDashboardCommit({
+          viewList: message.views || [],
+          state: message.state || {},
+          revision: message.dashboard_revision,
+        })) {
+          runtime.updateDashboardState(message.state || {});
         }
-        break;
-
-      case "dashboard_state":
-        syncDashboardState(
-          message.state || {},
-          message.dashboard_revision ?? message.state?.dashboard_revision,
-        );
         break;
 
       case "runtime_state":
@@ -290,23 +289,6 @@ export function useWebSocket(audioPlayer) {
 
     if (!responseId || responseId === activeResponseId) activeResponseId = null;
     if (acknowledge) sendPlaybackStopped(stoppedId, reason, playbackCursor);
-  }
-
-  function syncDashboardState(state = {}, revision = null) {
-    if (!dashboard.acceptDashboardRevision(revision)) return;
-    runtime.updateDashboardState(state);
-    if (Array.isArray(state.filters)) dashboard.activeFilters = state.filters;
-    if (Array.isArray(state.highlighted)) {
-      if (state.highlighted.length) {
-        dashboard.highlightViews(
-          state.highlighted,
-          state.highlight_element ?? null,
-          state.dim_others ?? true,
-        );
-      } else {
-        dashboard.clearHighlight();
-      }
-    }
   }
 
   function syncSessionInfo(message = {}) {

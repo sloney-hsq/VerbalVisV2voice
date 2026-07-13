@@ -99,6 +99,10 @@ export const useRuntimeStore = defineStore("runtime", () => {
     toolRunning.value = false;
     activeTools.value = [];
     phase.value = message.followup_requested === false ? "ready" : "processing";
+    if (message.fatal_error) {
+      lastToolError.value = String(message.fatal_error);
+      lastToolSummary.value = "";
+    }
     lastToolDurationMs.value = Number.isFinite(Number(message.duration_ms))
       ? Number(message.duration_ms)
       : null;
@@ -112,11 +116,6 @@ export const useRuntimeStore = defineStore("runtime", () => {
     } else {
       lastToolError.value = "";
     }
-
-    const rows = message.payload?.filtered_rows;
-    if (rows !== undefined && rows !== null && Number.isFinite(Number(rows))) {
-      filteredRows.value = Number(rows);
-    }
   }
 
   function updateDashboardState(state = {}) {
@@ -127,6 +126,13 @@ export const useRuntimeStore = defineStore("runtime", () => {
       low_score_threshold: Number(state.low_score_threshold || 2),
       ...state,
     };
+    if (
+      state.filtered_rows !== undefined &&
+      state.filtered_rows !== null &&
+      Number.isFinite(Number(state.filtered_rows))
+    ) {
+      filteredRows.value = Number(state.filtered_rows);
+    }
   }
 
   function resetRuntime() {

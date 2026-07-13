@@ -1,11 +1,7 @@
 export const DEFAULT_CHART_HEIGHT = 270;
 export const MAX_CHART_HEIGHT = 290;
 
-/**
- * All dashboard views occupy exactly one grid cell. This helper only adjusts
- * the internal plotting height when a categorical bar chart needs enough
- * vertical room for its labels; it never changes grid span or view priority.
- */
+/** Adjust internal plot height without changing a card's grid placement. */
 export function chartHeightForView(view) {
   const rows = Array.isArray(view?.data) ? view.data.length : 0;
   const isCategoryBar = (
@@ -20,4 +16,8 @@ export function chartHeightForView(view) {
     MAX_CHART_HEIGHT,
     Math.max(DEFAULT_CHART_HEIGHT, estimatedHeight),
   );
+}
+
+export function isMultiSeriesLine(view) {
+  return view?.chart_type === "line" && Boolean(view?.color);
 }

@@ -31,7 +31,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   // Dashboard state
   // ------------------------------------------------------------------
 
-  function initViews(viewList = [], revision = null) {
+  function initViews(viewList = [], revision = null, state = {}) {
     activeFilters.value = [];
     highlightedViewIds.value = [];
     highlightElement.value = null;
@@ -41,11 +41,33 @@ export const useDashboardStore = defineStore("dashboard", () => {
     currentAssistantResponseId.value = null;
     isAssistantSpeaking.value = false;
     dashboardRevision.value = 0;
-    applyAuthoritativeViews(viewList, revision);
+    applyDashboardCommit({ viewList, revision, state });
   }
 
   function updateViews(viewList = [], revision = null) {
     return applyAuthoritativeViews(viewList, revision);
+  }
+
+  function applyDashboardCommit({ viewList = [], state = {}, revision = null } = {}) {
+    const incomingRevision = resolvedRevision(
+      viewList,
+      revision ?? state.dashboard_revision,
+    );
+    if (!acceptDashboardRevision(incomingRevision)) return false;
+
+    if (Array.isArray(state.filters)) activeFilters.value = state.filters;
+    const selected = Array.isArray(state.highlighted)
+      ? uniqueIds(state.highlighted)
+      : viewList
+        .filter((view) => Boolean(view.highlighted))
+        .map((view) => view.id);
+    highlightedViewIds.value = selected;
+    highlightElement.value = selected.length
+      ? state.highlight_element ?? null
+      : null;
+    highlightDimOthers.value = state.dim_others ?? true;
+    views.value = viewList.map((view) => ({ ...view }));
+    return true;
   }
 
   function applyAuthoritativeViews(viewList, revision = null) {
@@ -101,20 +123,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
   }
 
   function handleToolResult(message = {}) {
-    const payload = message.payload || {};
-    if (message.tool === "highlight_visual" && message.success) {
-      if (payload.action === "clear") clearHighlight();
-      else {
-        highlightViews(
-          payload.view_ids || payload.highlighted_views || [payload.view_id],
-          payload.highlight_element,
-          payload.dim_others ?? true,
-        );
-      }
-    }
-    if (message.success && Array.isArray(payload.active_filters)) {
-      activeFilters.value = payload.active_filters;
-    }
+    // Tool-result messages describe one action in the transcript. Dashboard
+    // state itself changes only when the backend publishes the completed
+    // batch's dashboard_commit snapshot.
     completeToolItem(message.call_id, message);
   }
 
@@ -252,6 +263,18 @@ export const useDashboardStore = defineStore("dashboard", () => {
     item.completedAt = Date.now();
   }
 
+  function failRunningToolItems(responseId, error) {
+    const message = String(error || "Tool batch could not finish");
+    transcriptItems.value.forEach((item) => {
+      if (item.role !== "tool" || item.status !== "running") return;
+      if (responseId && item.responseId && item.responseId !== responseId) return;
+      item.status = "error";
+      item.error = message;
+      item.expanded = true;
+      item.completedAt = Date.now();
+    });
+  }
+
   function toggleToolDetails(itemId) {
     const item = transcriptItems.value.find((entry) => entry.id === itemId);
     if (item?.role === "tool") item.expanded = !item.expanded;
@@ -375,6 +398,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     outputAudioRate,
     initViews,
     updateViews,
+    applyDashboardCommit,
     acceptDashboardRevision,
     setSessionInfo,
     highlightViews,
@@ -389,6 +413,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     interruptAssistantResponse,
     addToolItem,
     completeToolItem,
+    failRunningToolItems,
     toggleToolDetails,
   };
 });

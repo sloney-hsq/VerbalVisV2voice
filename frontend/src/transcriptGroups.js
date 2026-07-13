@@ -1,6 +1,7 @@
 /** Group a flat realtime timeline into user-led conversation turns. */
 export function groupTranscriptItems(items = []) {
   const groups = [];
+  const responseGroups = new Map();
   let current = null;
 
   for (const item of Array.isArray(items) ? items : []) {
@@ -12,11 +13,29 @@ export function groupTranscriptItems(items = []) {
       groups.push(current);
     }
 
-    if (item?.role === "tool") current.actions.push(item);
-    else current.messages.push(item);
+    if (item?.role === "tool") {
+      const target = responseGroups.get(item.responseId) || current;
+      target.actions.push(item);
+      continue;
+    }
+
+    current.messages.push(item);
+    if (item?.role === "assistant" && item.responseId) {
+      responseGroups.set(item.responseId, current);
+    }
   }
 
+  groups.forEach((group) => {
+    group.actionAnchorId = actionAnchorId(group.messages);
+  });
   return groups;
+}
+
+function actionAnchorId(messages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant") return messages[index].id || null;
+  }
+  return null;
 }
 
 function makeGroup(id, startedAt) {
@@ -25,5 +44,6 @@ function makeGroup(id, startedAt) {
     startedAt: startedAt ?? Date.now(),
     messages: [],
     actions: [],
+    actionAnchorId: null,
   };
 }

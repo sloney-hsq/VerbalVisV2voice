@@ -44,7 +44,7 @@ from realtime import (  # noqa: E402
     QWEN_WORKSPACE_ID,
     QwenRealtimeSession,
 )
-from tools import get_views_for_frontend, init_views  # noqa: E402
+from tools import get_views_for_frontend, init_views, realtime_state  # noqa: E402
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
@@ -172,10 +172,13 @@ async def _serve_configuration_error(
 ) -> None:
     """Keep the dashboard visible and report one non-retrying config error."""
     init_views()
+    initial_state = realtime_state()
     await websocket.send_json(
         {
             "type": "init",
             "views": get_views_for_frontend(),
+            "state": initial_state,
+            "dashboard_revision": initial_state.get("dashboard_revision"),
             "session_id": session_id,
             "analysis_id": analysis_id or session_id,
             "mode": "barge_in",

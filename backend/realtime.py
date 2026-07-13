@@ -212,11 +212,14 @@ class QwenRealtimeSession:
         init_views()
         self._init_logs()
         self.running = True
+        initial_state = realtime_state()
 
         if not await self._send_client(
             {
                 "type": "init",
                 "views": get_views_for_frontend(),
+                "state": initial_state,
+                "dashboard_revision": initial_state.get("dashboard_revision"),
                 **self._session_metadata(),
             }
         ):
@@ -308,9 +311,6 @@ class QwenRealtimeSession:
             if event.get("type") == "session.updated":
                 await self._send_client(
                     {"type": "session_updated", **self._session_metadata()}
-                )
-                await self._send_client(
-                    {"type": "dashboard_state", "state": realtime_state()}
                 )
                 await self._send_runtime("ready")
                 return await self._send_client({"type": "session_ready"})
@@ -787,10 +787,12 @@ class QwenRealtimeSession:
 
         try:
             blocking_failure: str | None = None
-            for pending in calls:
+            for index, pending in enumerate(calls, start=1):
                 result = await self._execute_one_tool(
                     pending,
                     skip_reason=blocking_failure,
+                    batch_index=index,
+                    batch_size=len(calls),
                 )
                 completed += 1
                 if result.get("success"):
@@ -801,26 +803,21 @@ class QwenRealtimeSession:
                     blocking_failure = (
                         f"Skipped because the earlier tool {pending.name} failed"
                     )
-        finally:
+
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
             ignored = self.ignored_audio_chunks
             self.ignored_audio_chunks = 0
             final_revision = int(realtime_state().get("dashboard_revision") or 0)
 
             if dashboard_change and successful:
-                # Publish one coherent dashboard snapshot for the completed
-                # batch instead of exposing intermediate cross-view states.
+                # A mutation batch becomes visible to the browser as one
+                # committed snapshot. Individual tool results are transcript
+                # records only, so filters/highlights never briefly reflect an
+                # intermediate tool while later calls are still running.
                 await self._send_client(
                     {
-                        "type": "views_update",
+                        "type": "dashboard_commit",
                         "views": get_views_for_frontend(),
-                        "dashboard_revision": final_revision,
-                        "intent_epoch": intent_epoch,
-                    }
-                )
-                await self._send_client(
-                    {
-                        "type": "dashboard_state",
                         "state": realtime_state(),
                         "dashboard_revision": final_revision,
                         "intent_epoch": intent_epoch,
@@ -874,12 +871,62 @@ class QwenRealtimeSession:
                 base_revision=base_revision,
                 dashboard_revision=final_revision,
             )
+        except asyncio.CancelledError:
+            self.tool_running = False
+            self.awaiting_followup_response = False
+            self.ignored_audio_chunks = 0
+            raise
+        except Exception as exc:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            ignored = self.ignored_audio_chunks
+            self.ignored_audio_chunks = 0
+            final_revision = int(
+                realtime_state().get("dashboard_revision") or base_revision
+            )
+            message = f"{type(exc).__name__}: {exc}"
+            self.tool_running = False
+            self.awaiting_followup_response = False
+            self._event(
+                "tool_batch_failed",
+                response_id=response_id,
+                error=message,
+                completed=completed,
+                successful=successful,
+                intent_epoch=intent_epoch,
+            )
+            log.exception("Tool batch failed before it could finish")
+            # Do not emit a generic realtime error here: that would lock the
+            # microphone. The browser receives a completed batch with a
+            # recoverable error and can immediately accept a corrected request.
+            await self._send_client(
+                {
+                    "type": "tool_execution_finished",
+                    "response_id": response_id,
+                    "tool_count": len(calls),
+                    "completed_count": completed,
+                    "successful_count": successful,
+                    "failed_count": max(0, completed - successful),
+                    "skipped_count": skipped,
+                    "duration_ms": duration_ms,
+                    "ignored_audio_chunks": ignored,
+                    "followup_requested": False,
+                    "changes_dashboard": dashboard_change,
+                    "tools": metadata,
+                    "intent_epoch": intent_epoch,
+                    "base_revision": base_revision,
+                    "dashboard_revision": final_revision,
+                    "fatal_error": message,
+                }
+            )
+            await self._send_runtime("ready")
 
     async def _execute_one_tool(
         self,
         pending: PendingToolCall,
         *,
         skip_reason: str | None = None,
+        batch_index: int = 1,
+        batch_size: int = 1,
     ) -> dict[str, Any]:
         started_at = time.perf_counter()
         arguments = normalize_tool_arguments(
@@ -956,16 +1003,26 @@ class QwenRealtimeSession:
             }
         )
 
-        state = realtime_state()
+        is_final_call = batch_index == batch_size
         output = {
             "success": result.get("success", False),
             "tool": result.get("tool", pending.name),
             "payload": result.get("payload"),
             "error": result.get("error"),
-            "dashboard_state": state,
             "intent_epoch": pending.intent_epoch,
-            "dashboard_revision": state.get("dashboard_revision"),
+            "batch": {
+                "index": batch_index,
+                "size": batch_size,
+                "final": is_final_call,
+            },
         }
+        if is_final_call:
+            # The model receives every tool result in order. The last output
+            # carries the one authoritative post-batch snapshot, avoiding a
+            # repeated dashboard payload for every function call.
+            state = realtime_state()
+            output["dashboard_state"] = state
+            output["dashboard_revision"] = state.get("dashboard_revision")
         await self._send_qwen(
             {
                 "type": "conversation.item.create",

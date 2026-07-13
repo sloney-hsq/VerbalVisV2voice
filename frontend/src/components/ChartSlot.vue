@@ -4,6 +4,7 @@
     :class="{
       'chart-card--highlighted': view.highlighted,
       'chart-card--dimmed': isDimmed,
+      'chart-card--multi-series': isMultiSeriesLine(view),
     }"
   >
     <header class="chart-card__header">
@@ -34,7 +35,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { createSpec } from "../specFactory";
-import { chartHeightForView } from "../chartLayout";
+import { chartHeightForView, isMultiSeriesLine } from "../chartLayout";
 import { resolveHighlight } from "../highlightSpec";
 import { useDashboardStore } from "../stores/dashboard";
 
@@ -168,6 +169,16 @@ function clearChart() {
 
 .chart-card--dimmed {
   opacity: 0.28;
+}
+
+.chart-card--multi-series {
+  grid-column: span 2;
+}
+
+@media (max-width: 850px) {
+  .chart-card--multi-series {
+    grid-column: span 1;
+  }
 }
 
 .chart-card__header {

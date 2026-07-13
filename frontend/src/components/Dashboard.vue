@@ -56,7 +56,6 @@
       class="timeline"
       :class="{
         'timeline--collapsed': timelineCollapsed,
-        'timeline--empty': !conversationGroups.length,
       }"
       aria-label="Session transcript"
     >
@@ -110,21 +109,24 @@
                 class="interrupted-mark"
                 title="Assistant response interrupted"
               >×</span>
+              <button
+                v-if="group.actions.length && group.actionAnchorId === item.id"
+                class="actions-toggle"
+                type="button"
+                :aria-expanded="isGroupActionsOpen(group.id)"
+                @click="toggleGroupActions(group.id)"
+              >
+                <span>Actions ({{ group.actions.length }})</span>
+                <span aria-hidden="true">{{ isGroupActionsOpen(group.id) ? '⌃' : '⌄' }}</span>
+              </button>
             </div>
           </div>
 
-          <button
-            v-if="group.actions.length"
-            class="actions-toggle"
-            type="button"
-            :aria-expanded="isGroupActionsOpen(group.id)"
-            @click="toggleGroupActions(group.id)"
+          <div
+            v-if="isGroupActionsOpen(group.id) || (group.actions.length && !group.actionAnchorId)"
+            class="action-list"
+            :class="{ 'action-list--unanchored': !group.actionAnchorId }"
           >
-            <span>Actions ({{ group.actions.length }})</span>
-            <span aria-hidden="true">{{ isGroupActionsOpen(group.id) ? '⌃' : '⌄' }}</span>
-          </button>
-
-          <div v-if="isGroupActionsOpen(group.id)" class="action-list">
             <div
               v-for="item in group.actions"
               :key="item.id"
@@ -504,8 +506,8 @@ function filterLabel(filter) {
 
 .timeline {
   display: flex;
-  flex: 0 0 clamp(150px, 22dvh, 210px);
-  height: clamp(150px, 22dvh, 210px);
+  flex: 0 0 250px;
+  height: 250px;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid #d9e1ec;
@@ -517,11 +519,6 @@ function filterLabel(filter) {
 .timeline--collapsed {
   flex-basis: 40px;
   height: 40px;
-}
-
-.timeline--empty:not(.timeline--collapsed) {
-  flex-basis: 78px;
-  height: 78px;
 }
 
 .timeline__header {
@@ -553,8 +550,7 @@ function filterLabel(filter) {
   white-space: nowrap;
 }
 
-.timeline__toggle,
-.actions-toggle {
+.timeline__toggle {
   border: 1px solid #d8e1ed;
   border-radius: 7px;
   background: #fff;
@@ -572,8 +568,7 @@ function filterLabel(filter) {
   padding: 0 8px;
   gap: 6px;
 }
-.timeline__toggle:hover,
-.actions-toggle:hover { border-color: #93b4e4; color: #1d5ec7; }
+.timeline__toggle:hover { border-color: #93b4e4; color: #1d5ec7; }
 
 .timeline__list {
   flex: 1 1 auto;
@@ -651,7 +646,7 @@ function filterLabel(filter) {
   min-width: 0;
   width: 100%;
   overflow: hidden;
-  color: #92400e;
+  color: #526174;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -662,25 +657,30 @@ function filterLabel(filter) {
 .tool-caret { flex: 0 0 14px; }
 
 .actions-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-width: 104px;
-  height: 25px;
-  margin: 2px 0 1px 98px;
-  padding: 0 8px;
-  color: #8a5a11;
-  background: #fffbeb;
-  border-color: #f3d8a5;
+  display: inline-flex;
+  align-items: baseline;
+  align-self: flex-start;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  color: #526174;
+  cursor: pointer;
+  font: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
 }
+.actions-toggle:hover { color: #1d5ec7; }
 
 .action-list {
-  margin: 4px 0 3px 90px;
-  padding: 3px 8px;
-  border-left: 2px solid #f1d39a;
-  border-radius: 0 7px 7px 0;
-  background: #fffdf7;
+  margin: 1px 0 3px 98px;
+  padding: 0;
 }
+.action-list--unanchored { margin-left: 0; }
 .action-list .timeline-row {
   grid-template-columns: 58px 52px minmax(0, 1fr);
 }
@@ -694,9 +694,9 @@ function filterLabel(filter) {
   margin: 3px 0 5px;
   padding: 7px 9px;
   gap: 10px;
-  border: 1px solid #fde1b6;
+  border: 1px solid #e2e8f0;
   border-radius: 7px;
-  background: #fffbeb;
+  background: #f8fafc;
   cursor: default;
 }
 .tool-details div { min-width: 0; }
@@ -710,7 +710,7 @@ function filterLabel(filter) {
 .tool-details b {
   display: block;
   margin-bottom: 3px;
-  color: #92400e;
+  color: #475569;
   font-size: 9px;
   text-transform: uppercase;
 }
@@ -738,13 +738,12 @@ function filterLabel(filter) {
   .session-state { overflow-x: auto; }
   .mic-button { min-width: 44px; padding: 0 10px; }
   .mic-button span { display: none; }
-  .timeline { flex-basis: clamp(140px, 25dvh, 190px); }
   .timeline--collapsed { flex-basis: 40px; }
   .timeline__toggle { font-size: 0; }
   .timeline__toggle span { font-size: 12px; }
   .timeline-row { grid-template-columns: 50px 34px minmax(0, 1fr); }
-  .actions-toggle { margin-left: 84px; }
   .action-list { margin-left: 76px; }
+  .action-list--unanchored { margin-left: 0; }
   .action-list .timeline-row { grid-template-columns: 50px 48px minmax(0, 1fr); }
   .tool-details { grid-template-columns: minmax(0, 1fr); }
 }

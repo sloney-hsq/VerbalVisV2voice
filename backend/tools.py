@@ -23,6 +23,7 @@ from typing import Any, Iterable
 from uuid import uuid4
 
 from db import FIELDS, OPERATORS, build_where, get_connection, total_rows
+from view_titles import short_view_title
 
 log = logging.getLogger(__name__)
 
@@ -228,7 +229,10 @@ TOOL_SCHEMAS = [
                 "type": "string",
                 "enum": [*SERIES_FIELDS, "none"],
             },
-            "title": {"type": "string"},
+            "title": {
+                "type": "string",
+                "description": "Short English display title, at most 40 characters",
+            },
             "top_n": {"type": "integer", "minimum": 1, "maximum": MAX_ROWS},
             "sort_by": {
                 "type": "string",
@@ -243,7 +247,7 @@ TOOL_SCHEMAS = [
             },
             "filters": {"type": "array", "items": FILTER_SCHEMA},
         },
-        ["chart_type", "x", "y", "title"],
+        ["chart_type", "x", "y"],
     ),
     _tool(
         "update_visual",
@@ -260,7 +264,10 @@ TOOL_SCHEMAS = [
                 "type": "string",
                 "enum": [*SERIES_FIELDS, "none"],
             },
-            "title": {"type": "string"},
+            "title": {
+                "type": "string",
+                "description": "Short English display title, at most 40 characters",
+            },
             "top_n": {"type": "integer", "minimum": 1, "maximum": MAX_ROWS},
             "sort_by": {
                 "type": "string",
@@ -467,6 +474,7 @@ def realtime_state() -> dict[str, Any]:
     return {
         "dashboard_revision": dashboard_revision,
         "filters": deepcopy(active_filters),
+        "filtered_rows": total_rows(active_filters),
         "highlighted": list(highlighted_views),
         "highlight_element": deepcopy(highlight_element),
         "dim_others": dim_others,
@@ -728,24 +736,24 @@ def _exec_compare_category_metrics(args: dict[str, Any]) -> dict[str, Any]:
             chart_type = "line"
             x = "order_week"
             series = "product_category"
-            title = (
-                f"{title_prefix + ' ' if title_prefix else ''}"
-                f"Weekly {_metric_label(metric)} · "
-                f"Top {top_n} by {_metric_label(rank_by)}"
-            )
             sort_by = "order_week"
             sort_order = "asc"
         else:
             chart_type = "bar"
             x = "product_category"
             series = None
-            title = (
-                f"{title_prefix + ' ' if title_prefix else ''}"
-                f"{_metric_label(metric)} · "
-                f"Top {top_n} by {_metric_label(rank_by)}"
-            )
             sort_by = rank_by
             sort_order = "desc"
+
+        title = short_view_title(
+            None,
+            chart_type=chart_type,
+            x=x,
+            y=metric,
+            series=series,
+            top_n=top_n,
+            state=args.get("customer_state"),
+        )
 
         view = _make_view(
             f"view{next_counter}",
@@ -847,6 +855,16 @@ def _exec_create_visual(args: dict[str, Any]) -> dict[str, Any]:
         return _error("create_visual", error)
     assert candidate is not None
 
+    candidate["title"] = short_view_title(
+        args.get("title"),
+        chart_type=candidate["chart_type"],
+        x=candidate["x_field"],
+        y=candidate["y_field"],
+        series=candidate.get("color"),
+        top_n=candidate.get("top_n"),
+        normalize=bool(candidate.get("normalize")),
+    )
+
     _push_history("create_visual")
     view_counter += 1
     candidate["id"] = f"view{view_counter}"
@@ -912,6 +930,17 @@ def _exec_update_visual(args: dict[str, Any]) -> dict[str, Any]:
     if error:
         return _error("update_visual", error)
     assert candidate is not None
+
+    if "title" in args:
+        candidate["title"] = short_view_title(
+            args.get("title"),
+            chart_type=candidate["chart_type"],
+            x=candidate["x_field"],
+            y=candidate["y_field"],
+            series=candidate.get("color"),
+            top_n=candidate.get("top_n"),
+            normalize=bool(candidate.get("normalize")),
+        )
 
     candidate["id"] = current["id"]
     candidate["label"] = current.get("label") or current["id"]
@@ -1153,8 +1182,6 @@ def _build_visual_candidate(
         return None, "Invalid y metric"
     if series is not None and series not in SERIES_FIELDS:
         return None, "Invalid series field"
-    if not title:
-        return None, "title is required"
     if normalize and (chart_type != "bar" or series is None):
         return None, "normalize requires a bar chart with a series field"
 
