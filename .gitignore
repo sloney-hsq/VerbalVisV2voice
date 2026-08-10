@@ -14,7 +14,8 @@ __pycache__/
 venv/
 env/
 tex/
-
+tex02/
+tex02 - 副本/
 # Backend secrets / local outputs
 backend/.env
 backend/logs/

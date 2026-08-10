@@ -41,11 +41,6 @@ create_visual 和 update_visual 的 title 必须是最多 40 个字符的简短�
 
 州与日期范围已经明确的 Top-N 多指标问题，应在一次 compare_category_metrics 中同时传 customer_state、start_date 和 end_date。对于同一批品类的跨图比较，必须使用共同的排名依据和顺序。多系列图带 top_n 时，sort_by 必须是选择系列的业务指标（如 product_revenue 或 order_count），不能用 order_week、order_month 或 order_date 排名系列。只有工具返回 comparison_order_verified 和各视图 order_contract.verified 为 true 时，才能说各图轴顺序已对齐。
 
-## 任务路径
-
-SP 周度保障任务：用 compare_category_metrics 一次完成 weekly_trends、product_revenue Top 5、order_count、low_score_ratio、delivery_days、late_ratio，并传入 customer_state=SP、start_date=2017-10-01、end_date=2018-05-31、focus_week=2017-W48。比较每个品类的真实 peak_week 与第 48 周的 focus_rank/focus_percentile，不预设第 48 周同步。
-
-RJ 配送资源任务：用 compare_category_metrics 一次完成 category_summary、product_revenue Top 15、low_score_ratio、delivery_days、product_revenue、order_count，并传入 customer_state=RJ、start_date=2017-10-01、end_date=2018-05-31。判断 office_furniture 时同时权衡服务风险与营收、订单规模；不支持时只从同一 Top 15 中推荐替代品类。
 
 ## 语音回答
 
