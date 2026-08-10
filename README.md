@@ -275,3 +275,49 @@ Open `http://localhost:5173`. Wait until the top status becomes `Ready`, then
 press **Start mic**. Start/Stop mic may be toggled repeatedly within the same
 conversation session.
 
+## Standalone DataOps Agent
+
+`dataops_agent` is an isolated service package; it does not alter or replace
+the current VerbalVis realtime implementation. Its architecture is:
+
+```text
+record ingestion -> DuckDB + quarantine -> durable audit task -> quality report
+read-only SQL -> allow-listed DuckDB executor
+knowledge lookup -> local HybridRetriever or configured Elasticsearch
+trace event -> redacted JSONL
+```
+
+Launch the standalone API from the repository root:
+
+```powershell
+python -m pip install -r requirements-dataops.txt
+$env:DATAOPS_DATABASE_PATH = (Join-Path $PWD ".dataops/dataops.duckdb")
+python -m uvicorn dataops_agent.app:app --reload
+```
+
+In a separate terminal, run the standalone verification:
+
+```powershell
+python -m pytest tests/dataops/test_integration.py -q
+python -m pytest tests/dataops -q
+```
+
+The integration test is measured end-to-end coverage of valid and quarantined
+ingestion, terminal durable audit progress, an allow-listed SQL metric,
+audit-rule retrieval, and a redacted JSONL trace. It uses in-memory adapters
+and no live Redis or Elasticsearch.
+
+Measured on 2026-08-10: the integration file has 1 test; the DataOps suite
+has 77 tests; the repository Python suite has 79 tests; and the existing
+frontend suite has 5 tests.
+
+Resume points:
+
+- DataOps data and agent contracts are ready for standalone use.
+- Optional Redis and Elasticsearch are available through
+  `docker-compose.dataops.yml`.
+- VerbalVis remains on its existing in-memory response coordinator. The exact
+  future dual-admission adapter boundary is documented in
+  [`docs/dataops-agent-verbalvis-integration.md`](docs/dataops-agent-verbalvis-integration.md);
+  it is not wired today.
+
