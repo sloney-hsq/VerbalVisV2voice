@@ -94,6 +94,59 @@ def test_duckdb_task_store_persists_terminal_progress_across_reopen(tmp_path) ->
     assert progress.result == {"schema_valid_rate": 1.0}
 
 
+def test_file_backed_duckdb_task_store_owns_connection_independently_of_repository(tmp_path) -> None:
+    database_path = tmp_path / "independent-task-state.duckdb"
+    repository = DuckDBRepository(str(database_path))
+    store = tasks.DuckDBTaskStore(repository)
+    repository.close()
+
+    task = AuditTask(batch_id="batch-1", task_id="task-1")
+    store.create(task)
+
+    assert store.progress(task.task_id).status is TaskStatus.QUEUED
+
+
+class RecordingQueue:
+    def __init__(self, task: AuditTask) -> None:
+        self.task = task
+        self.acknowledged: list[str] = []
+
+    def enqueue(self, task: AuditTask) -> str:
+        raise AssertionError("enqueue is not used by this test")
+
+    def dequeue(self) -> AuditTask | None:
+        task, self.task = self.task, None
+        return task
+
+    def acknowledge(self, task: AuditTask) -> None:
+        self.acknowledged.append(task.task_id)
+
+
+class TerminalPersistenceFailureStore(InMemoryTaskStore):
+    def complete(self, task_id: str, *, result):
+        raise RuntimeError("complete persistence unavailable")
+
+    def fail(self, task_id: str, *, error: str):
+        raise RuntimeError("failure persistence unavailable")
+
+
+def test_worker_leaves_message_pending_when_terminal_state_cannot_be_persisted(monkeypatch) -> None:
+    task = AuditTask(batch_id="batch-1", task_id="task-1")
+    store = TerminalPersistenceFailureStore()
+    store.create(task)
+    queue = RecordingQueue(task)
+    worker = AuditWorker(queue=queue, store=store, repository=FakeRepository())
+    monkeypatch.setattr(
+        "dataops_agent.tasks.worker.run_quality_checks",
+        lambda repository: {"schema_valid_rate": 1.0},
+    )
+
+    assert worker.run_once() is True
+
+    assert store.progress(task.task_id).status is TaskStatus.RUNNING
+    assert queue.acknowledged == []
+
+
 class FakeRedisStreams:
     def __init__(self) -> None:
         self.created_groups: list[tuple[object, ...]] = []
@@ -182,7 +235,7 @@ def test_worker_reconstructs_missing_reclaimed_task_state_and_acknowledges(monke
     assert redis.acked == [("audits", "workers", "stale-1")]
 
 
-def test_worker_marks_reclaimed_running_task_failed_without_retrying(monkeypatch) -> None:
+def test_worker_marks_reclaimed_running_task_failed_and_acknowledges_without_retrying(monkeypatch) -> None:
     store = InMemoryTaskStore()
     task = AuditTask(batch_id="batch-1", task_id="running-task")
     store.create(task)
@@ -203,5 +256,55 @@ def test_worker_marks_reclaimed_running_task_failed_without_retrying(monkeypatch
     assert worker.run_once() is True
 
     assert called is False
-    assert store.progress(task.task_id).status is TaskStatus.FAILED
+    progress = store.progress(task.task_id)
+    assert progress.status is TaskStatus.FAILED
+    assert progress.error == "Audit delivery was reclaimed after the worker lease expired; execution was not retried."
     assert redis.acked == [("audits", "workers", "stale-1")]
+
+
+def test_worker_run_forever_polls_until_its_stop_predicate_is_false(monkeypatch) -> None:
+    """Removing the loop would leave the Redis deployment with only a one-shot worker."""
+    store = InMemoryTaskStore()
+    queue = InMemoryTaskQueue(store)
+    worker = AuditWorker(queue=queue, store=store, repository=FakeRepository())
+    outcomes = iter([False, False])
+    keep_running = iter([True, True, False])
+    pauses: list[float] = []
+    monkeypatch.setattr(worker, "run_once", lambda: next(outcomes))
+
+    worker.run_forever(
+        poll_interval_seconds=0.25,
+        should_continue=lambda: next(keep_running),
+        sleep=pauses.append,
+    )
+
+    assert pauses == [0.25, 0.25]
+
+
+
+
+class PublishFailsOnceRedis(FakeRedisStreams):
+    def __init__(self) -> None:
+        super().__init__()
+        self.publish_attempts = 0
+
+    def xadd(self, stream, fields) -> str:
+        self.publish_attempts += 1
+        if self.publish_attempts == 1:
+            raise RuntimeError("redis unavailable")
+        return super().xadd(stream, fields)
+
+
+def test_redis_publication_failure_keeps_a_durable_outbox_entry_for_recovery() -> None:
+    store = InMemoryTaskStore()
+    redis = PublishFailsOnceRedis()
+    queue = RedisStreamsTaskQueue(store, client=redis)
+    first = AuditTask(batch_id="batch-1", task_id="task-1", idempotency_key="audit-key")
+
+    task_id = queue.enqueue(first)
+
+    assert store.progress(first.task_id).status.value == "pending_publish"
+    assert task_id == first.task_id
+    assert queue.recover_pending() == 1
+    assert store.progress(first.task_id).status is TaskStatus.QUEUED
+    assert redis.fields["batch_id"] == "batch-1"

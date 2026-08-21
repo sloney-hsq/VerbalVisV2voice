@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import yaml
+from packaging.requirements import Requirement
 
 from dataops_agent.data import DuckDBRepository, execute_readonly_sql, load_records
 from dataops_agent.knowledge import HybridRetriever, KnowledgeChunk
 from dataops_agent.runtime import JsonlTracer
 from dataops_agent.tasks import AuditTask, AuditWorker, DuckDBTaskStore, InMemoryTaskQueue, TaskStatus
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_in_memory_dataops_flow_ingests_audits_queries_retrieves_and_traces(tmp_path) -> None:
@@ -62,3 +69,45 @@ def test_in_memory_dataops_flow_ingests_audits_queries_retrieves_and_traces(tmp_
     assert trace_event["authorization"] == "[REDACTED]"
     assert trace_event["message"] == "worker saw Bearer [REDACTED]"
     assert "should-not-appear" not in trace_path.read_text(encoding="utf-8")
+
+
+def test_compose_demo_waits_for_elasticsearch_then_bootstraps_before_api_start() -> None:
+    config = yaml.safe_load(
+        (REPOSITORY_ROOT / "docker-compose.dataops.yml").read_text(encoding="utf-8")
+    )
+    api = config["services"]["dataops-agent"]
+    elasticsearch = config["services"]["elasticsearch"]
+
+    assert api["environment"] == {
+        "DATAOPS_DATABASE_PATH": "/app/.dataops/dataops.duckdb",
+        "DATAOPS_ELASTICSEARCH_URL": "http://elasticsearch:9200",
+        "DATAOPS_ELASTICSEARCH_INDEX": "dataops-knowledge",
+        "DATAOPS_ELASTICSEARCH_EMBEDDING_DIMENSIONS": "384",
+        "DATAOPS_TRACE_PATH": "/app/.dataops/dataops-trace.jsonl",
+    }
+    command = api["command"]
+    assert command.index("python -m dataops_agent.knowledge.bootstrap") < command.index(
+        "uvicorn dataops_agent.app:app"
+    )
+    assert api["depends_on"]["elasticsearch"]["condition"] == "service_healthy"
+    assert elasticsearch["image"] == (
+        "docker.elastic.co/elasticsearch/elasticsearch:8.15.3"
+    )
+    assert any("_cluster/health" in item for item in elasticsearch["healthcheck"]["test"])
+
+
+def test_dataops_requirements_pin_client_to_compose_elasticsearch_major() -> None:
+    requirements = {
+        requirement.name: requirement
+        for requirement in (
+            Requirement(line)
+            for line in (REPOSITORY_ROOT / "requirements-dataops.txt")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip()
+        )
+    }
+
+    assert requirements["elasticsearch"].specifier.contains("8.15.3")
+    assert not requirements["elasticsearch"].specifier.contains("9.0.0")
+    assert requirements["pyyaml"].specifier.contains("6.0.3")

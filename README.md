@@ -282,12 +282,20 @@ the current VerbalVis realtime implementation. Its architecture is:
 
 ```text
 record ingestion -> DuckDB + quarantine -> durable audit task -> quality report
-read-only SQL -> allow-listed DuckDB executor
-knowledge lookup -> local HybridRetriever or configured Elasticsearch
-trace event -> redacted JSONL
+read-only SQL -> allow-listed DuckDB sandbox
+knowledge lookup -> built-in local rule retriever or optional Elasticsearch adapter
+trace event -> input-minimised JSONL
 ```
 
-Launch the standalone API from the repository root:
+Every mutating endpoint requires a nonblank `Idempotency-Key` request header:
+`POST /ingest`, `POST /ingestion`, `POST /ingest/csv`, and `POST /audit`.
+Repeating the same key with the same request replays the prior result; changing
+the request for that key returns HTTP `409`. In the default file-backed
+configuration, request fingerprints and first responses persist across an API
+restart; audit idempotency also prevents duplicate tasks.
+
+For a local API-only demo, install the dependencies and start Uvicorn from the
+repository root:
 
 ```powershell
 python -m pip install -r requirements-dataops.txt
@@ -295,27 +303,81 @@ $env:DATAOPS_DATABASE_PATH = (Join-Path $PWD ".dataops/dataops.duckdb")
 python -m uvicorn dataops_agent.app:app --reload
 ```
 
-In a separate terminal, run the standalone verification:
+The Compose configuration provides an optional Elasticsearch mapping/bootstrap
+demo. Docker was not run in the environment used for this update; local tests
+verify the Compose configuration and fake-client Elasticsearch request shapes.
+
+In a separate PowerShell terminal, call JSON and raw CSV ingestion, audit and
+progress, read-only SQL, seeded knowledge retrieval, and trace inspection:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+$jsonHeaders = @{ "Idempotency-Key" = "demo-json-001" }
+Invoke-RestMethod http://127.0.0.1:8000/ingest -Method Post -Headers $jsonHeaders -ContentType application/json -Body '{"batch_id":"demo-json","records":[{"record_id":"json-1","source":"demo","value":42}]}'
+$csv = "record_id,source,value`r`ncsv-1,demo,84`r`n"
+$csvHeaders = @{ "Idempotency-Key" = "demo-csv-001" }
+Invoke-RestMethod "http://127.0.0.1:8000/ingest/csv?batch_id=demo-csv" -Method Post -Headers $csvHeaders -ContentType text/csv -Body $csv
+$auditHeaders = @{ "Idempotency-Key" = "demo-audit-001" }
+$task = Invoke-RestMethod http://127.0.0.1:8000/audit -Method Post -Headers $auditHeaders -ContentType application/json -Body '{"batch_id":"demo-csv"}'
+Invoke-RestMethod "http://127.0.0.1:8000/tasks/$($task.task_id)/progress"
+Invoke-RestMethod http://127.0.0.1:8000/sql -Method Post -ContentType application/json -Body '{"sql":"SELECT record_id, source FROM records"}'
+$filter = [uri]::EscapeDataString('{"kind":"audit-rule"}')
+Invoke-RestMethod "http://127.0.0.1:8000/knowledge?query=schema%20validity&filters=$filter&limit=1"
+Get-Content .dataops/dataops-trace.jsonl -Tail 10
+```
+
+`POST /ingest/csv?batch_id=<id>` consumes a UTF-8 `text/csv` body directly;
+no multipart package is needed. A native DuckDB database is consumed only by
+the API process that owns it: the in-memory path uses FastAPI
+`BackgroundTasks`; when Redis Streams is configured, an in-process lifecycle
+worker drains and recovers its durable `pending_publish` outbox. This repository
+does **not** present a separate multi-process worker topology for a native
+DuckDB file.
+
+Search requests never create or modify the knowledge index. For a separately
+managed Elasticsearch instance, set `DATAOPS_ELASTICSEARCH_URL` and
+`DATAOPS_ELASTICSEARCH_INDEX`, then run this once:
+
+```powershell
+python -m dataops_agent.knowledge.bootstrap
+```
+
+Without Elasticsearch, the API includes one built-in deterministic audit rule
+so the quick-start `/knowledge` call returns a local lexical result. The seeded
+Elasticsearch default exercises lexical retrieval and mapping bootstrap.
+Elasticsearch hybrid KNN/vector retrieval additionally requires an embedder to
+be injected into the application; it is not enabled solely by setting an
+Elasticsearch URL.
+
+An MCP server is available through standard input/output:
+
+```powershell
+python -m dataops_agent.mcp_server
+```
+
+It exposes five read-only tools for a compatible MCP host. It does not start an
+LLM, hold a conversation, or automatically connect itself to a model provider.
+
+Run the standalone verification with:
 
 ```powershell
 python -m pytest tests/dataops/test_integration.py -q
 python -m pytest tests/dataops -q
 ```
 
-The integration test is measured end-to-end coverage of valid and quarantined
-ingestion, terminal durable audit progress, an allow-listed SQL metric,
-audit-rule retrieval, and a redacted JSONL trace. It uses in-memory adapters
-and no live Redis or Elasticsearch.
-
-Measured on 2026-08-10: the integration file has 1 test; the DataOps suite
-has 77 tests; the repository Python suite has 79 tests; and the existing
-frontend suite has 5 tests.
+The integration test is end-to-end coverage of valid and quarantined ingestion,
+terminal durable audit progress, an allow-listed SQL metric (with a default
+1,000-row result cap), audit-rule retrieval, and an input-minimised JSONL
+trace. It uses in-memory adapters and does not prove live Redis, Elasticsearch,
+or Docker deployment. A request deadline remains a deployment-level safeguard
+for expensive untrusted SQL.
 
 Resume points:
 
-- DataOps data and agent contracts are ready for standalone use.
-- Optional Redis and Elasticsearch are available through
-  `docker-compose.dataops.yml`.
+- DataOps offers deterministic ingestion, quality checks, protected SQL,
+  idempotent audit scheduling, and traceable runtime contracts.
+- Redis Streams and Elasticsearch are optional integrations; their live-service
+  operational claims require separate deployment evidence.
 - VerbalVis remains on its existing in-memory response coordinator. The exact
   future dual-admission adapter boundary is documented in
   [`docs/dataops-agent-verbalvis-integration.md`](docs/dataops-agent-verbalvis-integration.md);

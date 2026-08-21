@@ -17,14 +17,70 @@ class Route(StrEnum):
 def route_request(text: str) -> Route:
     """Select the least-surprising handler for a user request."""
     normalized = " ".join(text.casefold().split())
-    if normalized.startswith(("select ", "with ")) or _contains_phrase(normalized, "sql"):
-        return Route.SQL
-    if _contains_any(normalized, ("audit", "data quality", "quality check", "validate data")):
-        return Route.AUDIT
-    if _contains_any(normalized, ("search", "runbook", "documentation", "knowledge base", "guide")):
-        return Route.KNOWLEDGE
-    if _contains_any(normalized, ("plan", "roadmap", "steps to", "migration")):
+    if _contains_any(
+        normalized,
+        (
+            "plan",
+            "roadmap",
+            "steps to",
+            "step by step",
+            "multiple steps",
+            "and then",
+            "workflow",
+            "migration",
+        ),
+    ) or re.search(r"\bfirst\b.+\bthen\b", normalized):
         return Route.PLAN
+    if normalized.startswith(("select ", "with ")) or _contains_phrase(normalized, "sql") or _contains_any(
+        normalized,
+        (
+            "count",
+            "how many",
+            "sum",
+            "average",
+            "minimum",
+            "maximum",
+            "group by",
+            "grouped by",
+            "rows where",
+            "records where",
+            "show records",
+            "list records",
+            "find rows",
+        ),
+    ):
+        return Route.SQL
+    if _contains_any(
+        normalized,
+        (
+            "audit",
+            "data quality",
+            "quality check",
+            "validate data",
+            "inspect batch",
+            "inspect the batch",
+            "check batch",
+            "batch inspection",
+            "batch anomalies",
+        ),
+    ):
+        return Route.AUDIT
+    if _contains_any(
+        normalized,
+        (
+            "search",
+            "runbook",
+            "documentation",
+            "knowledge base",
+            "guide",
+            "definition",
+            "define",
+            "what is",
+            "history",
+            "historical context",
+        ),
+    ):
+        return Route.KNOWLEDGE
     return Route.LOOKUP
 
 

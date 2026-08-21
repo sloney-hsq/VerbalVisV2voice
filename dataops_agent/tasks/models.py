@@ -10,10 +10,12 @@ from uuid import uuid4
 
 
 class TaskStatus(StrEnum):
+    PENDING_PUBLISH = "pending_publish"
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +24,8 @@ class AuditTask:
     task_id: str = field(default_factory=lambda: str(uuid4()))
     requested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: Mapping[str, object] = field(default_factory=dict)
+    idempotency_key: str | None = None
+    reclaimed: bool = False
 
 
 @dataclass(frozen=True, slots=True)

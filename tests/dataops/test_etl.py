@@ -4,6 +4,7 @@ import multiprocessing
 import os
 import time
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -196,42 +197,70 @@ def test_load_records_coordinates_a_batch_across_processes(tmp_path):
     assert repository.count_rows("load_batches") == 1
 
 
-def test_load_records_releases_a_parent_file_connection_before_child_ingestion(tmp_path):
-    """Parent-side ingestion releases a direct file connection before worker processes load."""
-    context = multiprocessing.get_context("spawn")
-    database = str(tmp_path / "parent-connection-load.duckdb")
-    parent_repository = DuckDBRepository(database)
-    assert parent_repository.connection.execute("SELECT 1").fetchone() == (1,)
-    load_records([], batch_id="batch-parent-release", repository=parent_repository)
+def test_load_records_preserves_a_shared_file_connection(tmp_path):
+    """Loading must not invalidate task-state holders of the repository connection."""
+    repository = DuckDBRepository(str(tmp_path / "shared-connection-load.duckdb"))
+    shared_connection = repository.connection
 
-    batch_id = "batch-after-parent-release"
-    start = context.Event()
-    outcomes = context.Queue()
-    ready = [context.Event(), context.Event()]
-    processes = [
-        context.Process(
-            target=_load_file_batch_in_process,
-            args=(database, batch_id, ready_event, start, outcomes),
+    summary = load_records(
+        [{"record_id": "customer-shared", "source": "crm"}],
+        batch_id="batch-shared-connection",
+        repository=repository,
+    )
+
+    assert summary.loaded == 1
+    assert repository.connection is shared_connection
+    assert shared_connection.execute(
+        "SELECT record_id FROM records WHERE batch_id = 'batch-shared-connection'"
+    ).fetchone() == ("customer-shared",)
+
+
+def test_load_records_serializes_concurrent_batches_on_one_repository(tmp_path):
+    """One repository must commit each batch marker and its records as a unit."""
+    repository = DuckDBRepository(str(tmp_path / "same-repository-load.duckdb"))
+    first_batch_blocked = Event()
+    release_first_batch = Event()
+    second_load_started = Event()
+
+    def first_records():
+        yield {"record_id": "customer-first", "source": "crm"}
+        first_batch_blocked.set()
+        assert release_first_batch.wait(timeout=10)
+
+    def load_second_batch():
+        second_load_started.set()
+        return load_records(
+            [{"record_id": "customer-second", "source": "crm"}],
+            batch_id="batch-second",
+            repository=repository,
         )
-        for ready_event in ready
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            load_records,
+            first_records(),
+            batch_id="batch-first",
+            repository=repository,
+        )
+        assert first_batch_blocked.wait(timeout=10)
+        second = executor.submit(load_second_batch)
+        assert second_load_started.wait(timeout=10)
+        release_first_batch.set()
+        summaries = [first.result(), second.result()]
+
+    assert [summary.loaded for summary in summaries] == [1, 1]
+    assert repository.connection.execute(
+        "SELECT batch_id, status FROM load_batches ORDER BY batch_id"
+    ).fetchall() == [
+        ("batch-first", "completed"),
+        ("batch-second", "completed"),
     ]
-
-    for process in processes:
-        process.start()
-    try:
-        assert all(event.wait(timeout=10) for event in ready)
-        start.set()
-        results = [outcomes.get(timeout=15) for _ in processes]
-    finally:
-        for process in processes:
-            process.join(timeout=15)
-            if process.is_alive():
-                process.terminate()
-                process.join()
-
-    assert [result for result in results if result[0] == "error"] == []
-    assert sorted((result[1], result[2]) for result in results) == [(0, True), (1, False)]
-    assert parent_repository.count_rows("records") == 1
+    assert repository.connection.execute(
+        "SELECT batch_id, record_id FROM records ORDER BY batch_id"
+    ).fetchall() == [
+        ("batch-first", "customer-first"),
+        ("batch-second", "customer-second"),
+    ]
 
 
 def test_load_records_reclaims_an_expired_incomplete_file_lock(tmp_path):
@@ -308,6 +337,27 @@ def test_execute_readonly_sql_returns_records_as_dictionaries():
     )
 
     assert rows == [{"record_id": "customer-4", "source": "crm"}]
+
+
+def test_execute_readonly_sql_rejects_results_larger_than_the_configured_row_cap():
+    """SQL output must be bounded before a caller can materialize every row."""
+    repository = DuckDBRepository(":memory:")
+    load_records(
+        [
+            {"record_id": "customer-cap-1", "source": "crm"},
+            {"record_id": "customer-cap-2", "source": "crm"},
+            {"record_id": "customer-cap-3", "source": "crm"},
+        ],
+        batch_id="batch-row-cap",
+        repository=repository,
+    )
+
+    with pytest.raises(ValueError, match="maximum row limit: 2"):
+        execute_readonly_sql(
+            repository,
+            "SELECT record_id FROM records ORDER BY record_id",
+            max_result_rows=2,
+        )
 
 
 def test_execute_readonly_sql_allows_a_with_query_over_records():
@@ -533,3 +583,115 @@ def test_execute_readonly_sql_allows_materialized_ctes():
     )
 
     assert rows == [{"record_id": "customer-materialized"}]
+
+
+def test_execute_readonly_sql_rejects_nextval_without_advancing_the_sequence():
+    """A SELECT must not hide a state-changing sequence function."""
+    repository = DuckDBRepository(":memory:")
+    repository.connection.execute("CREATE SEQUENCE protected_sequence START 1")
+
+    with pytest.raises(ValueError, match="Function is not allow-listed: nextval"):
+        execute_readonly_sql(repository, "SELECT nextval('protected_sequence') AS value")
+
+    assert repository.connection.execute(
+        "SELECT nextval('protected_sequence')"
+    ).fetchone() == (1,)
+
+
+def test_execute_readonly_sql_rejects_sleep_ms_without_invoking_the_function():
+    """An unknown SELECT function must be rejected before it can pin a worker."""
+    repository = DuckDBRepository(":memory:")
+    repository.connection.execute("CREATE SEQUENCE sleep_invocations START 1")
+    repository.connection.execute(
+        "CREATE MACRO sleep_ms(duration) AS nextval('sleep_invocations')"
+    )
+
+    with pytest.raises(ValueError, match="Function is not allow-listed: sleep_ms"):
+        execute_readonly_sql(repository, "SELECT sleep_ms(100) AS duration")
+
+    assert repository.connection.execute(
+        "SELECT nextval('sleep_invocations')"
+    ).fetchone() == (1,)
+
+
+def test_execute_readonly_sql_rejects_qualified_calls_named_like_allowed_functions():
+    """A schema-qualified macro must not impersonate an allow-listed built-in."""
+    repository = DuckDBRepository(":memory:")
+    repository.connection.execute("CREATE SEQUENCE extension_invocations START 1")
+    repository.connection.execute("CREATE SCHEMA extension")
+    repository.connection.execute(
+        "CREATE MACRO extension.count(value) AS nextval('extension_invocations')"
+    )
+
+    with pytest.raises(ValueError, match=r"Function is not allow-listed: extension\.count"):
+        execute_readonly_sql(repository, "SELECT extension.count(1) AS value")
+
+    assert repository.connection.execute(
+        "SELECT nextval('extension_invocations')"
+    ).fetchone() == (1,)
+
+
+def test_execute_readonly_sql_isolates_allowed_sum_from_source_macros():
+    """Allow-listed aggregates must not resolve to stateful source-database macros."""
+    repository = DuckDBRepository(":memory:")
+    repository.connection.execute("CREATE SEQUENCE shadowed_sum START 1")
+    repository.connection.execute(
+        "CREATE MACRO sum(value) AS nextval('shadowed_sum')"
+    )
+
+    rows = execute_readonly_sql(repository, "SELECT sum(1) AS total")
+
+    assert rows == [{"total": 1}]
+    assert repository.connection.execute("SELECT nextval('shadowed_sum')").fetchone() == (1,)
+
+
+def test_execute_readonly_sql_reads_allow_listed_tables_from_a_file_repository(tmp_path):
+    """Sandbox execution must preserve approved data from a file-backed repository."""
+    repository = DuckDBRepository(str(tmp_path / "sandbox-source.duckdb"))
+    load_records(
+        [{"record_id": "customer-file", "source": "crm"}],
+        batch_id="batch-file-sandbox",
+        repository=repository,
+    )
+
+    rows = execute_readonly_sql(
+        repository,
+        "SELECT record_id, source FROM records ORDER BY record_id",
+    )
+
+    assert rows == [{"record_id": "customer-file", "source": "crm"}]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ATTACH 'source.duckdb' AS external_source",
+        "SELECT * FROM read_csv_auto('source.csv')",
+    ],
+)
+def test_execute_readonly_sql_rejects_source_escaping_statements(sql):
+    """Admission must prevent sandbox queries from reaching external sources."""
+    repository = DuckDBRepository(":memory:")
+
+    with pytest.raises(ValueError):
+        execute_readonly_sql(repository, sql)
+
+
+def test_execute_readonly_sql_allows_normal_aggregate_functions():
+    """The function policy must retain ordinary allow-listed analytics."""
+    repository = DuckDBRepository(":memory:")
+    load_records(
+        [
+            {"record_id": "customer-aggregate-1", "source": "crm"},
+            {"record_id": "customer-aggregate-2", "source": "erp"},
+        ],
+        batch_id="batch-aggregate",
+        repository=repository,
+    )
+
+    rows = execute_readonly_sql(
+        repository,
+        "SELECT COUNT(*) AS record_count, MIN(source) AS first_source FROM records",
+    )
+
+    assert rows == [{"record_count": 2, "first_source": "crm"}]

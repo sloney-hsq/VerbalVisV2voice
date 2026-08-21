@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import importlib
+
+import pytest
+
+from dataops_agent import knowledge
 from dataops_agent.knowledge.chunking import chunk_markdown
 from dataops_agent.knowledge import DEFAULT_KNOWLEDGE_INDEX_MAPPING
+from dataops_agent.knowledge import elastic
 from dataops_agent.knowledge.elastic import ElasticsearchHybridRetriever
 from dataops_agent.knowledge.models import KnowledgeChunk
 from dataops_agent.knowledge.retrieval import HybridRetriever, rrf_fuse
@@ -316,6 +322,186 @@ def test_default_mapping_declares_the_exact_fields_used_by_identifier_lookup() -
         "identifiers": {"type": "keyword"},
         "aliases": {"type": "keyword"},
     }
+
+
+def test_knowledge_mapping_supports_configurable_knn_and_exact_metadata_filters() -> None:
+    mapping = elastic.build_knowledge_index_mapping(embedding_dimensions=2)
+
+    assert mapping["properties"]["embedding"] == {
+        "type": "dense_vector",
+        "dims": 2,
+        "index": True,
+        "similarity": "cosine",
+    }
+    assert mapping["dynamic_templates"] == [
+        {
+            "metadata_strings_as_keywords": {
+                "path_match": "metadata.*",
+                "match_mapping_type": "string",
+                "mapping": {"type": "keyword", "ignore_above": 256},
+            }
+        }
+    ]
+    assert DEFAULT_KNOWLEDGE_INDEX_MAPPING["properties"]["embedding"]["dims"] == (
+        elastic.DEFAULT_EMBEDDING_DIMENSIONS
+    )
+
+
+def test_knowledge_mapping_rejects_nonpositive_embedding_dimensions() -> None:
+    with pytest.raises(ValueError, match="embedding_dimensions must be positive"):
+        elastic.build_knowledge_index_mapping(embedding_dimensions=0)
+
+
+def test_bootstrap_creates_mapping_and_indexes_deterministic_sample_rule() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Indices:
+        def exists(self, **request: object) -> bool:
+            calls.append(("exists", request))
+            return False
+
+        def create(self, **request: object) -> None:
+            calls.append(("create", request))
+
+    class Client:
+        indices = Indices()
+
+        def index(self, **request: object) -> None:
+            calls.append(("index", request))
+
+    result = knowledge.bootstrap_knowledge_index(
+        Client(), index="knowledge", embedding_dimensions=3
+    )
+
+    assert result == {
+        "index": "knowledge",
+        "created": True,
+        "sample_document_id": "sample-audit-schema-rule",
+    }
+    assert calls[0] == ("exists", {"index": "knowledge"})
+    assert calls[1][0] == "create"
+    assert calls[1][1]["index"] == "knowledge"
+    assert calls[1][1]["mappings"]["properties"]["embedding"]["dims"] == 3
+    assert calls[2] == (
+        "index",
+        {
+            "index": "knowledge",
+            "id": "sample-audit-schema-rule",
+            "document": {
+                "content": "Audit rule: report schema validity for every completed ingestion batch.",
+                "embedding": [1.0, 0.0, 0.0],
+                "metadata": {
+                    "identifier": "AUDIT-SCHEMA-001",
+                    "aliases": ["schema-validity-rule"],
+                    "kind": "audit-rule",
+                    "source": "dataops-demo",
+                },
+            },
+            "refresh": "wait_for",
+        },
+    )
+
+
+def test_bootstrap_checks_compatible_existing_mapping_before_seeding() -> None:
+    calls: list[str] = []
+
+    class Indices:
+        def exists(self, **request: object) -> bool:
+            calls.append("exists")
+            return True
+
+        def get_mapping(self, **request: object) -> dict[str, object]:
+            calls.append("get_mapping")
+            return {
+                "knowledge": {
+                    "mappings": elastic.build_knowledge_index_mapping(
+                        embedding_dimensions=3
+                    )
+                }
+            }
+
+    class Client:
+        indices = Indices()
+
+        def index(self, **request: object) -> None:
+            calls.append("index")
+
+    result = elastic.bootstrap_knowledge_index(
+        Client(), index="knowledge", embedding_dimensions=3
+    )
+
+    assert calls == ["exists", "get_mapping", "index"]
+    assert result["created"] is False
+
+
+@pytest.mark.parametrize(
+    "mutate_mapping",
+    [
+        lambda mapping: mapping["properties"]["embedding"].update({"dims": 2}),
+        lambda mapping: mapping["properties"]["metadata"]["properties"].update(
+            {"identifier": {"type": "text"}}
+        ),
+        lambda mapping: mapping.update({"dynamic_templates": []}),
+    ],
+    ids=["vector-dimensions", "identifier-type", "metadata-string-strategy"],
+)
+def test_bootstrap_rejects_an_incompatible_existing_mapping(mutate_mapping) -> None:
+    mapping = elastic.build_knowledge_index_mapping(embedding_dimensions=3)
+    mutate_mapping(mapping)
+
+    class Indices:
+        def exists(self, **request: object) -> bool:
+            return True
+
+        def get_mapping(self, **request: object) -> dict[str, object]:
+            return {
+                "knowledge": {
+                    "mappings": mapping
+                }
+            }
+
+    class Client:
+        indices = Indices()
+
+        def index(self, **request: object) -> None:
+            raise AssertionError("an incompatible index must not be seeded")
+
+    with pytest.raises(
+        ValueError,
+        match="knowledge index mapping is incompatible",
+    ):
+        elastic.bootstrap_knowledge_index(
+            Client(), index="knowledge", embedding_dimensions=3
+        )
+
+
+def test_bootstrap_command_uses_environment_index_and_embedding_dimensions(
+    monkeypatch,
+) -> None:
+    bootstrap_command = importlib.import_module("dataops_agent.knowledge.bootstrap")
+    requests: list[tuple[str, dict[str, object]]] = []
+
+    class Indices:
+        def exists(self, **request: object) -> bool:
+            return False
+
+        def create(self, **request: object) -> None:
+            requests.append(("create", request))
+
+    class Client:
+        indices = Indices()
+
+        def index(self, **request: object) -> None:
+            requests.append(("index", request))
+
+    monkeypatch.setenv("DATAOPS_ELASTICSEARCH_INDEX", "demo-knowledge")
+    monkeypatch.setenv("DATAOPS_ELASTICSEARCH_EMBEDDING_DIMENSIONS", "3")
+
+    result = bootstrap_command.main(client=Client())
+
+    assert result["index"] == "demo-knowledge"
+    assert requests[0][1]["mappings"]["properties"]["embedding"]["dims"] == 3
+    assert requests[1][1]["document"]["embedding"] == [1.0, 0.0, 0.0]
 
 
 def test_elasticsearch_adapter_directly_looks_up_a_document_path_chunk_id() -> None:

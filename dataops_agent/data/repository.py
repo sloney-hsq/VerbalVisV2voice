@@ -13,6 +13,14 @@ import duckdb
 
 
 _ALLOWED_TABLES = frozenset({"records", "quarantine_records", "load_batches"})
+_SANDBOX_TABLE_SCHEMAS = {
+    "records": "record_id VARCHAR, source VARCHAR, payload JSON, batch_id VARCHAR",
+    "quarantine_records": "batch_id VARCHAR, raw_record JSON, reason VARCHAR",
+    "load_batches": (
+        "batch_id VARCHAR, received INTEGER, loaded INTEGER, duplicates INTEGER, "
+        "quarantined INTEGER, status VARCHAR"
+    ),
+}
 _IDENTIFIER = r'(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)'
 _CTE_PATTERN = re.compile(
     rf"(?:\bWITH\b|,)\s*(?:RECURSIVE\s+)?(?P<name>{_IDENTIFIER})"
@@ -44,8 +52,43 @@ _MUTATING_KEYWORDS = frozenset(
     }
 )
 _DENIED_RELATION_OPERATORS = frozenset({"PIVOT", "TABLE", "UNPIVOT"})
+_ALLOWED_READONLY_FUNCTIONS = frozenset(
+    {
+        "avg",
+        "cast",
+        "coalesce",
+        "count",
+        "date_trunc",
+        "max",
+        "min",
+        "sum",
+        "try_cast",
+    }
+)
+_PARENTHESIZED_SQL_KEYWORDS = frozenset(
+    {
+        "AS",
+        "EXISTS",
+        "FILTER",
+        "FROM",
+        "GROUP",
+        "IN",
+        "MATERIALIZED",
+        "NOT",
+        "OVER",
+        "SELECT",
+        "VALUES",
+        "WHERE",
+        "WINDOW",
+        "WITHIN",
+    }
+)
 _TOKEN_PATTERN = re.compile(r'"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*|[(),.]')
 _IDENTIFIER_PATTERN = re.compile(rf"^{_IDENTIFIER}$")
+_FUNCTION_CALL_PATTERN = re.compile(
+    rf"(?P<name>{_IDENTIFIER}(?:\s*\.\s*{_IDENTIFIER})*)\s*\(",
+    re.IGNORECASE,
+)
 _FROM_CLAUSE_END = frozenset(
     {
         "EXCEPT",
@@ -63,6 +106,7 @@ _FROM_CLAUSE_END = frozenset(
 _FILE_LOCK_TIMEOUT_SECONDS = 10.0
 _FILE_LOCK_POLL_SECONDS = 0.05
 _STALE_FILE_LOCK_SECONDS = 60.0
+DEFAULT_MAX_RESULT_ROWS = 1_000
 
 
 class _FileDatabaseLock:
@@ -284,6 +328,27 @@ def _referenced_tables(sql: str) -> list[str]:
     return tables
 
 
+def _invoked_functions(sql: str) -> list[str]:
+    """Return callable identifiers, excluding SQL grouping and CTE declarations."""
+    cte_declaration_starts = {
+        match.start("name") for match in _CTE_PATTERN.finditer(sql)
+    }
+    functions: list[str] = []
+    for match in _FUNCTION_CALL_PATTERN.finditer(sql):
+        name = match.group("name")
+        if match.start("name") in cte_declaration_starts:
+            continue
+        if not name.startswith('"') and name.upper() in _PARENTHESIZED_SQL_KEYWORDS:
+            continue
+        functions.append(
+            ".".join(
+                _normalise_identifier(part)
+                for part in re.findall(_IDENTIFIER, name)
+            )
+        )
+    return functions
+
+
 def _admit_readonly_sql(sql: str) -> None:
     scrubbed = _scrub_sql(sql)
     if not re.match(r"^\s*(?:SELECT|WITH)\b", scrubbed, re.IGNORECASE):
@@ -294,12 +359,28 @@ def _admit_readonly_sql(sql: str) -> None:
         raise ValueError("Only SELECT or WITH statements are allowed")
     if _has_unquoted_keywords(scrubbed, _DENIED_RELATION_OPERATORS):
         raise ValueError("Table is not allow-listed")
+    for function in _invoked_functions(scrubbed):
+        if function not in _ALLOWED_READONLY_FUNCTIONS:
+            raise ValueError(f"Function is not allow-listed: {function}")
     cte_names = {
         _normalise_identifier(match.group("name")) for match in _CTE_PATTERN.finditer(scrubbed)
     }
     for table in _referenced_tables(scrubbed):
         if table not in _ALLOWED_TABLES and table not in cte_names:
             raise ValueError(f"Table is not allow-listed: {table}")
+
+
+def _materialize_allowed_tables(source_connection, sandbox_connection) -> None:
+    """Copy durable data, but no database objects, into an isolated query sandbox."""
+    for table, schema in _SANDBOX_TABLE_SCHEMAS.items():
+        sandbox_connection.execute(f"CREATE TABLE {table} ({schema})")
+        rows = source_connection.execute(f"SELECT * FROM {table}").fetchall()
+        if rows:
+            placeholders = ", ".join("?" for _ in rows[0])
+            sandbox_connection.executemany(
+                f"INSERT INTO {table} VALUES ({placeholders})",
+                rows,
+            )
 
 
 class DuckDBRepository:
@@ -387,11 +468,16 @@ class DuckDBRepository:
     def batch_lock(self, batch_id: str):
         del batch_id
         with self._operation_lock:
-            if self._database_path is None:
-                yield
-            else:
-                with _FileDatabaseLock(self._database_path):
+            close_owned_connection = self._database_path is not None and not self.is_connected
+            try:
+                if self._database_path is None:
                     yield
+                else:
+                    with _FileDatabaseLock(self._database_path):
+                        yield
+            finally:
+                if close_owned_connection:
+                    self.close()
 
     @contextmanager
     def transaction(self):
@@ -450,9 +536,31 @@ class DuckDBRepository:
         return self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
-def execute_readonly_sql(repository: DuckDBRepository, sql: str) -> list[dict[str, object]]:
-    """Run a single read-only SELECT and return JSON-compatible row mappings."""
+def execute_readonly_sql(
+    repository: DuckDBRepository,
+    sql: str,
+    *,
+    max_result_rows: int = DEFAULT_MAX_RESULT_ROWS,
+) -> list[dict[str, object]]:
+    """Run an allow-listed SELECT with a bounded result set.
+
+    The DuckDB settings exposed by this project's installed client do not offer
+    a reliable per-query timeout. Callers must also apply a request deadline at
+    their execution boundary for untrusted or expensive SQL.
+    """
+    if isinstance(max_result_rows, bool) or not isinstance(max_result_rows, int):
+        raise ValueError("max_result_rows must be a positive integer")
+    if max_result_rows <= 0:
+        raise ValueError("max_result_rows must be a positive integer")
     _admit_readonly_sql(sql)
-    cursor = repository.connection.execute(sql)
-    columns = [column[0] for column in cursor.description]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    sandbox_connection = duckdb.connect(":memory:")
+    try:
+        _materialize_allowed_tables(repository.connection, sandbox_connection)
+        cursor = sandbox_connection.execute(sql)
+        columns = [column[0] for column in cursor.description]
+        rows = cursor.fetchmany(max_result_rows + 1)
+        if len(rows) > max_result_rows:
+            raise ValueError(f"Query result exceeds maximum row limit: {max_result_rows}")
+        return [dict(zip(columns, row)) for row in rows]
+    finally:
+        sandbox_connection.close()

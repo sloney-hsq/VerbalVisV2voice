@@ -10,19 +10,131 @@ from .models import KnowledgeChunk
 
 
 _IDENTIFIER_QUERY = re.compile(r"^[A-Za-z0-9]+(?:[-_.:/][A-Za-z0-9]+)+$")
+DEFAULT_EMBEDDING_DIMENSIONS = 384
 
-DEFAULT_KNOWLEDGE_INDEX_MAPPING: dict[str, object] = {
-    "properties": {
-        "content": {"type": "text"},
-        "metadata": {
-            "properties": {
-                "identifier": {"type": "keyword"},
-                "identifiers": {"type": "keyword"},
-                "aliases": {"type": "keyword"},
+
+def build_knowledge_index_mapping(
+    *, embedding_dimensions: int = DEFAULT_EMBEDDING_DIMENSIONS
+) -> dict[str, object]:
+    """Build the mapping required by lexical, KNN, and exact metadata search."""
+    if embedding_dimensions <= 0:
+        raise ValueError("embedding_dimensions must be positive")
+    return {
+        "dynamic_templates": [
+            {
+                "metadata_strings_as_keywords": {
+                    "path_match": "metadata.*",
+                    "match_mapping_type": "string",
+                    "mapping": {"type": "keyword", "ignore_above": 256},
+                }
             }
+        ],
+        "properties": {
+            "content": {"type": "text"},
+            "embedding": {
+                "type": "dense_vector",
+                "dims": embedding_dimensions,
+                "index": True,
+                "similarity": "cosine",
+            },
+            "metadata": {
+                "properties": {
+                    "identifier": {"type": "keyword"},
+                    "identifiers": {"type": "keyword"},
+                    "aliases": {"type": "keyword"},
+                }
+            },
         },
     }
-}
+
+
+DEFAULT_KNOWLEDGE_INDEX_MAPPING = build_knowledge_index_mapping()
+
+_SAMPLE_DOCUMENT_ID = "sample-audit-schema-rule"
+
+
+def bootstrap_knowledge_index(
+    client: Any,
+    *,
+    index: str,
+    embedding_dimensions: int = DEFAULT_EMBEDDING_DIMENSIONS,
+) -> dict[str, object]:
+    """Create a demo-ready knowledge index and seed one deterministic rule."""
+    mapping = build_knowledge_index_mapping(embedding_dimensions=embedding_dimensions)
+    created = not client.indices.exists(index=index)
+    if created:
+        client.indices.create(index=index, mappings=mapping)
+    else:
+        existing = client.indices.get_mapping(index=index)
+        if not _is_compatible_mapping(
+            existing, index=index, embedding_dimensions=embedding_dimensions
+        ):
+            raise ValueError(
+                f"knowledge index mapping is incompatible for {index!r}; "
+                "use a new index name or recreate it with the bootstrap mapping"
+            )
+    client.index(
+        index=index,
+        id=_SAMPLE_DOCUMENT_ID,
+        document={
+            "content": (
+                "Audit rule: report schema validity for every completed ingestion batch."
+            ),
+            "embedding": [1.0, *([0.0] * (embedding_dimensions - 1))],
+            "metadata": {
+                "identifier": "AUDIT-SCHEMA-001",
+                "aliases": ["schema-validity-rule"],
+                "kind": "audit-rule",
+                "source": "dataops-demo",
+            },
+        },
+        refresh="wait_for",
+    )
+    return {
+        "index": index,
+        "created": created,
+        "sample_document_id": _SAMPLE_DOCUMENT_ID,
+    }
+
+
+def _is_compatible_mapping(
+    response: object, *, index: str, embedding_dimensions: int
+) -> bool:
+    if not isinstance(response, Mapping):
+        return False
+    index_definition = response.get(index)
+    if not isinstance(index_definition, Mapping):
+        return False
+    mapping = index_definition.get("mappings")
+    if not isinstance(mapping, Mapping):
+        return False
+    properties = mapping.get("properties")
+    if not isinstance(properties, Mapping):
+        return False
+    embedding = properties.get("embedding")
+    metadata = properties.get("metadata")
+    if not isinstance(embedding, Mapping) or not isinstance(metadata, Mapping):
+        return False
+    if (
+        embedding.get("type") != "dense_vector"
+        or embedding.get("dims") != embedding_dimensions
+    ):
+        return False
+    metadata_properties = metadata.get("properties")
+    if not isinstance(metadata_properties, Mapping):
+        return False
+    if any(
+        metadata_properties.get(field) != {"type": "keyword"}
+        for field in ("identifier", "identifiers", "aliases")
+    ):
+        return False
+    templates = mapping.get("dynamic_templates")
+    if not isinstance(templates, list):
+        return False
+    expected_template = build_knowledge_index_mapping(
+        embedding_dimensions=embedding_dimensions
+    )["dynamic_templates"][0]
+    return expected_template in templates
 
 
 class ElasticsearchHybridRetriever:

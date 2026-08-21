@@ -21,6 +21,9 @@ backend/.env
 backend/logs/
 backend/*.raw
 
+# DataOps local runtime artifacts
+.dataops/
+
 # Node / Vite
 node_modules/
 frontend/node_modules/

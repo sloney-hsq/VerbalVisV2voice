@@ -178,14 +178,107 @@ def test_jsonl_tracer_redacts_common_key_styles_and_credentials_but_keeps_token_
     )
 
     event = json.loads(path.read_text(encoding="utf-8"))
-    assert event == {
-        "apiKey": "[REDACTED]",
-        "cookie": "[REDACTED]",
-        "credentials": "[REDACTED]",
-        "token_count": 123,
-        "message": "Upstream rejected Bearer [REDACTED]",
-        "error": "Proxy rejected basic [REDACTED]",
+    assert event["apiKey"] == "[REDACTED]"
+    assert event["cookie"] == "[REDACTED]"
+    assert event["credentials"] == "[REDACTED]"
+    assert event["token_count"] == 123
+    assert event["message"] == "Upstream rejected Bearer [REDACTED]"
+    assert event["error"] == "Proxy rejected basic [REDACTED]"
+    assert {"trace_id", "session_id", "call_id", "tool_name", "status", "elapsed_ms", "retry_count", "at"} <= set(event)
+
+
+def test_jsonl_tracer_minimizes_nested_payloads_containing_credentials(tmp_path):
+    """Nested payload values must never survive tracing, even when keys are unknown."""
+    path = tmp_path / "trace.jsonl"
+    JsonlTracer(path).emit(
+        {
+            "payload": {
+                "headers": {
+                    "x-api-key": "api-secret",
+                    "proxy-authorization": "Basic cHJveHk6c2VjcmV0",
+                },
+                "rows": [
+                    {"value": "prefix Bearer nested-secret suffix"},
+                    "Basic bGlzdDpzZWNyZXQ=",
+                ],
+            }
+        }
+    )
+
+    trace_text = path.read_text(encoding="utf-8")
+    event = json.loads(trace_text)
+    assert event["payload"] == {
+        "policy": "minimized",
+        "type": "object",
+        "field_count": 2,
+        "sensitive_field_count": 0,
     }
+    assert "secret" not in trace_text.casefold()
+
+
+def test_jsonl_tracer_minimizes_raw_tool_inputs_without_serializing_pii(tmp_path):
+    """Tool input traces must keep shape metadata, never user-supplied record bodies."""
+    path = tmp_path / "trace.jsonl"
+    JsonlTracer(path).emit(
+        {
+            "tool_name": "load_records",
+            "input": {
+                "records": [
+                    {
+                        "email": "ada@example.com",
+                        "ssn": "123-45-6789",
+                        "credit_card": "4111 1111 1111 1111",
+                        "secret_key": "raw-secret-value",
+                    }
+                ],
+                "batch_id": "batch-privacy",
+            },
+            "result": {"loaded": 1},
+        }
+    )
+
+    trace_text = path.read_text(encoding="utf-8")
+    event = json.loads(trace_text)
+    assert event["input"] == {
+        "policy": "minimized",
+        "type": "object",
+        "field_count": 2,
+        "sensitive_field_count": 0,
+    }
+    assert event["result"] == {"loaded": 1}
+    for raw_value in (
+        "ada@example.com",
+        "123-45-6789",
+        "4111 1111 1111 1111",
+        "raw-secret-value",
+        "secret_key",
+    ):
+        assert raw_value not in trace_text
+
+
+def test_jsonl_tracer_minimizes_unknown_nested_values_instead_of_trusting_field_names(tmp_path):
+    """Unexpected event fields cannot bypass the input-minimization boundary."""
+    path = tmp_path / "trace.jsonl"
+    JsonlTracer(path).emit(
+        {
+            "tool_name": "inspect_schema",
+            "client_supplied_context": {
+                "contact": "grace@example.com",
+                "nested": {"secret_key": "do-not-log"},
+            },
+        }
+    )
+
+    trace_text = path.read_text(encoding="utf-8")
+    event = json.loads(trace_text)
+    assert event["client_supplied_context"] == {
+        "policy": "minimized",
+        "type": "object",
+        "field_count": 2,
+        "sensitive_field_count": 0,
+    }
+    assert "grace@example.com" not in trace_text
+    assert "do-not-log" not in trace_text
 
 
 class _InterleavingEpochs(dict[str, int]):
