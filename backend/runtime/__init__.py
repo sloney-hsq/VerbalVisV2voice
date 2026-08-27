@@ -1,0 +1,1 @@
+"""Response-transaction runtime primitives."""
