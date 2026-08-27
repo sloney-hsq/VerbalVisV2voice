@@ -27,6 +27,7 @@ class ResponseTransaction:
     status: ResponseStatus = ResponseStatus.STREAMING
     cancelled: bool = False
     proposed_tool_calls: tuple[object, ...] = ()
+    overlap_return_status: ResponseStatus | None = None
 
 
 class ResponseTransactionManager:
@@ -50,8 +51,21 @@ class ResponseTransactionManager:
         self._current_response_id = response_id
         return transaction
 
+    @property
+    def current_response_id(self) -> str | None:
+        return self._current_response_id
+
+    def get(self, response_id: str) -> ResponseTransaction | None:
+        return self._transactions.get(response_id)
+
     def mark_overlap(self, response_id: str) -> None:
         transaction = self._current_transaction(response_id)
+        if transaction.status not in {
+            ResponseStatus.STREAMING,
+            ResponseStatus.EXECUTING_DRAFT,
+        }:
+            raise ValueError("response cannot accept overlap in its current state")
+        transaction.overlap_return_status = transaction.status
         transaction.status = ResponseStatus.OVERLAP_PENDING
         self._overlap_response_id = response_id
 
@@ -72,7 +86,10 @@ class ResponseTransactionManager:
             InterruptionDecision.BACKCHANNEL,
             InterruptionDecision.RECOGNITION_REPAIR,
         }:
-            transaction.status = ResponseStatus.STREAMING
+            transaction.status = (
+                transaction.overlap_return_status or ResponseStatus.STREAMING
+            )
+            transaction.overlap_return_status = None
         elif decision is InterruptionDecision.STOP_ONLY:
             transaction.cancelled = True
             transaction.status = ResponseStatus.CANCELLED
@@ -80,6 +97,38 @@ class ResponseTransactionManager:
         else:
             self.supersede_current()
         return decision
+
+    def start_draft_execution(self, response_id: str) -> ResponseTransaction:
+        """Transition an admissible response into private tool execution."""
+        if not self.can_admit(response_id):
+            raise ValueError("response is not eligible to execute a draft")
+        transaction = self._current_transaction(response_id)
+        transaction.status = ResponseStatus.EXECUTING_DRAFT
+        return transaction
+
+    def mark_committed(self, response_id: str) -> ResponseTransaction:
+        transaction = self._current_transaction(response_id)
+        if transaction.cancelled:
+            raise ValueError("cancelled response cannot commit")
+        transaction.status = ResponseStatus.COMMITTED
+        self._current_response_id = None
+        self._overlap_response_id = None
+        return transaction
+
+    def mark_failed(self, response_id: str) -> ResponseTransaction | None:
+        transaction = self._transactions.get(response_id)
+        if transaction is None:
+            return None
+        if transaction.status not in {
+            ResponseStatus.CANCELLED,
+            ResponseStatus.SUPERSEDED,
+        }:
+            transaction.status = ResponseStatus.FAILED
+        if self._current_response_id == response_id:
+            self._current_response_id = None
+        if self._overlap_response_id == response_id:
+            self._overlap_response_id = None
+        return transaction
 
     def supersede_current(self) -> ResponseTransaction | None:
         if self._current_response_id is None:

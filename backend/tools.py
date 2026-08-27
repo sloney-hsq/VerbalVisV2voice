@@ -19,6 +19,7 @@ import json
 import logging
 from pathlib import Path
 import re
+from threading import RLock
 from typing import Any, Iterable
 from uuid import uuid4
 
@@ -64,6 +65,22 @@ dim_others: bool = True
 view_counter = BASE_VIEW_COUNT
 dashboard_revision = 0
 _history: list[dict[str, Any]] = []
+
+# Tool handlers predate the transaction runtime and deliberately operate on
+# module globals.  The lock makes a short-lived draft-state swap private to a
+# worker thread: readers either see the committed dashboard before the swap or
+# after it has been restored, never its intermediate draft.
+_DASHBOARD_STATE_LOCK = RLock()
+_STATE_SNAPSHOT_FIELDS = (
+    "active_filters",
+    "views",
+    "highlighted_views",
+    "highlight_element",
+    "dim_others",
+    "view_counter",
+    "dashboard_revision",
+    "_history",
+)
 
 MUTATING_TOOLS = {
     "update_analysis_scope",
@@ -394,41 +411,128 @@ def init_views() -> None:
 def execute_tool(
     name: str,
     arguments: dict[str, Any] | None = None,
+    *,
+    increment_revision: bool = True,
 ) -> dict[str, Any]:
+    """Execute one legacy tool against the currently installed state.
+
+    ``increment_revision`` remains true for all pre-transaction callers.  The
+    transaction bridge uses false while it evaluates a private draft; the
+    enclosing DashboardStore owns the one public revision increment at commit.
+    """
     global dashboard_revision
 
-    args = normalize_tool_arguments(name, arguments or {})
-    handlers = {
-        "update_analysis_scope": _exec_update_analysis_scope,
-        "aggregate_data": _exec_aggregate_data,
-        "compare_selected_groups": _exec_compare_selected_groups,
-        "compare_category_metrics": _exec_compare_category_metrics,
-        "create_visual": _exec_create_visual,
-        "update_visual": _exec_update_visual,
-        "delete_visual": _exec_delete_visual,
-        "highlight_visual": _exec_highlight_visual,
-        "inspect_visual": _exec_inspect_visual,
-        "summarize_dashboard": _exec_summarize_dashboard,
-        "undo_last_action": _exec_undo_last_action,
+    with _DASHBOARD_STATE_LOCK:
+        args = normalize_tool_arguments(name, arguments or {})
+        handlers = {
+            "update_analysis_scope": _exec_update_analysis_scope,
+            "aggregate_data": _exec_aggregate_data,
+            "compare_selected_groups": _exec_compare_selected_groups,
+            "compare_category_metrics": _exec_compare_category_metrics,
+            "create_visual": _exec_create_visual,
+            "update_visual": _exec_update_visual,
+            "delete_visual": _exec_delete_visual,
+            "highlight_visual": _exec_highlight_visual,
+            "inspect_visual": _exec_inspect_visual,
+            "summarize_dashboard": _exec_summarize_dashboard,
+            "undo_last_action": _exec_undo_last_action,
+        }
+        handler = handlers.get(name)
+        if not handler:
+            return _error(name, f"Unknown tool: {name}")
+        try:
+            result = handler(args)
+            if result.get("success"):
+                if increment_revision and name in MUTATING_TOOLS:
+                    dashboard_revision += 1
+                payload = result.get("payload")
+                if isinstance(payload, dict):
+                    payload["dashboard_revision"] = dashboard_revision
+                    postconditions = payload.get("postconditions")
+                    if isinstance(postconditions, dict):
+                        postconditions["dashboard_revision"] = dashboard_revision
+            return result
+        except Exception as exc:
+            log.exception("Tool %s failed", name)
+            return _error(name, str(exc))
+
+
+def _capture_dashboard_snapshot_unlocked() -> dict[str, Any]:
+    """Copy every mutable global that contributes to a tool result."""
+    return {
+        "active_filters": deepcopy(active_filters),
+        "views": deepcopy(views),
+        "highlighted_views": deepcopy(highlighted_views),
+        "highlight_element": deepcopy(highlight_element),
+        "dim_others": dim_others,
+        "view_counter": view_counter,
+        "dashboard_revision": dashboard_revision,
+        "_history": deepcopy(_history),
     }
-    handler = handlers.get(name)
-    if not handler:
-        return _error(name, f"Unknown tool: {name}")
-    try:
-        result = handler(args)
-        if result.get("success"):
-            if name in MUTATING_TOOLS:
-                dashboard_revision += 1
-            payload = result.get("payload")
-            if isinstance(payload, dict):
-                payload["dashboard_revision"] = dashboard_revision
-                postconditions = payload.get("postconditions")
-                if isinstance(postconditions, dict):
-                    postconditions["dashboard_revision"] = dashboard_revision
-        return result
-    except Exception as exc:
-        log.exception("Tool %s failed", name)
-        return _error(name, str(exc))
+
+
+def capture_dashboard_snapshot() -> dict[str, Any]:
+    """Return an isolated complete dashboard state for a transaction draft."""
+    with _DASHBOARD_STATE_LOCK:
+        return _capture_dashboard_snapshot_unlocked()
+
+
+def _apply_dashboard_snapshot_unlocked(snapshot: dict[str, Any]) -> None:
+    """Install a complete snapshot while the caller holds the state lock."""
+    global active_filters
+    global views
+    global highlighted_views
+    global highlight_element
+    global dim_others
+    global view_counter
+    global dashboard_revision
+    global _history
+
+    missing = [key for key in _STATE_SNAPSHOT_FIELDS if key not in snapshot]
+    if missing:
+        raise ValueError(f"Dashboard snapshot is missing fields: {', '.join(missing)}")
+
+    active_filters = deepcopy(snapshot["active_filters"])
+    views = deepcopy(snapshot["views"])
+    highlighted_views = deepcopy(snapshot["highlighted_views"])
+    highlight_element = deepcopy(snapshot["highlight_element"])
+    dim_others = bool(snapshot["dim_others"])
+    view_counter = int(snapshot["view_counter"])
+    dashboard_revision = int(snapshot["dashboard_revision"])
+    _history = deepcopy(snapshot["_history"])
+
+
+def apply_dashboard_snapshot(snapshot: dict[str, Any]) -> None:
+    """Atomically make a successful DashboardStore commit publicly visible."""
+    with _DASHBOARD_STATE_LOCK:
+        _apply_dashboard_snapshot_unlocked(snapshot)
+
+
+def execute_tool_in_snapshot(
+    name: str,
+    arguments: dict[str, Any] | None,
+    snapshot: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run one existing handler against a private draft and restore globals.
+
+    The synchronous legacy handlers are not cooperatively cancellable.  A
+    newer response can therefore only prevent their *result* from being
+    committed; the `finally` restoration ensures a stale draft never escapes
+    to websocket readers while the handler is running.
+    """
+    with _DASHBOARD_STATE_LOCK:
+        committed_snapshot = _capture_dashboard_snapshot_unlocked()
+        try:
+            _apply_dashboard_snapshot_unlocked(snapshot)
+            result = execute_tool(
+                name,
+                arguments,
+                increment_revision=False,
+            )
+            next_snapshot = _capture_dashboard_snapshot_unlocked()
+            return deepcopy(result), next_snapshot
+        finally:
+            _apply_dashboard_snapshot_unlocked(committed_snapshot)
 
 
 def normalize_tool_arguments(
@@ -459,41 +563,43 @@ def normalize_tool_arguments(
 
 
 def get_views_for_frontend() -> list[dict[str, Any]]:
-    selected = set(highlighted_views)
-    return [
+    with _DASHBOARD_STATE_LOCK:
+        selected = set(highlighted_views)
+        return [
             {
                 **deepcopy(view),
                 "highlighted": view.get("id") in selected,
                 "revision": dashboard_revision,
             }
-        for view in views
-    ]
+            for view in views
+        ]
 
 
 def realtime_state() -> dict[str, Any]:
-    return {
-        "dashboard_revision": dashboard_revision,
-        "filters": deepcopy(active_filters),
-        "filtered_rows": total_rows(active_filters),
-        "highlighted": list(highlighted_views),
-        "highlight_element": deepcopy(highlight_element),
-        "dim_others": dim_others,
-        "low_score_threshold": LOW_SCORE_THRESHOLD,
-        "views": [
-            {
-                "id": view["id"],
-                "title": view["title"],
-                "chart_type": view["chart_type"],
-                "x": view["x_field"],
-                "y": view["y_field"],
-                "series": view.get("color"),
-                "normalize": bool(view.get("normalize")),
-                "data_points": len(view.get("data") or []),
-            }
-            for view in views
-        ],
-        "undo_available": bool(_history),
-    }
+    with _DASHBOARD_STATE_LOCK:
+        return {
+            "dashboard_revision": dashboard_revision,
+            "filters": deepcopy(active_filters),
+            "filtered_rows": total_rows(active_filters),
+            "highlighted": list(highlighted_views),
+            "highlight_element": deepcopy(highlight_element),
+            "dim_others": dim_others,
+            "low_score_threshold": LOW_SCORE_THRESHOLD,
+            "views": [
+                {
+                    "id": view["id"],
+                    "title": view["title"],
+                    "chart_type": view["chart_type"],
+                    "x": view["x_field"],
+                    "y": view["y_field"],
+                    "series": view.get("color"),
+                    "normalize": bool(view.get("normalize")),
+                    "data_points": len(view.get("data") or []),
+                }
+                for view in views
+            ],
+            "undo_available": bool(_history),
+        }
 
 
 def get_dashboard_context() -> str:

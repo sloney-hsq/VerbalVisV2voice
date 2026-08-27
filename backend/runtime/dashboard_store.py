@@ -101,6 +101,35 @@ class DashboardStore:
                 snapshot=deepcopy(self._state),
             )
 
+    def validate(
+        self,
+        draft: DashboardDraft,
+        transaction: object,
+        current_epoch: int | None = None,
+    ) -> CommitResult:
+        """Check whether a read-only draft is still publishable.
+
+        Read-only tool batches need the same response/epoch admission check as
+        mutations, but must not manufacture a new dashboard revision.
+        """
+        with self._lock:
+            active_epoch = self.intent_epoch if current_epoch is None else current_epoch
+            reason = self._rejection_reason(draft, transaction, active_epoch)
+            if reason is not None:
+                return CommitResult(
+                    committed=False,
+                    status="stale_discarded",
+                    revision=self._revision,
+                    snapshot=deepcopy(self._state),
+                    reason=reason,
+                )
+            return CommitResult(
+                committed=True,
+                status="committed",
+                revision=self._revision,
+                snapshot=deepcopy(self._state),
+            )
+
     def _rejection_reason(
         self,
         draft: DashboardDraft,

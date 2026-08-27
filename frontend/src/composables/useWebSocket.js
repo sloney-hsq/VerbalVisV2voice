@@ -1,7 +1,78 @@
 import { onBeforeUnmount, ref } from "vue";
 import { storeToRefs } from "pinia";
-import { useDashboardStore } from "../stores/dashboard";
-import { useRuntimeStore } from "../stores/runtime";
+import { useDashboardStore } from "../stores/dashboard.js";
+import { useRuntimeStore } from "../stores/runtime.js";
+
+/**
+ * Apply the additive response-transaction protocol without depending on a
+ * WebSocket or audio-capture lifecycle.  Keeping this adapter pure makes the
+ * browser side of the backend contract directly testable with node:test.
+ *
+ * Returns true only when the message has been consumed here; legacy messages
+ * continue through the main realtime switch below.
+ */
+export function dispatchTransactionalMessage(message = {}, {
+  dashboard,
+  runtime,
+  audioPlayer,
+  stopAssistantPlayback,
+} = {}) {
+  switch (message.type) {
+    case "response_overlap":
+      runtime?.markResponseOverlap?.(message);
+      return true;
+
+    case "response_resumed":
+      runtime?.markResponseResumed?.(message);
+      return true;
+
+    case "response_superseded":
+      runtime?.markResponseTerminal?.("superseded", message);
+      stopAssistantPlayback?.(
+        message.response_id || null,
+        message.reason || "analytical_revision",
+      );
+      return true;
+
+    case "response_cancelled":
+      runtime?.markResponseTerminal?.("cancelled", message);
+      stopAssistantPlayback?.(message.response_id || null, message.reason || "cancelled");
+      return true;
+
+    case "tool_execution_started":
+      // A tool batch is not an input-closed window.  The backend will reject
+      // a stale draft at commit time, so capture stays available for a newer
+      // semantic utterance.
+      runtime?.startToolBatch?.(message);
+      return true;
+
+    case "tool_execution_finished":
+      runtime?.finishToolBatch?.(message);
+      runtime?.recordCommitOutcome?.(message);
+      if (message.fatal_error) {
+        dashboard?.failRunningToolItems?.(message.response_id, message.fatal_error);
+      }
+      return true;
+
+    case "dashboard_commit": {
+      const status = message.commit_status;
+      runtime?.recordCommitOutcome?.(message);
+      // A missing status represents the legacy pre-transaction server.
+      if (status && status !== "committed") return true;
+      if (dashboard?.applyDashboardCommit?.({
+        viewList: message.views || [],
+        state: message.state || {},
+        revision: message.dashboard_revision,
+      })) {
+        runtime?.updateDashboardState?.(message.state || {});
+      }
+      return true;
+    }
+
+    default:
+      return false;
+  }
+}
 
 /**
  * Browser-side FD-Voice protocol adapter.
@@ -87,6 +158,13 @@ export function useWebSocket(audioPlayer) {
   }
 
   function dispatch(message = {}) {
+    if (dispatchTransactionalMessage(message, {
+      dashboard,
+      runtime,
+      audioPlayer,
+      stopAssistantPlayback,
+    })) return;
+
     switch (message.type) {
       case "init":
         activeResponseId = null;
@@ -305,7 +383,7 @@ export function useWebSocket(audioPlayer) {
 
   function sendAudio(base64Pcm) {
     if (!dashboard.sessionReady) return false;
-    if (toolRunning.value || audioPlayer?.captureBlocked?.value) return false;
+    if (audioPlayer?.captureBlocked?.value) return false;
     if (!socket.value || socket.value.readyState !== WebSocket.OPEN) return false;
     socket.value.send(JSON.stringify({ type: "audio", data: base64Pcm }));
     return true;

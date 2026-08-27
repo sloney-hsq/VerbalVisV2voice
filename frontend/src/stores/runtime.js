@@ -17,6 +17,11 @@ export const useRuntimeStore = defineStore("runtime", () => {
   const lastToolError = ref("");
   const lastToolDurationMs = ref(null);
   const ignoredAudioChunks = ref(0);
+  const overlapPending = ref(false);
+  const responseStatus = ref("idle");
+  const relevantResponseId = ref(null);
+  const lastCommitStatus = ref("");
+  const lastDiscardReason = ref("");
 
   const phaseLabel = computed(() => {
     switch (phase.value) {
@@ -118,6 +123,32 @@ export const useRuntimeStore = defineStore("runtime", () => {
     }
   }
 
+  function markResponseOverlap(message = {}) {
+    overlapPending.value = true;
+    responseStatus.value = "overlap_pending";
+    relevantResponseId.value = message.response_id || null;
+  }
+
+  function markResponseResumed(message = {}) {
+    overlapPending.value = false;
+    responseStatus.value = "streaming";
+    relevantResponseId.value = message.response_id || relevantResponseId.value;
+  }
+
+  function markResponseTerminal(status, message = {}) {
+    overlapPending.value = false;
+    responseStatus.value = status || "idle";
+    relevantResponseId.value = message.response_id || relevantResponseId.value;
+  }
+
+  function recordCommitOutcome(message = {}) {
+    const status = String(message.commit_status || "committed");
+    lastCommitStatus.value = status;
+    lastDiscardReason.value = status === "stale_discarded"
+      ? String(message.discard_reason || "")
+      : "";
+  }
+
   function updateDashboardState(state = {}) {
     dashboardState.value = {
       filters: Array.isArray(state.filters) ? state.filters : [],
@@ -151,6 +182,11 @@ export const useRuntimeStore = defineStore("runtime", () => {
     lastToolError.value = "";
     lastToolDurationMs.value = null;
     ignoredAudioChunks.value = 0;
+    overlapPending.value = false;
+    responseStatus.value = "idle";
+    relevantResponseId.value = null;
+    lastCommitStatus.value = "";
+    lastDiscardReason.value = "";
   }
 
   return {
@@ -164,6 +200,11 @@ export const useRuntimeStore = defineStore("runtime", () => {
     lastToolError,
     lastToolDurationMs,
     ignoredAudioChunks,
+    overlapPending,
+    responseStatus,
+    relevantResponseId,
+    lastCommitStatus,
+    lastDiscardReason,
     phaseLabel,
     phaseDetail,
     activeFilterCount,
@@ -173,6 +214,10 @@ export const useRuntimeStore = defineStore("runtime", () => {
     startToolBatch,
     finishToolBatch,
     recordToolResult,
+    markResponseOverlap,
+    markResponseResumed,
+    markResponseTerminal,
+    recordCommitOutcome,
     updateDashboardState,
     resetRuntime,
   };

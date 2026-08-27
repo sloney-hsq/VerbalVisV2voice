@@ -3,7 +3,8 @@
 VerbalVis is a full-duplex voice-driven conversational visual analytics prototype
 for the Olist Brazilian E-Commerce dataset. The FD-Voice condition combines one
 Qwen-Omni-Realtime conversation, a shared Vega-Lite dashboard, structured tools,
-and immediate speech interruption.
+and response transactions that distinguish overlap from a confirmed analytical
+revision.
 
 # VerbalVis-FD-Voice
 
@@ -170,37 +171,47 @@ backend/realtime.py
 backend/tools.py
 ```
 
-## Voice interruption
+## Response transaction and interruption contract
 
-The system uses the simple R-A policy:
-
-```text
-Qwen Semantic VAD speech_started
-→ stop the current Assistant audio queue
-→ reject late audio from that response
-→ send response.cancel while generation is active
-→ process the newest completed user utterance
-```
-
-The browser enforces that audio from at most one Assistant `response_id` may be
-scheduled at a time.
-
-A tool batch that has already started is non-preemptive:
+Semantic VAD is a **timing signal**, not a cancellation decision. Each provider
+response has a response id, an intent epoch, and a base dashboard revision.
 
 ```text
-tool call selected
-→ block microphone forwarding
-→ clear Qwen partial input audio
-→ execute tool calls sequentially
-→ return all function_call_output items
-→ inject the latest dashboard state
-→ request one final spoken response
+speech_started
+→ response_overlap (keep audio and response alive)
+→ completed transcript is classified
+   ├─ BACKCHANNEL / RECOGNITION_REPAIR → response_resumed
+   ├─ STOP_ONLY                        → response.cancel, no new epoch
+   └─ ANALYTICAL_REVISION              → response.cancel, epoch + 1
 ```
 
-Running tools are not cancelled or rolled back.
-If one tool fails validation or execution, later calls from that same model
-response receive explicit skipped outputs and do not run. This fail-fast rule is
-separate from user interruption: a tool that has already begun still completes.
+Only the confirmed analytical-revision path supersedes response ownership.
+This prevents acknowledgements such as `yes, continue` from destroying a useful
+answer just because the user starts speaking.
+
+Tool calls execute against a complete private snapshot of the legacy dashboard
+globals. Their results, browser tool cards, model `function_call_output` items,
+and dashboard state remain staged until a conditional commit succeeds:
+
+```text
+admitted tool bundle
+→ DashboardDraft (private global-state swap under an RLock)
+→ sequential handler execution
+→ compare intent_epoch + base_revision + transaction status
+   ├─ committed: apply one snapshot, publish one dashboard_commit,
+   │             publish function outputs in order, then response.create
+   └─ stale_discarded: publish neither dashboard nor tool output to the model
+```
+
+The legacy Python handlers are synchronous, so the runtime does not falsely
+claim to abort a query halfway through. A superseded handler may finish
+physically, but its draft and result are discarded before they reach the
+dashboard, browser transcript, or model context. Microphone forwarding remains
+available during a draft batch; a later semantic revision invalidates the
+compare-and-swap commit instead of being ignored.
+
+The exact state, WebSocket, and tool-contract fields are documented in
+[the runtime contract](docs/verbalvis-runtime-contract.md).
 
 ## Model-facing tools
 
