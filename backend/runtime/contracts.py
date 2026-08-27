@@ -3,10 +3,35 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
+
+
+class _FrozenSequence(tuple[Any, ...]):
+    """An immutable sequence that still compares equal to JSON lists."""
+
+    __hash__ = tuple.__hash__
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, list):
+            return list(self) == other
+        return super().__eq__(other)
+
+
+def _freeze(value: Any) -> Any:
+    """Copy a JSON-like value into recursively immutable containers."""
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {deepcopy(key): _freeze(item) for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return _FrozenSequence(_freeze(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze(item) for item in value)
+    return deepcopy(value)
 
 
 class ToolMode(str, Enum):
@@ -34,7 +59,7 @@ class ToolContract:
         object.__setattr__(
             self,
             "input_schema",
-            MappingProxyType(deepcopy(dict(self.input_schema))),
+            _freeze(self.input_schema),
         )
         object.__setattr__(self, "dependencies", tuple(self.dependencies))
 
@@ -56,6 +81,6 @@ class ToolProposal:
         object.__setattr__(
             self,
             "arguments",
-            MappingProxyType(deepcopy(dict(self.arguments))),
+            _freeze(self.arguments),
         )
         object.__setattr__(self, "dependencies", tuple(self.dependencies))

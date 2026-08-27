@@ -1,6 +1,14 @@
+import pytest
+
+from backend.runtime.contracts import ToolContract, ToolProposal
 from backend.runtime.dashboard_store import DashboardStore
 from backend.runtime.transactions import ResponseStatus, ResponseTransaction
-from backend.tool_contracts import TOOL_CONTRACTS, changes_dashboard
+from backend.tool_contracts import (
+    TOOL_CONTRACTS,
+    changes_dashboard,
+    materialize_tool_contract,
+)
+from backend.tools import TOOL_SCHEMAS
 
 
 def _executing_transaction(
@@ -99,3 +107,35 @@ def test_every_existing_olist_tool_has_transaction_contract_metadata() -> None:
         assert isinstance(contract["cancellable"], bool)
         assert isinstance(contract["dependencies"], tuple)
         assert contract["effect_detail"]
+
+
+def test_registered_contracts_bind_their_actual_tool_schema() -> None:
+    """Catches a contract whose admission schema diverges from its registered tool."""
+    schemas_by_name = {
+        schema["name"]: schema["parameters"] for schema in TOOL_SCHEMAS
+    }
+
+    assert TOOL_CONTRACTS.keys() == schemas_by_name.keys()
+    for name, schema in schemas_by_name.items():
+        assert TOOL_CONTRACTS[name]["input_schema"] == schema
+        contract = materialize_tool_contract(name)
+        assert isinstance(contract, ToolContract)
+        assert contract.input_schema == schema
+
+
+def test_contract_schema_and_proposal_arguments_are_recursively_immutable() -> None:
+    """Catches nested mappings that can change after validation or admission."""
+    contract = materialize_tool_contract("update_analysis_scope")
+    proposal = ToolProposal(
+        response_id="response-1",
+        intent_epoch=3,
+        base_revision=7,
+        call_id="call-1",
+        tool_name="update_analysis_scope",
+        arguments={"filters": [{"field": "customer_state", "value": "SP"}]},
+    )
+
+    with pytest.raises(TypeError):
+        contract.input_schema["properties"]["operation"]["type"] = "integer"
+    with pytest.raises(TypeError):
+        proposal.arguments["filters"][0]["value"] = "RJ"

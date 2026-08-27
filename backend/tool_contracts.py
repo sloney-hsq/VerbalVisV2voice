@@ -2,7 +2,23 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any, Iterable
+
+if __package__:
+    # The legacy tool module is executable from ``backend/`` and therefore
+    # imports siblings absolutely.  Keep that execution path intact while
+    # also making its registered schemas available to package-based tests.
+    from . import db as _db
+    from . import view_titles as _view_titles
+
+    sys.modules.setdefault("db", _db)
+    sys.modules.setdefault("view_titles", _view_titles)
+    from .tools import TOOL_SCHEMAS
+    from .runtime.contracts import ToolContract, ToolMode
+else:
+    from tools import TOOL_SCHEMAS
+    from runtime.contracts import ToolContract, ToolMode
 
 TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
     "update_analysis_scope": {
@@ -129,6 +145,20 @@ TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
 }
 
 
+def _bind_registered_input_schemas() -> None:
+    """Attach each contract to the one schema registered with the model."""
+    schemas_by_name = {
+        str(schema["name"]): schema["parameters"] for schema in TOOL_SCHEMAS
+    }
+    if TOOL_CONTRACTS.keys() != schemas_by_name.keys():
+        raise RuntimeError("Tool contract metadata and registered schemas differ")
+    for name, contract in TOOL_CONTRACTS.items():
+        contract["input_schema"] = schemas_by_name[name]
+
+
+_bind_registered_input_schemas()
+
+
 def contract_for(name: str) -> dict[str, Any]:
     contract = TOOL_CONTRACTS.get(name)
     if contract:
@@ -145,6 +175,23 @@ def contract_for(name: str) -> dict[str, Any]:
         "cancellable": False,
         "effect_detail": "Unknown tools are rejected without changing the dashboard.",
     }
+
+
+def materialize_tool_contract(name: str) -> ToolContract:
+    """Return immutable runtime admission metadata for a registered tool."""
+    contract = TOOL_CONTRACTS.get(name)
+    if contract is None:
+        raise KeyError(f"Unknown tool contract: {name}")
+    return ToolContract(
+        name=name,
+        input_schema=contract["input_schema"],
+        mode=ToolMode(contract["mode"]),
+        dependencies=contract["dependencies"],
+        precondition=contract["precondition"],
+        idempotent=contract["idempotent"],
+        cancellable=contract["cancellable"],
+        effect_detail=contract["effect_detail"],
+    )
 
 
 def batch_metadata(names: Iterable[str]) -> list[dict[str, Any]]:
