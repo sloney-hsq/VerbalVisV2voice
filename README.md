@@ -142,15 +142,17 @@ that are late. For category service metrics, the grouping grain is one row per
 
 ## Verification
 
-For the local release checks, run the following from the repository root once
-the script is available:
+For the local release checks, run the following from the repository root:
 
 ```powershell
-scripts/verify_verbalvis_release.ps1
+powershell -ExecutionPolicy Bypass -File scripts/verify_verbalvis_release.ps1
 ```
 
-That verifier will be added by a later task; it is not present in this revision.
-The manual browser checks are recorded in
+The verifier runs the offline backend tests, frontend contract tests, frontend
+production build, and Git whitespace checks. Local release verification was
+rerun on Windows with Python 3.13.5, Node 24.14.0, and npm 11.9.0. The checked-in
+GitHub Actions workflow targets Python 3.11/3.12 and Node 20, but has not yet
+been remotely executed. The manual browser checks are recorded in
 [the release checklist](docs/verbalvis-release-checklist.md). Unit tests do
 not represent provider/browser end-to-end checks or user-effect studies.
 
@@ -166,6 +168,11 @@ applicable reuse and redistribution terms.
 research-use protocol. Conversation text, tool arguments, dashboard state, and
 transaction metadata may appear in local traces; do not commit or publish real
 participant material.
+
+The project source and documentation use the [MIT License](LICENSE). The
+tracked Olist data is excluded from that license; read
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the dataset contract
+before any data use or redistribution.
 
 ## Standalone DataOps boundary
 
@@ -186,5 +193,6 @@ It is not wired into the VerbalVis realtime path.
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change and
 [SECURITY.md](SECURITY.md) before reporting a vulnerability. The project is
-released under the [MIT License](LICENSE). Never commit API keys, private data,
-or unredacted participant traces.
+released under the [MIT License](LICENSE) for repository-authored source and
+documentation. Never commit API keys, private data, or unredacted participant
+traces.

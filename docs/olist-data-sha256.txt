@@ -1,0 +1,12 @@
+# Known-good SHA-256 values for the repository's tracked Olist CSV snapshot.
+# Format: relative path, two spaces, uppercase SHA-256 digest.
+# This manifest verifies this checkout only; it does not establish upstream provenance.
+backend/data/olist/olist_customers_dataset.csv  983A422239E1712DED753B3BF9ECF47DC73F144D306029DCFA99E70A226883D2
+backend/data/olist/olist_geolocation_dataset.csv  B514F6FC991B9566AEBA02AA5D67E2C3630F034B60A0E05AA0D082A3B66D88D6
+backend/data/olist/olist_order_items_dataset.csv  0BC4D068C4FE38CBB01BD90E8746E3C613FE7B4BAEF75FAB7B0E329701C3E279
+backend/data/olist/olist_order_payments_dataset.csv  4F713964F2815DBBAA40B9488268C55AAC3627BFCE5AA96CF58D1F3616DE3CC0
+backend/data/olist/olist_order_reviews_dataset.csv  012B61C7593E34F51FA614EFDF802B9C7056CE6AAE5307DDB93236E7CFC797D7
+backend/data/olist/olist_orders_dataset.csv  8DF58EF3D2D7E9944010F7BEECD9B75367F5588EC6E3C91CEC19AE3345EF9ECF
+backend/data/olist/olist_products_dataset.csv  3E6569628A17FBC75FD206EE357B59E20364B9AFA90F5B6CD5B4D624C58AA9CC
+backend/data/olist/olist_sellers_dataset.csv  1F643D2B950373B85735E7794B20986F528D7A000432E7C6F9BCBB44D0846A0E
+backend/data/olist/product_category_name_translation.csv  A81F0D1F27B27E7293F761BC79E3CE8F348EE39C4B3ED3E49BDE38F478586278
