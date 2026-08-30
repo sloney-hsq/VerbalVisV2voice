@@ -3,9 +3,10 @@
 ## Scope and local location
 
 VerbalVis reads a local copy of the Olist CSV dataset from
-`backend/data/olist/`. The dataset is a development and research input; it is
-not bundled, fetched, or served by the application. This repository remains a
-standalone prototype and is not wired to a dataset distribution service.
+`backend/data/olist/`. The repository tracks local CSV copies in that
+directory as development and research inputs. The application does not fetch
+or serve dataset files. This repository remains a standalone prototype and is
+not wired to a dataset distribution service.
 
 ## Source and reuse boundary
 
@@ -26,18 +27,21 @@ copy.
 - `olist_customers_dataset.csv`
 - `olist_products_dataset.csv`
 - `olist_order_payments_dataset.csv`
+- `product_category_name_translation.csv`
 
 ## Integrity procedure
 
-After obtaining the CSV files from an approved source, confirm that the local
-directory contains the expected files and record their hashes for the release
-record:
+After obtaining or updating CSV files from an approved source, record their
+hashes for the release record:
 
 ```powershell
 Get-FileHash backend/data/olist/*.csv -Algorithm SHA256
 ```
 
-Do not commit data copies or raw source archives merely to satisfy this check.
+This command inventories every local CSV in the directory (currently nine),
+including files not loaded by `backend/db.py`. The runtime subset is the seven
+files listed above, including the translation file. Do not add additional data
+copies or raw source archives merely to satisfy this check.
 
 ## Tool metric semantics
 
